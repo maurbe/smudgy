@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools", "wheel", "torch", "numpy", "pybind11"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sph_lib"
+version = "0.1.0"
+description = "SPH mesh package"
+authors = [
+    { name = "Mauro Bernardini", email = "mauro.bernardini1313@gmail.com" }
+    ]
+dependencies = ["torch", "numpy"]
+
+[tool.setuptools]
+packages = ["sph_lib"]

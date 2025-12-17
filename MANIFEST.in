@@ -1,0 +1,2 @@
+include LICENSE
+recursive-include sph_lib/cpp *.cpp *.h
