@@ -1,5 +1,4 @@
 # +
-import torch
 import numpy as np
 import scipy.spatial as spatial
 
@@ -23,7 +22,7 @@ def p2g(positions,
 				   kernel_name='quintic',
 				   integration='midpoint',
                    ):
-
+	
 	dim = positions.shape[-1]
 	assert dim==2 or dim==3, f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
 
@@ -39,6 +38,16 @@ def p2g(positions,
 	quantities = quantities.astype('float32')
 	extent     = extent.astype('float32')
 
+	if "adaptive" in method:
+		# +1e-8 due to error when pos exactly equals boxsize
+		point_tree = spatial.cKDTree(positions, boxsize=extent[1] + 1e-8)
+		# [0]=distances; [:, -1] we only need the last NN
+		# this follows the same "definition" of the smoothing length as 0.5 * distance to Nth nearest neighbor
+		pcellsizesHalf = point_tree.query(x=positions, k=num_nn, workers=-1)[0][:, -1] * 0.5
+		pcellsizesHalf = pcellsizesHalf.astype('float32')
+		#if accelerator == 'cpp':
+		#	pcellsizesHalf = torch.from_numpy(pcellsizesHalf)
+	"""
 	if accelerator == 'cpp':
 		positions = torch.from_numpy(positions)
 		quantities = torch.from_numpy(quantities)
@@ -48,17 +57,7 @@ def p2g(positions,
 		if hmat_eigvecs is not None:
 			hmat_eigvecs = torch.from_numpy(hmat_eigvecs.astype('float32'))
 			hmat_eigvals = torch.from_numpy(hmat_eigvals.astype('float32'))
-
-	if "adaptive" in method:
-		# +1e-8 due to error when pos exactly equals boxsize
-		point_tree = spatial.cKDTree(positions, boxsize=extent[1] + 1e-8)
-		# [0]=distances; [:, -1] we only need the last NN
-		# this follows the same "definition" of the smoothing length as 0.5 * distance to Nth nearest neighbor
-		pcellsizesHalf = point_tree.query(x=positions, k=num_nn, workers=-1)[0][:, -1] * 0.5
-		pcellsizesHalf = pcellsizesHalf.astype('float32')
-		if accelerator == 'cpp':
-			pcellsizesHalf = torch.from_numpy(pcellsizesHalf)
-
+	"""
 	"""
 	# identify correct deposition function
 	if dim==2:
@@ -115,32 +114,56 @@ def p2g(positions,
 	# select the deposition function based on the method, dim and accelerator
 	namespace = pyfunc if accelerator=="python" else cppfunc
 	func = getattr(namespace, f"{method}_{dim}d")
-
+	# print me the function name here for debugging
+	print(f"Using deposition function: {func.__name__}")
 
 	# perform deposition
 	if "adaptive" in method:
-		fields, weights = func(positions, quantities, extent, gridnum, periodic,
-						 pcellsizesHalf, 
-						 )
-	
-	elif "isotropic" in method:
-		fields, weights = func(positions, quantities, extent, gridnum, periodic, 
-						 hsm, 
-						 kernel_name,
-						 integration
-						 )
-	
-	elif "anisotropic" in method:
-		fields, weights = func(positions, quantities, extent, gridnum, periodic, 
-						 hmat_eigvecs, 
-						 hmat_eigvals, 
-						 kernel_name,
-						 integration
-						 )
-	
+		args = (
+			positions,
+			quantities,
+			extent,
+			gridnum,
+			periodic,
+			pcellsizesHalf,
+		)
+
+	elif "isotropic" == method:
+		args = (
+			positions,
+			quantities,
+			extent,
+			gridnum,
+			periodic,
+			hsm,
+			kernel_name,
+			integration,
+		)
+
+	elif "anisotropic" == method:
+		args = (
+			positions,
+			quantities,
+			extent,
+			gridnum,
+			periodic,
+			hmat_eigvecs,
+			hmat_eigvals,
+			kernel_name,
+			integration,
+		)
+
 	else:
-		fields, weights = func(positions, quantities,extent, gridnum, periodic
-						 )
+		args = (
+			positions,
+			quantities,
+			extent,
+			gridnum,
+			periodic,
+		)
+
+	fields, weights = func(*args)
+
 
 
 	# divide averaged fields by weight
@@ -270,10 +293,6 @@ def anisotropic_kernel_deposition(positions,
 
 """
 # .......................................................................................... 
-import numpy as np
-from scipy import spatial
-
-import numpy as np
 
 def coordinate_difference_with_pbc(x, y, boxsize):
     return (x - y + 0.5 * boxsize) % boxsize - 0.5 * boxsize
@@ -292,7 +311,6 @@ def compute_hsm(pos, nn, boxsize=None):
 	hsm = nn_dists[:, -1] * 0.5
 	return hsm, nn_dists, nn_inds, tree
 
-import numpy as np
 
 def compute_hsm_tensor(pos, masses, NN, boxsize=None):
     """
@@ -301,7 +319,7 @@ def compute_hsm_tensor(pos, masses, NN, boxsize=None):
 
     Args:
         pos:      (N, D) particle positions
-        masses:   (N,) particle masses
+        masses:   (N,) particle masses (1D array)
         NN:       int, number of neighbors
         boxsize:  float or None, periodic box size
 
@@ -312,6 +330,9 @@ def compute_hsm_tensor(pos, masses, NN, boxsize=None):
     """
     N, D = pos.shape
     assert D in (2, 3), "Only 2D and 3D supported"
+    
+    # Ensure masses is 1D (flattens any extra dimensions from indexing)
+    masses = masses.flatten() if masses.ndim > 1 else masses
 
     # Step 1: Find neighbors
     _, _, nn_inds, _ = compute_hsm(pos, NN, boxsize)
@@ -326,15 +347,18 @@ def compute_hsm_tensor(pos, masses, NN, boxsize=None):
     neighbor_coords = r_jc + pos[:, np.newaxis, :]       # (N, k, D)
 
     # Step 3: Center of mass of each cluster
+    # neighbor_masses: (N, k) → reshape to (N, k, 1) for broadcasting with neighbor_coords (N, k, D)
     total_mass = np.sum(neighbor_masses, axis=1)   # (N,)
-    rc = np.sum(neighbor_coords * neighbor_masses[..., np.newaxis], axis=1) / total_mass[..., np.newaxis]  # (N, D)
+    weighted_coords = neighbor_coords * neighbor_masses[:, :, np.newaxis]  # (N, k, D) * (N, k, 1)
+    rc = np.sum(weighted_coords, axis=1) / total_mass[:, np.newaxis]  # (N, D)
 
     # Displacement vectors from center
     deltas = neighbor_coords - rc[:, np.newaxis, :]   # (N, k, D)
 
     # Step 4: Mass-weighted covariance matrix Σ
     outer = np.einsum('...i,...j->...ij', deltas, deltas)   # (N, k, D, D)
-    outer = outer * neighbor_masses[..., np.newaxis, np.newaxis]
+    # Scale by masses: reshape masses from (N, k) to (N, k, 1, 1) for broadcasting
+    outer = outer * neighbor_masses[:, :, np.newaxis, np.newaxis]  # (N, k, D, D) * (N, k, 1, 1)
     Sigma = np.sum(outer, axis=1) / total_mass[:, np.newaxis, np.newaxis]   # (N, D, D)
 
     # Step 5: Eigen-decomposition of Σ
@@ -359,8 +383,6 @@ def compute_hsm_tensor(pos, masses, NN, boxsize=None):
     eigvals_H = zeta_max[:, np.newaxis] * sqrt_eigvals    # (N, D)
 
     return H, eigvals_H, eigvecs
-
-
 
 
 """
@@ -471,6 +493,11 @@ def compute_hsm_tensor(pos, masses, NN, boxsize):
 """
 
 def project_hsm_tensor_to_2d(hmat, plane):
+	
+	# If input is already 2D, just eigendecompose directly
+	if hmat.shape[-1] == 2:
+		evals, evecs = np.linalg.eigh(hmat)
+		return hmat, evals, evecs
 	
 	# need to project the smoothing ellipses onto cartesian plane
 	if plane == (0, 1):

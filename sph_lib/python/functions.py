@@ -106,6 +106,7 @@ def cic_3d(positions, quantities, extent, gridnum, periodic):
         z0 %= gridnum
         z1 %= gridnum
     else:
+        #TODO: this is wrong to do... need to skip particles outside the box
         x1 = np.clip(x1, 0, gridnum - 1)
         y1 = np.clip(y1, 0, gridnum - 1)
         z1 = np.clip(z1, 0, gridnum - 1)
@@ -179,9 +180,9 @@ def tsc_2d(positions, quantities, extent, gridnum, periodic):
             if periodic:
                 ix %= gridnum
                 iy %= gridnum
-            else:
-                ix = np.clip(ix, 0, gridnum - 1)
-                iy = np.clip(iy, 0, gridnum - 1)
+            #else:
+            #    ix = np.clip(ix, 0, gridnum - 1)
+            #    iy = np.clip(iy, 0, gridnum - 1)
 
             w = wx[:, dx_i] * wy[:, dy_i]  # (N,)
 

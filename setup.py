@@ -1,6 +1,5 @@
 import platform
 import os
-import sys
 from setuptools import setup, find_packages
 
 try:
@@ -17,41 +16,39 @@ extra_link_args = []
 ext_modules = []
 
 if TORCH_AVAILABLE:
-    # Get torch lib directory
     torch_lib_dir = os.path.join(torch.__path__[0], "lib")
     
     if system == "Darwin":  # macOS
         extra_compile_args = ["-Xpreprocessor", "-fopenmp"]
-        # Build rpath list with torch lib and conda env lib if available
         rpath_list = [
             "-lomp",
-            f"-Wl,-rpath,{torch_lib_dir}",              # PyTorch libraries
+            f"-Wl,-rpath,{torch_lib_dir}",
         ]
         if "CONDA_PREFIX" in os.environ:
             conda_lib = os.path.join(os.environ['CONDA_PREFIX'], 'lib')
             rpath_list.append(f"-Wl,-rpath,{conda_lib}")
         rpath_list.extend([
-            "-Wl,-rpath,@loader_path",                  # allow colocated runtimes
-            "-Wl,-rpath,@executable_path/../lib",       # additional fallback
+            "-Wl,-rpath,@loader_path",
+            "-Wl,-rpath,@executable_path/../lib",
         ])
         extra_link_args = rpath_list
     elif system == "Linux":
         extra_compile_args = ["-fopenmp"]
         extra_link_args = ["-fopenmp", f"-Wl,-rpath,{torch_lib_dir}"]
     else:
-        # Windows/MSVC (optional):
         extra_compile_args = ["/openmp"]
         extra_link_args = []
-    
+
     # Define C++ extension
     ext_modules = [
         CppExtension(
-            name="sph_lib.cpp.functions",
+            name="sph_lib.cpp.functions",  # this is the module Python will import
             sources=[
-                "sph_lib/cpp/functions.cpp",
-                "sph_lib/cpp/kernels.cpp",
+                "sph_lib/bindings/bindings.cpp",  # pybind11 bindings
+                "sph_lib/cpp/functions.cpp",               # backend numerics
+                "sph_lib/cpp/kernels.cpp",                 # backend kernels
             ],
-            include_dirs=include_paths(),
+            include_dirs=include_paths() + ["sph_lib/cpp"],  # include path for kernels.h
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args,
         ),
