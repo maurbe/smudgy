@@ -1,0 +1,32 @@
+TODO's
+
+Interpolation
+[ ] double check the h_ij computation for the isotropic case
+[ ] derive/implent with the paper the formulas for the anisotropic case
+  (I guess since the metric is deformed, the distance computations need to change)
+[ ] rewrite test notebook
+
+Deposition
+[+] port the p2g function to the main class and rename it
+[+] expand the num_grid parameter to define the number of cells in each dimension - adopt cpp/py functions
+[+] streamline the deposition code in ops.py
+[+] make sure we have per axis periodicity
+
+[+] test the entire pipeline - test the accordance between python / cpp
+[ ] think about the integral estimation for the sph cases and implement solution
+  (e.g. if particle is enclosed in top right of cell, then estimating the integral at the midpoint is wrong)
+
+Both
+[ ] test openMP acceleration
+[ ] add verbosity to the whole class
+
+
+Features (so I don't forget)
+
+Interpolation
++ many kernels
+
+Deposition
++ many kernels
++ per axis periodic boundary conditions settings
++ non-uniform grids: varying pixel / voxel sizes for each axis possible

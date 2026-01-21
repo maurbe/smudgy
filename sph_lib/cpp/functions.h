@@ -3,199 +3,187 @@
 #include <string>
 
 void ngp_2d_cpp(
-    const float* pos,            // (N, 2)
-    const float* quantities,     // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    float* fields,               // (gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,
+    float* weights
 );
 
 void ngp_3d_cpp(
-    const float* pos,            // (N, 3)
-    const float* quantities,     // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    float* fields,               // (gridnum, gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,
+    float* weights
 );
 
 void cic_2d_cpp(
-    const float* pos,            // (N, 2)
-    const float* quantities,     // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,               // (gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum)
-);  
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,
+    float* weights
+);
 
 void cic_3d_cpp(
-    const float* pos,            // (N, 3)
-    const float* quantities,     // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,               // (gridnum, gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,
+    float* weights
 );
 
 void cic_2d_adaptive_cpp(
-    const float* pos,            // (N, 2)
-    const float* quantities,     // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    const float* pcellsizesHalf, // (N)
-    float* fields,               // (gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    const float* pcellsizesHalf,
+    float* fields,
+    float* weights
 );
 
 void cic_3d_adaptive_cpp(
-    const float* pos,            // (N, 3)
-    const float* quantities,     // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    const float* pcellsizesHalf, // (N)
-    float* fields,               // (gridnum, gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    const float* pcellsizesHalf,
+    float* fields,
+    float* weights
 );
 
 void tsc_2d_cpp(
-    const float* pos,        // (N,2)
-    const float* quantities, // (N, num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,           // (gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,
+    float* weights
 );
 
 void tsc_3d_cpp(
-    const float* pos,        // (N,3)
-    const float* quantities, // (N,num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,           // (gridnum, gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,
+    float* weights
 );
 
 void tsc_2d_adaptive_cpp(
-    const float* pos,        // (N,2)
-    const float* quantities, // (N,num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    const float* pcellsizesHalf, // (N)
-    float* fields,           // (gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    const float* pcellsizesHalf,
+    float* fields,
+    float* weights
 );
 
 void tsc_3d_adaptive_cpp(
-    const float* pos,        // (N,3)
-    const float* quantities, // (N,num_fields)
+    const float* pos,
+    const float* quantities,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    const float* pcellsizesHalf, // (N)
-    float* fields,           // (gridnum, gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    const float* pcellsizesHalf,
+    float* fields,
+    float* weights
 );
 
 void isotropic_kernel_deposition_2d_cpp(
-    const float* pos,          // (N, 2)
-    const float* quantities,   // (N, num_fields)
-    const float* hsm,          // (N)
+    const float* pos,
+    const float* quantities,
+    const float* hsm,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    float* fields,             // (gridnum, gridnum, num_fields)
-    float* weights             // (gridnum, gridnum)
+    float* fields,
+    float* weights
 );
 
 void isotropic_kernel_deposition_3d_cpp(
-    const float* pos,          // (N, 3)
-    const float* quantities,   // (N, num_fields)
-    const float* hsm,          // (N)
+    const float* pos,
+    const float* quantities,
+    const float* hsm,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    float* fields,             // (gridnum, gridnum, gridnum, num_fields)
-    float* weights             // (gridnum, gridnum, gridnum)
+    float* fields,
+    float* weights
 );
 
 void anisotropic_kernel_deposition_2d_cpp(
-    const float* pos,                // (N, 2)
-    const float* quantities,         // (N, num_fields)
-    const float* hmat_eigvecs,       // (N, 2, 2)
-    const float* hmat_eigvals,       // (N, 2)
+    const float* pos,
+    const float* quantities,
+    const float* hmat_eigvecs,
+    const float* hmat_eigvals,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    float* fields,                   // (gridnum, gridnum, num_fields)
-    float* weights                   // (gridnum, gridnum)
+    float* fields,
+    float* weights
 );
 
 void anisotropic_kernel_deposition_3d_cpp(
-    const float* pos,                // (N, 3)
-    const float* quantities,         // (N, num_fields)
-    const float* hmat_eigvecs,       // (N, 3, 3)
-    const float* hmat_eigvals,       // (N, 3)
+    const float* pos,
+    const float* quantities,
+    const float* hmat_eigvecs,
+    const float* hmat_eigvals,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    float* fields,                   // (gridnum, gridnum, gridnum, num_fields)
-    float* weights                   // (gridnum, gridnum, gridnum)
+    float* fields,
+    float* weights
 );

@@ -1,18 +1,67 @@
 import numpy as np
 
 
-def ngp_2d(positions, quantities, extent, gridnum, periodic):
+def _wrap_or_mask_indices(indices: np.ndarray, gridnum: int, periodic_flag: bool):
+    """Wrap indices for periodic axes or mark validity for non-periodic axes."""
+    if periodic_flag:
+        return np.mod(indices, gridnum), np.ones_like(indices, dtype=bool)
+    valid = (indices >= 0) & (indices < gridnum)
+    return indices, valid
 
-    boxsize = extent[1] - extent[0]
-    inv_dx = gridnum / boxsize
-    grid_pos = ((positions - extent[0]) * inv_dx).astype(int)
 
-    fields  = np.zeros((gridnum, gridnum, quantities.shape[1]), dtype=np.float32)
-    weights = np.zeros((gridnum, gridnum), dtype=np.int32)
+def _as_float32(array):
+    """Return a float32 view of ``array`` without copying when possible."""
+    return np.asarray(array, dtype=np.float32)
+
+def ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
+    """Deposit particle quantities onto a 2D grid with Nearest-Grid-Point weighting.
+
+    Parameters
+    ----------
+    positions : ndarray, shape (N, 2)
+        Cartesian particle coordinates.
+    quantities : ndarray, shape (N, F)
+        Per-particle fields to accumulate (e.g. mass, temperature).
+    boxsizes : array_like of length 2
+        Assumes ``[0, boxsize]`` in each dimension.
+    gridnums : array_like of length 2
+        Number of grid cells for each axis.
+    periodic : Sequence[bool]
+        Whether to wrap particles that leave the domain.
+
+    Returns
+    -------
+    fields : ndarray
+        Accumulated field values on the grid.
+    weights : ndarray
+        Particle counts per cell (used as normalization weights).
+    """
+
+    positions = _as_float32(positions)
+    quantities = _as_float32(quantities)
+    boxsizes = _as_float32(boxsizes)
+
+    gridnum_x, gridnum_y = gridnums
+    inv_dx = np.array([gridnum_x, gridnum_y], dtype=np.float32) / boxsizes
+    grid_pos = (positions * inv_dx).astype(int)
+
+    fields  = np.zeros((gridnum_x, gridnum_y, quantities.shape[1]), dtype=np.float32)
+    weights = np.zeros((gridnum_x, gridnum_y), dtype=np.float32)
     
     # Split indices
     x_idx = grid_pos[:, 0]
     y_idx = grid_pos[:, 1]
+
+    valid = np.ones(x_idx.shape[0], dtype=bool)
+    valid &= (x_idx >= 0) & (x_idx < gridnum_x)
+    valid &= (y_idx >= 0) & (y_idx < gridnum_y)
+
+    if not np.all(valid):
+        x_idx = x_idx[valid]
+        y_idx = y_idx[valid]
+        quantities = quantities[valid]
+    if x_idx.size == 0:
+        return fields, weights
 
     for f in range(quantities.shape[1]):
         np.add.at(fields[:, :, f], (x_idx, y_idx), quantities[:, f])
@@ -20,19 +69,59 @@ def ngp_2d(positions, quantities, extent, gridnum, periodic):
     
     return fields, weights
 
-def ngp_3d(positions, quantities, extent, gridnum, periodic):
+def ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
+    """Deposit particle quantities onto a 3D grid via Nearest-Grid-Point weighting.
 
-    boxsize = extent[1] - extent[0]
-    inv_dx = gridnum / boxsize
-    grid_pos = ((positions - extent[0]) * inv_dx).astype(int)
+    Parameters
+    ----------
+    positions : ndarray, shape (N, 3)
+        Cartesian particle coordinates.
+    quantities : ndarray, shape (N, F)
+        Per-particle fields to accumulate (e.g. mass, temperature).
+    boxsizes : array_like of length 3
+        Assumes ``[0, boxsize]`` in each dimension.
+    gridnums : array_like of length 3
+        Number of grid cells for each axis.
+    periodic : Sequence[bool]
+        Whether to wrap particles that leave the domain.
 
-    fields  = np.zeros((gridnum, gridnum, gridnum, quantities.shape[1]), dtype=np.float32)
-    weights = np.zeros((gridnum, gridnum, gridnum), dtype=np.int32)
+    Returns
+    -------
+    fields : ndarray
+        Accumulated field values on the grid.
+    weights : ndarray
+        Particle counts per cell (used as normalization weights).
+    """
+
+    positions = _as_float32(positions)
+    quantities = _as_float32(quantities)
+    boxsizes = _as_float32(boxsizes)
+
+    gridnum_x, gridnum_y, gridnum_z = gridnums
+    inv_dx = np.array([gridnum_x, gridnum_y, gridnum_z], dtype=np.float32) / boxsizes
+    grid_pos = (positions * inv_dx).astype(int)
+
+    fields  = np.zeros((gridnum_x, gridnum_y, gridnum_z, quantities.shape[1]), dtype=np.float32)
+    weights = np.zeros((gridnum_x, gridnum_y, gridnum_z), dtype=np.float32)
 
     # Split indices
     x_idx = grid_pos[:, 0]
     y_idx = grid_pos[:, 1]
     z_idx = grid_pos[:, 2]
+
+    valid = np.ones(x_idx.shape[0], dtype=bool)
+    
+    valid &= (x_idx >= 0) & (x_idx < gridnum_x)
+    valid &= (y_idx >= 0) & (y_idx < gridnum_y)
+    valid &= (z_idx >= 0) & (z_idx < gridnum_z)
+
+    if not np.all(valid):
+        x_idx = x_idx[valid]
+        y_idx = y_idx[valid]
+        z_idx = z_idx[valid]
+        quantities = quantities[valid]
+    if x_idx.size == 0:
+        return fields, weights
 
     for f in range(quantities.shape[1]):
         np.add.at(fields[:, :, :, f], (x_idx, y_idx, z_idx), quantities[:, f])
@@ -40,11 +129,39 @@ def ngp_3d(positions, quantities, extent, gridnum, periodic):
 
     return fields, weights
 
-def cic_2d(positions, quantities, extent, gridnum, periodic):
-    boxsize = extent[1] - extent[0]
-    inv_dx = gridnum / boxsize
+def cic_2d(positions, quantities, boxsizes, gridnums, periodic):
+    """Deposit 2D particle quantities using bilinear Cloud-In-Cell weights.
 
-    grid_pos = (positions - extent[0]) * inv_dx
+    Parameters
+    ----------
+    positions : ndarray, shape (N, 2)
+        Cartesian particle coordinates.
+    quantities : ndarray, shape (N, F)
+        Per-particle fields to accumulate.
+    boxsizes : array_like of length 2
+        Assumes ``[0, boxsize]`` in each dimension.
+    gridnums : array_like of length 2
+        Number of grid cells for each axis.
+    periodic : Sequence[bool]
+        Whether to wrap particles that leave the domain.
+
+    Returns
+    -------
+    fields : ndarray
+        Accumulated field values on the grid.
+    weights : ndarray
+        Sum of interpolation weights per cell (for later normalization).
+    """
+
+    positions = _as_float32(positions)
+    quantities = _as_float32(quantities)
+    boxsizes = _as_float32(boxsizes)
+
+    gridnum_x, gridnum_y = gridnums
+    periodic_x, periodic_y = periodic
+    inv_dx = np.array([gridnum_x, gridnum_y], dtype=np.float32) / boxsizes
+
+    grid_pos = positions * inv_dx
     base_idx = np.floor(grid_pos).astype(int)
     frac = grid_pos - base_idx
 
@@ -53,42 +170,70 @@ def cic_2d(positions, quantities, extent, gridnum, periodic):
     x1 = x0 + 1
     y1 = y0 + 1
 
-    if periodic:
-        x0 %= gridnum
-        x1 %= gridnum
-        y0 %= gridnum
-        y1 %= gridnum
-    else:
-        x1 = np.clip(x1, 0, gridnum - 1)
-        y1 = np.clip(y1, 0, gridnum - 1)
+    x0_idx, x0_valid = _wrap_or_mask_indices(x0, gridnum_x, periodic_x)
+    x1_idx, x1_valid = _wrap_or_mask_indices(x1, gridnum_x, periodic_x)
+    y0_idx, y0_valid = _wrap_or_mask_indices(y0, gridnum_y, periodic_y)
+    y1_idx, y1_valid = _wrap_or_mask_indices(y1, gridnum_y, periodic_y)
 
     w00 = (1 - dx) * (1 - dy)
     w10 = dx * (1 - dy)
     w01 = (1 - dx) * dy
     w11 = dx * dy
 
-    fields  = np.zeros((gridnum, gridnum, quantities.shape[1]), dtype=np.float32)
-    weights = np.zeros((gridnum, gridnum), dtype=np.float32)
+    fields  = np.zeros((gridnum_x, gridnum_y, quantities.shape[1]), dtype=np.float32)
+    weights = np.zeros((gridnum_x, gridnum_y), dtype=np.float32)
 
-    for i in range(quantities.shape[1]):
-        q = quantities[:, i]
-        np.add.at(fields[:, :, i], (x0, y0), q * w00)
-        np.add.at(fields[:, :, i], (x1, y0), q * w10)
-        np.add.at(fields[:, :, i], (x0, y1), q * w01)
-        np.add.at(fields[:, :, i], (x1, y1), q * w11)
+    neighbors = [
+        (x0_idx, x0_valid, y0_idx, y0_valid, w00),
+        (x1_idx, x1_valid, y0_idx, y0_valid, w10),
+        (x0_idx, x0_valid, y1_idx, y1_valid, w01),
+        (x1_idx, x1_valid, y1_idx, y1_valid, w11),
+    ]
 
-    np.add.at(weights, (x0, y0), w00)
-    np.add.at(weights, (x1, y0), w10)
-    np.add.at(weights, (x0, y1), w01)
-    np.add.at(weights, (x1, y1), w11)
+    for x_idx, x_mask, y_idx, y_mask, weight_vals in neighbors:
+        valid = x_mask & y_mask
+        if not np.any(valid):
+            continue
+        for i in range(quantities.shape[1]):
+            q = quantities[:, i]
+            np.add.at(fields[:, :, i], (x_idx[valid], y_idx[valid]), q[valid] * weight_vals[valid])
+        np.add.at(weights, (x_idx[valid], y_idx[valid]), weight_vals[valid])
 
     return fields, weights
 
-def cic_3d(positions, quantities, extent, gridnum, periodic):
-    boxsize = extent[1] - extent[0]
-    inv_dx = gridnum / boxsize
+def cic_3d(positions, quantities, boxsizes, gridnums, periodic):
+    """Deposit 3D particle quantities using trilinear Cloud-In-Cell weights.
 
-    grid_pos = (positions - extent[0]) * inv_dx
+    Parameters
+    ----------
+    positions : ndarray, shape (N, 3)
+        Cartesian particle coordinates.
+    quantities : ndarray, shape (N, F)
+        Per-particle fields to accumulate.
+    boxsizes : array_like of length 3
+        Assumes ``[0, boxsize]`` in each dimension.
+    gridnums : array_like of length 3
+        Number of grid cells for each axis.
+    periodic : Sequence[bool]
+        Whether to wrap particles that leave the domain.
+
+    Returns
+    -------
+    fields : ndarray
+        Accumulated field values on the grid.
+    weights : ndarray
+        Sum of interpolation weights per cell (for later normalization).
+    """
+
+    positions = _as_float32(positions)
+    quantities = _as_float32(quantities)
+    boxsizes = _as_float32(boxsizes)
+
+    gridnum_x, gridnum_y, gridnum_z = gridnums
+    periodic_x, periodic_y, periodic_z = periodic
+    inv_dx = np.array([gridnum_x, gridnum_y, gridnum_z], dtype=np.float32) / boxsizes
+
+    grid_pos = positions * inv_dx
     base_idx = np.floor(grid_pos).astype(int)
     frac = grid_pos - base_idx
 
@@ -98,18 +243,12 @@ def cic_3d(positions, quantities, extent, gridnum, periodic):
     y1 = y0 + 1
     z1 = z0 + 1
 
-    if periodic:
-        x0 %= gridnum
-        x1 %= gridnum
-        y0 %= gridnum
-        y1 %= gridnum
-        z0 %= gridnum
-        z1 %= gridnum
-    else:
-        #TODO: this is wrong to do... need to skip particles outside the box
-        x1 = np.clip(x1, 0, gridnum - 1)
-        y1 = np.clip(y1, 0, gridnum - 1)
-        z1 = np.clip(z1, 0, gridnum - 1)
+    x0_idx, x0_valid = _wrap_or_mask_indices(x0, gridnum_x, periodic_x)
+    x1_idx, x1_valid = _wrap_or_mask_indices(x1, gridnum_x, periodic_x)
+    y0_idx, y0_valid = _wrap_or_mask_indices(y0, gridnum_y, periodic_y)
+    y1_idx, y1_valid = _wrap_or_mask_indices(y1, gridnum_y, periodic_y)
+    z0_idx, z0_valid = _wrap_or_mask_indices(z0, gridnum_z, periodic_z)
+    z1_idx, z1_valid = _wrap_or_mask_indices(z1, gridnum_z, periodic_z)
 
     # Compute weights for 8 surrounding grid points
     w000 = (1 - dx) * (1 - dy) * (1 - dz)
@@ -121,84 +260,147 @@ def cic_3d(positions, quantities, extent, gridnum, periodic):
     w011 = (1 - dx) * dy * dz
     w111 = dx * dy * dz
 
-    fields  = np.zeros((gridnum, gridnum, gridnum, quantities.shape[1]), dtype=np.float32)
-    weights = np.zeros((gridnum, gridnum, gridnum), dtype=np.float32)
+    fields  = np.zeros((gridnum_x, gridnum_y, gridnum_z, quantities.shape[1]), dtype=np.float32)
+    weights = np.zeros((gridnum_x, gridnum_y, gridnum_z), dtype=np.float32)
 
-    for i in range(quantities.shape[1]):
-        q = quantities[:, i]
-        np.add.at(fields[:, :, :, i], (x0, y0, z0), q * w000)
-        np.add.at(fields[:, :, :, i], (x1, y0, z0), q * w100)
-        np.add.at(fields[:, :, :, i], (x0, y1, z0), q * w010)
-        np.add.at(fields[:, :, :, i], (x1, y1, z0), q * w110)
-        np.add.at(fields[:, :, :, i], (x0, y0, z1), q * w001)
-        np.add.at(fields[:, :, :, i], (x1, y0, z1), q * w101)
-        np.add.at(fields[:, :, :, i], (x0, y1, z1), q * w011)
-        np.add.at(fields[:, :, :, i], (x1, y1, z1), q * w111)
+    neighbors = [
+        (x0_idx, x0_valid, y0_idx, y0_valid, z0_idx, z0_valid, w000),
+        (x1_idx, x1_valid, y0_idx, y0_valid, z0_idx, z0_valid, w100),
+        (x0_idx, x0_valid, y1_idx, y1_valid, z0_idx, z0_valid, w010),
+        (x1_idx, x1_valid, y1_idx, y1_valid, z0_idx, z0_valid, w110),
+        (x0_idx, x0_valid, y0_idx, y0_valid, z1_idx, z1_valid, w001),
+        (x1_idx, x1_valid, y0_idx, y0_valid, z1_idx, z1_valid, w101),
+        (x0_idx, x0_valid, y1_idx, y1_valid, z1_idx, z1_valid, w011),
+        (x1_idx, x1_valid, y1_idx, y1_valid, z1_idx, z1_valid, w111),
+    ]
 
-    np.add.at(weights, (x0, y0, z0), w000)
-    np.add.at(weights, (x1, y0, z0), w100)
-    np.add.at(weights, (x0, y1, z0), w010)
-    np.add.at(weights, (x1, y1, z0), w110)
-    np.add.at(weights, (x0, y0, z1), w001)
-    np.add.at(weights, (x1, y0, z1), w101)
-    np.add.at(weights, (x0, y1, z1), w011)
-    np.add.at(weights, (x1, y1, z1), w111)
+    for x_idx, x_mask, y_idx, y_mask, z_idx, z_mask, weight_vals in neighbors:
+        valid = x_mask & y_mask & z_mask
+        if not np.any(valid):
+            continue
+        for i in range(quantities.shape[1]):
+            q = quantities[:, i]
+            np.add.at(fields[:, :, :, i], (x_idx[valid], y_idx[valid], z_idx[valid]), q[valid] * weight_vals[valid])
+        np.add.at(weights, (x_idx[valid], y_idx[valid], z_idx[valid]), weight_vals[valid])
 
     return fields, weights
 
 def _weights_tsc(d):
-        w = np.empty((len(d), 3))
-        w[:, 0] = 0.5 * (1.5 - d)**2
-        w[:, 1] = 0.75 - (d - 1)**2
-        w[:, 2] = 0.5 * (d - 0.5)**2
-        return w
+    """Return Triangular Shaped Cloud weights for displacement array ``d``."""
+    w = np.empty((len(d), 3), dtype=np.float32)
+    w[:, 0] = 0.5 * (1.5 - d)**2
+    w[:, 1] = 0.75 - (d - 1)**2
+    w[:, 2] = 0.5 * (d - 0.5)**2
+    return w
 
-def tsc_2d(positions, quantities, extent, gridnum, periodic):
-    boxsize = extent[1] - extent[0]
-    inv_dx = gridnum / boxsize
+def tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
+    """Deposit 2D particle quantities using the Triangular Shaped Cloud kernel.
 
+    Parameters
+    ----------
+    positions : ndarray, shape (N, 2)
+        Cartesian particle coordinates.
+    quantities : ndarray, shape (N, F)
+        Per-particle fields to accumulate.
+    boxsizes : array_like of length 2
+        Assumes ``[0, boxsize]`` in each dimension.
+    gridnums : array_like of length 2
+        Number of grid cells for each axis.
+    periodic : Sequence[bool]
+        Whether to wrap particles that leave the domain.
+
+    Returns
+    -------
+    fields : ndarray
+        Accumulated field values on the grid.
+    weights : ndarray
+        Sum of interpolation weights per cell (for later normalization).
+    """
+
+    positions = _as_float32(positions)
+    quantities = _as_float32(quantities)
+    boxsizes = _as_float32(boxsizes)
+
+    gridnum_x, gridnum_y = gridnums
+    inv_dx = np.array([gridnum_x, gridnum_y], dtype=np.float32) / boxsizes
+    
     # Convert positions to grid coordinates
-    grid_pos = (positions - extent[0]) * inv_dx
+    grid_pos = positions * inv_dx
 
     base_idx = np.floor(grid_pos).astype(int)  # (N, 2)
     frac = grid_pos - base_idx                 # (N, 2)
     nf = quantities.shape[1]
 
-    fields = np.zeros((gridnum, gridnum, nf), dtype=np.float32)
-    weights = np.zeros((gridnum, gridnum), dtype=np.float32)
+    fields = np.zeros((gridnum_x, gridnum_y, nf), dtype=np.float32)
+    weights = np.zeros((gridnum_x, gridnum_y), dtype=np.float32)
     offsets = np.array([-1, 0, 1])
 
     # Precompute the TSC weight function for each axis and particle for neighbors
     wx = _weights_tsc(frac[:, 0])
     wy = _weights_tsc(frac[:, 1])
 
+    periodic_x, periodic_y = periodic
+
     for dx_i, dx in enumerate(offsets):
         for dy_i, dy in enumerate(offsets):
             ix = base_idx[:, 0] + dx
             iy = base_idx[:, 1] + dy
 
-            if periodic:
-                ix %= gridnum
-                iy %= gridnum
-            #else:
-            #    ix = np.clip(ix, 0, gridnum - 1)
-            #    iy = np.clip(iy, 0, gridnum - 1)
+            valid = np.ones(ix.shape[0], dtype=bool)
+            if periodic_x:
+                ix = np.mod(ix, gridnum_x)
+            else:
+                valid &= (ix >= 0) & (ix < gridnum_x)
+            if periodic_y:
+                iy = np.mod(iy, gridnum_y)
+            else:
+                valid &= (iy >= 0) & (iy < gridnum_y)
 
-            w = wx[:, dx_i] * wy[:, dy_i]  # (N,)
+            if not np.any(valid):
+                continue
+
+            w = wx[:, dx_i] * wy[:, dy_i]
 
             for f in range(nf):
-                np.add.at(fields[:, :, f], (ix, iy), quantities[:, f] * w)
+                np.add.at(fields[:, :, f], (ix[valid], iy[valid]), quantities[:, f][valid] * w[valid])
 
-            np.add.at(weights, (ix, iy), w)
+            np.add.at(weights, (ix[valid], iy[valid]), w[valid])
 
     return fields, weights
 
-def tsc_3d(positions, quantities, extent, gridnum, periodic):
-    boxsize = extent[1] - extent[0]
-    inv_dx = gridnum / boxsize
+def tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
+    """Deposit 3D particle quantities using the Triangular Shaped Cloud kernel.
+
+    Parameters
+    ----------
+    positions : ndarray, shape (N, 3)
+        Cartesian particle coordinates.
+    quantities : ndarray, shape (N, F)
+        Per-particle fields to accumulate.
+    boxsizes : array_like of length 3
+        Assumes ``[0, boxsize]`` in each dimension.
+    gridnums : array_like of length 3
+        Number of grid cells for each axis.
+    periodic : Sequence[bool]
+        Whether to wrap particles that leave the domain.
+
+    Returns
+    -------
+    fields : ndarray
+        Accumulated field values on the grid.
+    weights : ndarray
+        Sum of interpolation weights per cell (for later normalization).
+    """
+
+    positions = _as_float32(positions)
+    quantities = _as_float32(quantities)
+    boxsizes = _as_float32(boxsizes)
+
+    gridnum_x, gridnum_y, gridnum_z = gridnums
+    inv_dx = np.array([gridnum_x, gridnum_y, gridnum_z], dtype=np.float32) / boxsizes
 
     # Normalize positions to grid coordinates (float)
-    grid_pos = (positions - extent[0]) * inv_dx
+    grid_pos = positions * inv_dx
 
     # Integer cell indices (center cell)
     base_idx = np.floor(grid_pos).astype(int)  # shape (N,3)
@@ -207,8 +409,8 @@ def tsc_3d(positions, quantities, extent, gridnum, periodic):
     frac = grid_pos - base_idx  # shape (N,3)
     nf = quantities.shape[1]
 
-    fields = np.zeros((gridnum, gridnum, gridnum, nf), dtype=np.float32)
-    weights = np.zeros((gridnum, gridnum, gridnum), dtype=np.float32)
+    fields = np.zeros((gridnum_x, gridnum_y, gridnum_z, nf), dtype=np.float32)
+    weights = np.zeros((gridnum_x, gridnum_y, gridnum_z), dtype=np.float32)
     offsets = np.array([-1, 0, 1])
 
     # Precompute the TSC weight function for each axis and particle for neighbors
@@ -217,32 +419,37 @@ def tsc_3d(positions, quantities, extent, gridnum, periodic):
     wz = _weights_tsc(frac[:, 2])
 
     # Loop over each neighbor offset in 3D (27 neighbors)
+    periodic_x, periodic_y, periodic_z = periodic
+
     for dx_i, dx in enumerate(offsets):
         for dy_i, dy in enumerate(offsets):
             for dz_i, dz in enumerate(offsets):
-                # Compute neighbor cell indices
                 ix = base_idx[:, 0] + dx
                 iy = base_idx[:, 1] + dy
                 iz = base_idx[:, 2] + dz
 
-                if periodic:
-                    ix %= gridnum
-                    iy %= gridnum
-                    iz %= gridnum
+                valid = np.ones(ix.shape[0], dtype=bool)
+                if periodic_x:
+                    ix = np.mod(ix, gridnum_x)
                 else:
-                    # Clip to grid boundaries
-                    ix = np.clip(ix, 0, gridnum - 1)
-                    iy = np.clip(iy, 0, gridnum - 1)
-                    iz = np.clip(iz, 0, gridnum - 1)
+                    valid &= (ix >= 0) & (ix < gridnum_x)
+                if periodic_y:
+                    iy = np.mod(iy, gridnum_y)
+                else:
+                    valid &= (iy >= 0) & (iy < gridnum_y)
+                if periodic_z:
+                    iz = np.mod(iz, gridnum_z)
+                else:
+                    valid &= (iz >= 0) & (iz < gridnum_z)
 
-                # Compute weights for this neighbor
-                w = wx[:, dx_i] * wy[:, dy_i] * wz[:, dz_i]  # shape (N,)
+                if not np.any(valid):
+                    continue
 
-                # Deposit quantities weighted by w into fields
+                w = wx[:, dx_i] * wy[:, dy_i] * wz[:, dz_i]
+
                 for f in range(nf):
-                    np.add.at(fields[:, :, :, f], (ix, iy, iz), quantities[:, f] * w)
+                    np.add.at(fields[:, :, :, f], (ix[valid], iy[valid], iz[valid]), quantities[:, f][valid] * w[valid])
 
-                # Deposit weights (scalar)
-                np.add.at(weights, (ix, iy, iz), w)
+                np.add.at(weights, (ix[valid], iy[valid], iz[valid]), w[valid])
 
     return fields, weights

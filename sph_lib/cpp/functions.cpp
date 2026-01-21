@@ -17,6 +17,11 @@ inline int apply_pbc(int idx, int gridnum) {
     return (r < 0) ? r + gridnum : r;
 }
 
+// Centralizes per-axis periodic checks and gracefully handles nullable arrays
+inline bool axis_periodic(const bool* periodic, int axis) {
+	return periodic ? periodic[axis] : false;
+}
+
 // =============================================================================
 // pure C++ deposition functions
 // =============================================================================
@@ -26,33 +31,39 @@ void ngp_2d_cpp(
     const float* quantities,     // (N, num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    float* fields,               // (gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,               // (gridnum_x, gridnum_y, num_fields)
+    float* weights               // (gridnum_x, gridnum_y)
 ) {
-    const float boxsize = extent_max - extent_min;
-    const float inv_dx = static_cast<float>(gridnum) / boxsize;
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
 
     // strides for C-contiguous layout (x, y, f)
-    const int field_stride_x = gridnum * num_fields;
+    const int field_stride_x = gridnum_y * num_fields;
     const int field_stride_y = num_fields;
 
     // zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     for (int n = 0; n < N; ++n) {
         // map positions to grid indices, mimicking Python astype(int)
-        int ix = static_cast<int>((pos[2*n + 0] - extent_min) * inv_dx);
-        int iy = static_cast<int>((pos[2*n + 1] - extent_min) * inv_dx);
+        int ix = static_cast<int>(pos[2 * n + 0] * inv_dx_x);
+        int iy = static_cast<int>(pos[2 * n + 1] * inv_dx_y);
 
-        // skip particles outside the extent
-        if (ix < 0 || ix >= gridnum || iy < 0 || iy >= gridnum) continue;
+        if (ix < 0 || ix >= gridnum_x) {
+            continue;
+        }
+        if (iy < 0 || iy >= gridnum_y) {
+            continue;
+        }
 
         const int base_idx   = ix * field_stride_x + iy * field_stride_y;
-        const int weight_idx = ix * gridnum + iy;
+        const int weight_idx = ix * gridnum_y + iy;
 
         for (int f = 0; f < num_fields; ++f) {
             fields[base_idx + f] += quantities[n * num_fields + f];
@@ -68,35 +79,48 @@ void ngp_3d_cpp(
     const float* quantities,     // (N, num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    float* fields,               // (gridnum, gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,               // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights               // (gridnum_x, gridnum_y, gridnum_z)
 ) {
-    const float boxsize = extent_max - extent_min;
-    const float inv_dx = static_cast<float>(gridnum) / boxsize;
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
 
     // strides for C-contiguous layout (x, y, z, f)
-    const int field_stride_x = gridnum * gridnum * num_fields;
-    const int field_stride_y = gridnum * num_fields;
+    const int field_stride_x = gridnum_y * gridnum_z * num_fields;
+    const int field_stride_y = gridnum_z * num_fields;
     const int field_stride_z = num_fields;
 
     // zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     for (int n = 0; n < N; ++n) {
         // map positions to grid indices, mimicking Python astype(int)
-        int ix = static_cast<int>((pos[3*n + 0] - extent_min) * inv_dx);
-        int iy = static_cast<int>((pos[3*n + 1] - extent_min) * inv_dx);
-        int iz = static_cast<int>((pos[3*n + 2] - extent_min) * inv_dx);
+        int ix = static_cast<int>(pos[3 * n + 0] * inv_dx_x);
+        int iy = static_cast<int>(pos[3 * n + 1] * inv_dx_y);
+        int iz = static_cast<int>(pos[3 * n + 2] * inv_dx_z);
 
-        // skip particles outside the extent
-        if (ix < 0 || ix >= gridnum || iy < 0 || iy >= gridnum || iz < 0 || iz >= gridnum) continue;
+        if (ix < 0 || ix >= gridnum_x) {
+            continue;
+        }
+
+        if (iy < 0 || iy >= gridnum_y) {
+            continue;
+        }
+
+        if (iz < 0 || iz >= gridnum_z) {
+            continue;
+        }
 
         const int base_idx   = ix * field_stride_x + iy * field_stride_y + iz * field_stride_z;
-        const int weight_idx = ix * gridnum * gridnum + iy * gridnum + iz;
+        const int weight_idx = ix * gridnum_y * gridnum_z + iy * gridnum_z + iz;
 
         for (int f = 0; f < num_fields; ++f) {
             fields[base_idx + f] += quantities[n * num_fields + f];
@@ -111,31 +135,34 @@ void cic_2d_cpp(
     const float* quantities,     // (N, num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,               // (gridnum, gridnum, num_fields)
-    float* weights               // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,               // (gridnum_x, gridnum_y, num_fields)
+    float* weights               // (gridnum_x, gridnum_y)
 ) {
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
 
     // strides for C-contiguous layout (x, y, f)
-    const int field_stride_x = gridnum * num_fields;
+    const int field_stride_x = gridnum_y * num_fields;
     const int field_stride_y = num_fields;
 
     // zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     for (int n = 0; n < N; ++n) {
-        float xpos = (pos[2*n + 0] - extent_min) / cellSize;
-        float ypos = (pos[2*n + 1] - extent_min) / cellSize;
+        float xpos = pos[2 * n + 0] * inv_dx_x;
+        float ypos = pos[2 * n + 1] * inv_dx_y;
 
         // Skip particles completely outside the domain
-        if (!periodic && 
-            (xpos < 0.0f || xpos >= gridnum || 
-             ypos < 0.0f || ypos >= gridnum))
+        if ((!periodic_x && (xpos < 0.0f || xpos >= gridnum_x)) ||
+            (!periodic_y && (ypos < 0.0f || ypos >= gridnum_y)))
             continue;
 
         int i0 = static_cast<int>(std::floor(xpos));
@@ -147,19 +174,17 @@ void cic_2d_cpp(
         float dy = ypos - j0;
         float dx_ = 1.0f - dx;
         float dy_ = 1.0f - dy;
+        if ((!periodic_x && (xpos < 0.5f || xpos > gridnum_x - 0.5f)) ||
+            (!periodic_y && (ypos < 0.5f || ypos > gridnum_y - 0.5f)))
+            continue;
 
-        if (!periodic) {
-            if (xpos < 0.5f || xpos > gridnum - 0.5f ||
-                ypos < 0.5f || ypos > gridnum - 0.5f)
-                continue;
+        if (periodic_x) {
+            i0 = apply_pbc(i0, gridnum_x);
+            i1 = apply_pbc(i1, gridnum_x);
         }
-
-        // Wrap indices only if periodic
-        if (periodic) {
-            i0 = apply_pbc(i0, gridnum);
-            i1 = apply_pbc(i1, gridnum);
-            j0 = apply_pbc(j0, gridnum);
-            j1 = apply_pbc(j1, gridnum);
+        if (periodic_y) {
+            j0 = apply_pbc(j0, gridnum_y);
+            j1 = apply_pbc(j1, gridnum_y);
         }
 
         // weights for bilinear stencil
@@ -169,10 +194,11 @@ void cic_2d_cpp(
         float w11 = dx  * dy;
 
         auto deposit = [&](int ix, int jy, float w) {
-            if (!periodic && (ix < 0 || ix >= gridnum || jy < 0 || jy >= gridnum)) return;
+            if (!periodic_x && (ix < 0 || ix >= gridnum_x)) return;
+            if (!periodic_y && (jy < 0 || jy >= gridnum_y)) return;
 
             int base_idx   = ix * field_stride_x + jy * field_stride_y;
-            int weight_idx = ix * gridnum + jy;
+            int weight_idx = ix * gridnum_y + jy;
 
             for (int f = 0; f < num_fields; ++f) {
                 fields[base_idx + f] += w * quantities[n * num_fields + f];
@@ -193,33 +219,40 @@ void cic_3d_cpp(
     const float* quantities, // (N, num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,           // (gridnum, gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,           // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights           // (gridnum_x, gridnum_y, gridnum_z)
 ) {
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
 
     // Strides for C-contiguous layout (x, y, z, f)
-    const int field_stride_x = gridnum * gridnum * num_fields;
-    const int field_stride_y = gridnum * num_fields;
+    const int field_stride_x = gridnum_y * gridnum_z * num_fields;
+    const int field_stride_y = gridnum_z * num_fields;
     const int field_stride_z = num_fields;
 
     // Zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     for (int n = 0; n < N; ++n) {
-        float xpos = (pos[3*n + 0] - extent_min) / cellSize;
-        float ypos = (pos[3*n + 1] - extent_min) / cellSize;
-        float zpos = (pos[3*n + 2] - extent_min) / cellSize;
+        float xpos = pos[3 * n + 0] * inv_dx_x;
+        float ypos = pos[3 * n + 1] * inv_dx_y;
+        float zpos = pos[3 * n + 2] * inv_dx_z;
 
         // Skip particles completely outside the domain (non-periodic)
-        if (!periodic && (xpos < 0.0f || xpos >= gridnum ||
-                          ypos < 0.0f || ypos >= gridnum ||
-                          zpos < 0.0f || zpos >= gridnum))
+        if ((!periodic_x && (xpos < 0.0f || xpos >= gridnum_x)) ||
+            (!periodic_y && (ypos < 0.0f || ypos >= gridnum_y)) ||
+            (!periodic_z && (zpos < 0.0f || zpos >= gridnum_z)))
             continue;
 
         // Base indices and fractional distances
@@ -237,14 +270,17 @@ void cic_3d_cpp(
         float dy_ = 1.0f - dy;
         float dz_ = 1.0f - dz;
 
-        // Wrap indices only if periodic
-        if (periodic) {
-            i0 = apply_pbc(i0, gridnum);
-            i1 = apply_pbc(i1, gridnum);
-            j0 = apply_pbc(j0, gridnum);
-            j1 = apply_pbc(j1, gridnum);
-            k0 = apply_pbc(k0, gridnum);
-            k1 = apply_pbc(k1, gridnum);
+        if (periodic_x) {
+            i0 = apply_pbc(i0, gridnum_x);
+            i1 = apply_pbc(i1, gridnum_x);
+        }
+        if (periodic_y) {
+            j0 = apply_pbc(j0, gridnum_y);
+            j1 = apply_pbc(j1, gridnum_y);
+        }
+        if (periodic_z) {
+            k0 = apply_pbc(k0, gridnum_z);
+            k1 = apply_pbc(k1, gridnum_z);
         }
 
         // Trilinear weights
@@ -259,13 +295,12 @@ void cic_3d_cpp(
 
         // Deposit lambda
         auto deposit = [&](int ix, int jy, int kz, float w) {
-            if (!periodic && (ix < 0 || ix >= gridnum ||
-                              jy < 0 || jy >= gridnum ||
-                              kz < 0 || kz >= gridnum))
-                return;
+            if (!periodic_x && (ix < 0 || ix >= gridnum_x)) return;
+            if (!periodic_y && (jy < 0 || jy >= gridnum_y)) return;
+            if (!periodic_z && (kz < 0 || kz >= gridnum_z)) return;
 
             int base_idx   = ix * field_stride_x + jy * field_stride_y + kz * field_stride_z;
-            int weight_idx = ix * gridnum * gridnum + jy * gridnum + kz;
+            int weight_idx = ix * gridnum_y * gridnum_z + jy * gridnum_z + kz;
 
             for (int f = 0; f < num_fields; ++f) {
                 fields[base_idx + f] += w * quantities[n * num_fields + f];
@@ -290,39 +325,46 @@ void cic_2d_adaptive_cpp(
     const float* quantities,  // (N,num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const float* pcellsizesHalf, // (N)
-    float* fields,            // (gridnum, gridnum, num_fields)
-    float* weights            // (gridnum, gridnum)
+    float* fields,            // (gridnum_x, gridnum_y, num_fields)
+    float* weights            // (gridnum_x, gridnum_y)
 ) {
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
-    const int stride_x = gridnum * num_fields;
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float inv_dx_x = 1.0f / cellSize_x;
+    const float inv_dx_y = 1.0f / cellSize_y;
+    const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
-    const int weight_stride_x = gridnum;
+    const int weight_stride_x = gridnum_y;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     for (int n = 0; n < N; ++n) {
-        float pcs = pcellsizesHalf[n] / cellSize;
-        float V = std::pow(2.0f * pcs, 2.0f);
+        float pcs_x = pcellsizesHalf[n] * inv_dx_x;
+        float pcs_y = pcellsizesHalf[n] * inv_dx_y;
+        float V = (2.0f * pcs_x) * (2.0f * pcs_y);
 
-        float xpos = (pos[2*n + 0] - extent_min) / cellSize;
-        float ypos = (pos[2*n + 1] - extent_min) / cellSize;
+        float xpos = pos[2 * n + 0] * inv_dx_x;
+        float ypos = pos[2 * n + 1] * inv_dx_y;
 
         int i = static_cast<int>(xpos);
         int j = static_cast<int>(ypos);
 
-        int num_left   = i - static_cast<int>(std::round(xpos - pcs - 0.5f));
-        int num_right  = static_cast<int>(xpos + pcs) - i;
-        int num_bottom = j - static_cast<int>(std::round(ypos - pcs - 0.5f));
-        int num_top    = static_cast<int>(ypos + pcs) - j;
+        int num_left   = i - static_cast<int>(std::round(xpos - pcs_x - 0.5f));
+        int num_right  = static_cast<int>(xpos + pcs_x) - i;
+        int num_bottom = j - static_cast<int>(std::round(ypos - pcs_y - 0.5f));
+        int num_top    = static_cast<int>(ypos + pcs_y) - j;
 
-        float c1 = xpos - pcs, c2 = xpos + pcs;
-        float c3 = ypos - pcs, c4 = ypos + pcs;
+        float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
+        float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
@@ -338,11 +380,15 @@ void cic_2d_adaptive_cpp(
                 if (fraction <= 0.0f) continue;
 
                 int an = a, bn = b;
-                if (periodic) {
-                    an = apply_pbc(a, gridnum);
-                    bn = apply_pbc(b, gridnum);
-                } else {
-                    if (a < 0 || a >= gridnum || b < 0 || b >= gridnum) continue;
+                if (periodic_x) {
+                    an = apply_pbc(a, gridnum_x);
+                } else if (a < 0 || a >= gridnum_x) {
+                    continue;
+                }
+                if (periodic_y) {
+                    bn = apply_pbc(b, gridnum_y);
+                } else if (b < 0 || b >= gridnum_y) {
+                    continue;
                 }
 
                 int base_idx = an * stride_x + bn * stride_y;
@@ -362,47 +408,59 @@ void cic_3d_adaptive_cpp(
     const float* quantities,  // (N,num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const float* pcellsizesHalf, // (N)
-    float* fields,            // (gridnum, gridnum, gridnum, num_fields)
-    float* weights            // (gridnum, gridnum, gridnum)
+    float* fields,            // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights            // (gridnum_x, gridnum_y, gridnum_z)
 ) {
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
-    const int stride_x = gridnum * gridnum * num_fields;
-    const int stride_y = gridnum * num_fields;
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float cellSize_z = boxsizes[2] / static_cast<float>(gridnum_z);
+    const float inv_dx_x = 1.0f / cellSize_x;
+    const float inv_dx_y = 1.0f / cellSize_y;
+    const float inv_dx_z = 1.0f / cellSize_z;
+    const int stride_x = gridnum_y * gridnum_z * num_fields;
+    const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
-    const int weight_stride_x = gridnum * gridnum;
-    const int weight_stride_y = gridnum;
+    const int weight_stride_x = gridnum_y * gridnum_z;
+    const int weight_stride_y = gridnum_z;
     const int weight_stride_z = 1;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     for (int n = 0; n < N; ++n) {
-        float pcs = pcellsizesHalf[n] / cellSize;
-        float V = std::pow(2.0f * pcs, 3.0f);
+        float pcs_x = pcellsizesHalf[n] * inv_dx_x;
+        float pcs_y = pcellsizesHalf[n] * inv_dx_y;
+        float pcs_z = pcellsizesHalf[n] * inv_dx_z;
+        float V = (2.0f * pcs_x) * (2.0f * pcs_y) * (2.0f * pcs_z);
 
-        float xpos = (pos[3*n + 0] - extent_min) / cellSize;
-        float ypos = (pos[3*n + 1] - extent_min) / cellSize;
-        float zpos = (pos[3*n + 2] - extent_min) / cellSize;
+        float xpos = pos[3 * n + 0] * inv_dx_x;
+        float ypos = pos[3 * n + 1] * inv_dx_y;
+        float zpos = pos[3 * n + 2] * inv_dx_z;
 
         int i = static_cast<int>(xpos);
         int j = static_cast<int>(ypos);
         int k = static_cast<int>(zpos);
 
-        int num_left   = i - static_cast<int>(std::round(xpos - pcs - 0.5f));
-        int num_right  = static_cast<int>(xpos + pcs) - i;
-        int num_bottom = j - static_cast<int>(std::round(ypos - pcs - 0.5f));
-        int num_top    = static_cast<int>(ypos + pcs) - j;
-        int num_back   = k - static_cast<int>(std::round(zpos - pcs - 0.5f));
-        int num_fwd    = static_cast<int>(zpos + pcs) - k;
+        int num_left   = i - static_cast<int>(std::round(xpos - pcs_x - 0.5f));
+        int num_right  = static_cast<int>(xpos + pcs_x) - i;
+        int num_bottom = j - static_cast<int>(std::round(ypos - pcs_y - 0.5f));
+        int num_top    = static_cast<int>(ypos + pcs_y) - j;
+        int num_back   = k - static_cast<int>(std::round(zpos - pcs_z - 0.5f));
+        int num_fwd    = static_cast<int>(zpos + pcs_z) - k;
 
-        float c1 = xpos - pcs, c2 = xpos + pcs;
-        float c3 = ypos - pcs, c4 = ypos + pcs;
-        float c5 = zpos - pcs, c6 = zpos + pcs;
+        float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
+        float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
+        float c5 = zpos - pcs_z, c6 = zpos + pcs_z;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
@@ -422,13 +480,20 @@ void cic_3d_adaptive_cpp(
                     if (fraction <= 0.0f) continue;
 
                     int an = a, bn = b, cn = c;
-                    if (periodic) {
-                        an = apply_pbc(a, gridnum);
-                        bn = apply_pbc(b, gridnum);
-                        cn = apply_pbc(c, gridnum);
-                    } else {
-                        if (a < 0 || a >= gridnum || b < 0 || b >= gridnum || c < 0 || c >= gridnum)
-                            continue;
+                    if (periodic_x) {
+                        an = apply_pbc(a, gridnum_x);
+                    } else if (a < 0 || a >= gridnum_x) {
+                        continue;
+                    }
+                    if (periodic_y) {
+                        bn = apply_pbc(b, gridnum_y);
+                    } else if (b < 0 || b >= gridnum_y) {
+                        continue;
+                    }
+                    if (periodic_z) {
+                        cn = apply_pbc(c, gridnum_z);
+                    } else if (c < 0 || c >= gridnum_z) {
+                        continue;
                     }
 
                     int base_idx = an * stride_x + bn * stride_y + cn * stride_z;
@@ -459,31 +524,34 @@ void tsc_2d_cpp(
     const float* quantities, // (N, num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,           // (gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,           // (gridnum_x, gridnum_y, num_fields)
+    float* weights           // (gridnum_x, gridnum_y)
 ) {
-    const float boxsize = extent_max - extent_min;
-    const float inv_dx = static_cast<float>(gridnum) / boxsize;
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
 
     // Strides for C-contiguous layout (x, y, f)
-    const int stride_x = gridnum * num_fields;
+    const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
 
     // Zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // Neighbor offsets
     const int offsets[3] = {-1, 0, 1};
 
     for (int n = 0; n < N; ++n) {
         // Convert particle position to grid coordinates
-        float xpos = (pos[2*n + 0] - extent_min) * inv_dx;
-        float ypos = (pos[2*n + 1] - extent_min) * inv_dx;
+        float xpos = pos[2 * n + 0] * inv_dx_x;
+        float ypos = pos[2 * n + 1] * inv_dx_y;
 
         int i_base = static_cast<int>(std::floor(xpos));
         int j_base = static_cast<int>(std::floor(ypos));
@@ -491,7 +559,7 @@ void tsc_2d_cpp(
         float dx = xpos - i_base;
         float dy = ypos - j_base;
 
-        // Compute TSC weights for each axis
+        // Compute TSC weights along each axis
         float wx[3], wy[3];
         tsc_weights(dx, wx);
         tsc_weights(dy, wy);
@@ -502,20 +570,23 @@ void tsc_2d_cpp(
                 int ix = i_base + offsets[dx_i];
                 int iy = j_base + offsets[dy_i];
 
-                // Apply periodic boundaries if needed
-                if (periodic) {
-                    ix = apply_pbc(ix, gridnum);
-                    iy = apply_pbc(iy, gridnum);
-                } else {
-                    // skip if out-of-bounds
-                    if (ix < 0 || ix >= gridnum || iy < 0 || iy >= gridnum) continue;
+                if (periodic_x) {
+                    ix = apply_pbc(ix, gridnum_x);
+                } else if (ix < 0 || ix >= gridnum_x) {
+                    continue;
+                }
+
+                if (periodic_y) {
+                    iy = apply_pbc(iy, gridnum_y);
+                } else if (iy < 0 || iy >= gridnum_y) {
+                    continue;
                 }
 
                 float w = wx[dx_i] * wy[dy_i];
                 if (w == 0.0f) continue;
 
                 int base_idx   = ix * stride_x + iy * stride_y;
-                int weight_idx = ix * gridnum + iy;
+                int weight_idx = ix * gridnum_y + iy;
 
                 for (int f = 0; f < num_fields; ++f) {
                     fields[base_idx + f] += w * quantities[n * num_fields + f];
@@ -531,33 +602,39 @@ void tsc_3d_cpp(
     const float* quantities, // (N,num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
-    float* fields,           // (gridnum, gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum, gridnum)
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
+    float* fields,           // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights           // (gridnum_x, gridnum_y, gridnum_z)
 ) {
-    const float boxsize = extent_max - extent_min;
-    const float inv_dx = static_cast<float>(gridnum) / boxsize;
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
 
     // Strides for C-contiguous layout (x, y, z, f)
-    const int stride_x = gridnum *   gridnum * num_fields;
-    const int stride_y = gridnum * num_fields;
+    const int stride_x = gridnum_y * gridnum_z * num_fields;
+    const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
 
     // Zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // Neighbor offsets
     const int offsets[3] = {-1, 0, 1};
 
     for (int n = 0; n < N; ++n) {
         // Convert particle position to grid coordinates
-        float xpos = (pos[3*n + 0] - extent_min) * inv_dx;
-        float ypos = (pos[3*n + 1] - extent_min) * inv_dx;
-        float zpos = (pos[3*n + 2] - extent_min) * inv_dx;
+        float xpos = pos[3 * n + 0] * inv_dx_x;
+        float ypos = pos[3 * n + 1] * inv_dx_y;
+        float zpos = pos[3 * n + 2] * inv_dx_z;
 
         int i_base = static_cast<int>(std::floor(xpos));
         int j_base = static_cast<int>(std::floor(ypos));
@@ -581,23 +658,27 @@ void tsc_3d_cpp(
                     int iy = j_base + offsets[dy_i];
                     int iz = k_base + offsets[dz_i];
 
-                    // Apply periodic boundaries if needed
-                    if (periodic) {
-                        ix = apply_pbc(ix, gridnum);
-                        iy = apply_pbc(iy, gridnum);
-                        iz = apply_pbc(iz, gridnum);
-                    } else {
-                        // Skip out-of-bounds neighbors
-                        if (ix < 0 || ix >= gridnum ||
-                            iy < 0 || iy >= gridnum ||
-                            iz < 0 || iz >= gridnum) continue;
+                    if (periodic_x) {
+                        ix = apply_pbc(ix, gridnum_x);
+                    } else if (ix < 0 || ix >= gridnum_x) {
+                        continue;
+                    }
+                    if (periodic_y) {
+                        iy = apply_pbc(iy, gridnum_y);
+                    } else if (iy < 0 || iy >= gridnum_y) {
+                        continue;
+                    }
+                    if (periodic_z) {
+                        iz = apply_pbc(iz, gridnum_z);
+                    } else if (iz < 0 || iz >= gridnum_z) {
+                        continue;
                     }
 
                     float w = wx[dx_i] * wy[dy_i] * wz[dz_i];
                     if (w == 0.0f) continue;
 
                     int base_idx   = ix * stride_x + iy * stride_y + iz * stride_z;
-                    int weight_idx = ix * gridnum * gridnum + iy * gridnum + iz;
+                    int weight_idx = ix * gridnum_y * gridnum_z + iy * gridnum_z + iz;
 
                     for (int f = 0; f < num_fields; ++f) {
                         fields[base_idx + f] += w * quantities[n * num_fields + f];
@@ -638,49 +719,57 @@ void tsc_2d_adaptive_cpp(
     const float* quantities, // (N,num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const float* pcellsizesHalf, // (N)
-    float* fields,           // (gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum)
+    float* fields,           // (gridnum_x, gridnum_y, num_fields)
+    float* weights           // (gridnum_x, gridnum_y)
 ) {
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float inv_dx_x = 1.0f / cellSize_x;
+    const float inv_dx_y = 1.0f / cellSize_y;
 
-    const int stride_x = gridnum * num_fields;
+    const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
-    const int weight_stride_x = gridnum;
+    const int weight_stride_x = gridnum_y;
     const int weight_stride_y = 1;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     for (int n = 0; n < N; ++n) {
-        float x = (pos[2*n + 0] - extent_min) / cellSize;
-        float y = (pos[2*n + 1] - extent_min) / cellSize;
-        float h = pcellsizesHalf[n] / cellSize;
+        float x = pos[2 * n + 0] * inv_dx_x;
+        float y = pos[2 * n + 1] * inv_dx_y;
+        float h_x = pcellsizesHalf[n] * inv_dx_x;
+        float h_y = pcellsizesHalf[n] * inv_dx_y;
 
-        float support = 1.5f * h;
-        int i_min = static_cast<int>(std::floor(x - support));
-        int i_max = static_cast<int>(std::ceil(x + support));
-        int j_min = static_cast<int>(std::floor(y - support));
-        int j_max = static_cast<int>(std::ceil(y + support));
+        float support_x = 1.5f * h_x;
+        float support_y = 1.5f * h_y;
+        int i_min = static_cast<int>(std::floor(x - support_x));
+        int i_max = static_cast<int>(std::ceil(x + support_x));
+        int j_min = static_cast<int>(std::floor(y - support_y));
+        int j_max = static_cast<int>(std::ceil(y + support_y));
 
         for (int i = i_min; i <= i_max; ++i) {
             int ii = i;
-            if (periodic) ii = apply_pbc(i, gridnum);
-            else if (ii < 0 || ii >= gridnum) continue;
+            if (periodic_x) ii = apply_pbc(i, gridnum_x);
+            else if (ii < 0 || ii >= gridnum_x) continue;
 
-            float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h);
+            float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
             if (wx == 0.0f) continue;
 
             for (int j = j_min; j <= j_max; ++j) {
                 int jj = j;
-                if (periodic) jj = apply_pbc(j, gridnum);
-                else if (jj < 0 || jj >= gridnum) continue;
+                if (periodic_y) jj = apply_pbc(j, gridnum_y);
+                else if (jj < 0 || jj >= gridnum_y) continue;
 
-                float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h);
+                float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
                 if (wy == 0.0f) continue;
 
                 float w = wx * wy;
@@ -701,60 +790,74 @@ void tsc_3d_adaptive_cpp(
     const float* quantities, // (N,num_fields)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const float* pcellsizesHalf, // (N)
-    float* fields,           // (gridnum, gridnum, gridnum, num_fields)
-    float* weights           // (gridnum, gridnum, gridnum)
+    float* fields,           // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights           // (gridnum_x, gridnum_y, gridnum_z)
 ) {
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float cellSize_z = boxsizes[2] / static_cast<float>(gridnum_z);
+    const float inv_dx_x = 1.0f / cellSize_x;
+    const float inv_dx_y = 1.0f / cellSize_y;
+    const float inv_dx_z = 1.0f / cellSize_z;
 
-    const int stride_x = gridnum * gridnum * num_fields;
-    const int stride_y = gridnum * num_fields;
+    const int stride_x = gridnum_y * gridnum_z * num_fields;
+    const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
 
-    const int weight_stride_x = gridnum * gridnum;
-    const int weight_stride_y = gridnum;
+    const int weight_stride_x = gridnum_y * gridnum_z;
+    const int weight_stride_y = gridnum_z;
     const int weight_stride_z = 1;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     for (int n = 0; n < N; ++n) {
-        float x = (pos[3*n + 0] - extent_min) / cellSize;
-        float y = (pos[3*n + 1] - extent_min) / cellSize;
-        float z = (pos[3*n + 2] - extent_min) / cellSize;
-        float h = pcellsizesHalf[n] / cellSize;
+        float x = pos[3 * n + 0] * inv_dx_x;
+        float y = pos[3 * n + 1] * inv_dx_y;
+        float z = pos[3 * n + 2] * inv_dx_z;
+        float h_x = pcellsizesHalf[n] * inv_dx_x;
+        float h_y = pcellsizesHalf[n] * inv_dx_y;
+        float h_z = pcellsizesHalf[n] * inv_dx_z;
 
-        float support = 1.5f * h;
-        int i_min = static_cast<int>(std::floor(x - support));
-        int i_max = static_cast<int>(std::ceil(x + support));
-        int j_min = static_cast<int>(std::floor(y - support));
-        int j_max = static_cast<int>(std::ceil(y + support));
-        int k_min = static_cast<int>(std::floor(z - support));
-        int k_max = static_cast<int>(std::ceil(z + support));
+        float support_x = 1.5f * h_x;
+        float support_y = 1.5f * h_y;
+        float support_z = 1.5f * h_z;
+        int i_min = static_cast<int>(std::floor(x - support_x));
+        int i_max = static_cast<int>(std::ceil(x + support_x));
+        int j_min = static_cast<int>(std::floor(y - support_y));
+        int j_max = static_cast<int>(std::ceil(y + support_y));
+        int k_min = static_cast<int>(std::floor(z - support_z));
+        int k_max = static_cast<int>(std::ceil(z + support_z));
 
         for (int i = i_min; i <= i_max; ++i) {
             int ii = i;
-            if (periodic) ii = apply_pbc(i, gridnum);
-            else if (ii < 0 || ii >= gridnum) continue;
-            float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h);
+            if (periodic_x) ii = apply_pbc(i, gridnum_x);
+            else if (ii < 0 || ii >= gridnum_x) continue;
+            float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
             if (wx == 0.0f) continue;
 
-            for (int j = j_min; j <= j_max; ++j) {
-                int jj = j;
-                if (periodic) jj = apply_pbc(j, gridnum);
-                else if (jj < 0 || jj >= gridnum) continue;
-                float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h);
+                for (int j = j_min; j <= j_max; ++j) {
+                    int jj = j;
+                    if (periodic_y) jj = apply_pbc(j, gridnum_y);
+                    else if (jj < 0 || jj >= gridnum_y) continue;
+                float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
                 if (wy == 0.0f) continue;
 
-                for (int k = k_min; k <= k_max; ++k) {
-                    int kk = k;
-                    if (periodic) kk = apply_pbc(k, gridnum);
-                    else if (kk < 0 || kk >= gridnum) continue;
-                    float wz = tsc_integrated_weight_1d(z, float(k), float(k+1), h);
+                    for (int k = k_min; k <= k_max; ++k) {
+                        int kk = k;
+                        if (periodic_z) kk = apply_pbc(k, gridnum_z);
+                        else if (kk < 0 || kk >= gridnum_z) continue;
+                    float wz = tsc_integrated_weight_1d(z, float(k), float(k+1), h_z);
                     if (wz == 0.0f) continue;
 
                     float w = wx * wy * wz;
@@ -783,20 +886,27 @@ static float compute_fraction_isotropic_2d_cpp(
     float ypos,
     int a,
     int b,
-    int gridnum,
-    bool periodic,
+    int gridnum_x,
+    int gridnum_y,
+    const bool* periodic,
     float h,
     SPHKernel* kernel
 ) {
     float sigma = kernel->normalization(h);
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
 
     if (method == "midpoint") {
         float dx = xpos - (a + 0.5f);
         float dy = ypos - (b + 0.5f);
 
-        if (periodic) {
-            if (dx > gridnum / 2.0f) dx -= gridnum;
-            if (dy > gridnum / 2.0f) dy -= gridnum;
+        if (periodic_x) {
+            if (dx > gridnum_x / 2.0f) dx -= gridnum_x;
+            if (dx < -gridnum_x / 2.0f) dx += gridnum_x;
+        }
+        if (periodic_y) {
+            if (dy > gridnum_y / 2.0f) dy -= gridnum_y;
+            if (dy < -gridnum_y / 2.0f) dy += gridnum_y;
         }
 
         float r = std::sqrt(dx * dx + dy * dy);
@@ -814,9 +924,13 @@ static float compute_fraction_isotropic_2d_cpp(
             float dx = xpos - (a + offsets[i][0]);
             float dy = ypos - (b + offsets[i][1]);
 
-            if (periodic) {
-                if (dx > gridnum / 2.0f) dx -= gridnum;
-                if (dy > gridnum / 2.0f) dy -= gridnum;
+            if (periodic_x) {
+                if (dx > gridnum_x / 2.0f) dx -= gridnum_x;
+                if (dx < -gridnum_x / 2.0f) dx += gridnum_x;
+            }
+            if (periodic_y) {
+                if (dy > gridnum_y / 2.0f) dy -= gridnum_y;
+                if (dy < -gridnum_y / 2.0f) dy += gridnum_y;
             }
 
             float r = std::sqrt(dx * dx + dy * dy);
@@ -833,9 +947,13 @@ static float compute_fraction_isotropic_2d_cpp(
             float dx = xpos - (a + 0.5f);
             float dy = ypos - (b + 0.5f);
 
-            if (periodic) {
-                if (dx > gridnum / 2.0f) dx -= gridnum;
-                if (dy > gridnum / 2.0f) dy -= gridnum;
+            if (periodic_x) {
+                if (dx > gridnum_x / 2.0f) dx -= gridnum_x;
+                if (dx < -gridnum_x / 2.0f) dx += gridnum_x;
+            }
+            if (periodic_y) {
+                if (dy > gridnum_y / 2.0f) dy -= gridnum_y;
+                if (dy < -gridnum_y / 2.0f) dy += gridnum_y;
             }
 
             float r = std::sqrt(dx * dx + dy * dy);
@@ -850,10 +968,14 @@ static float compute_fraction_isotropic_2d_cpp(
             float dx = xpos - (a + edge_offsets[i][0]);
             float dy = ypos - (b + edge_offsets[i][1]);
 
-            if (periodic) {
-                if (dx > gridnum / 2.0f) dx -= gridnum;
-                if (dy > gridnum / 2.0f) dy -= gridnum;
-            }
+                if (periodic_x) {
+                    if (dx > gridnum_x / 2.0f) dx -= gridnum_x;
+                    if (dx < -gridnum_x / 2.0f) dx += gridnum_x;
+                }
+                if (periodic_y) {
+                    if (dy > gridnum_y / 2.0f) dy -= gridnum_y;
+                    if (dy < -gridnum_y / 2.0f) dy += gridnum_y;
+                }
 
             float r = std::sqrt(dx * dx + dy * dy);
             sum += 2.0f * kernel->weight(r, h);
@@ -864,10 +986,14 @@ static float compute_fraction_isotropic_2d_cpp(
                 float dx = xpos - (a + dx_c);
                 float dy = ypos - (b + dy_c);
 
-                if (periodic) {
-                    if (dx > gridnum / 2.0f) dx -= gridnum;
-                    if (dy > gridnum / 2.0f) dy -= gridnum;
-                }
+                    if (periodic_x) {
+                        if (dx > gridnum_x / 2.0f) dx -= gridnum_x;
+                        if (dx < -gridnum_x / 2.0f) dx += gridnum_x;
+                    }
+                    if (periodic_y) {
+                        if (dy > gridnum_y / 2.0f) dy -= gridnum_y;
+                        if (dy < -gridnum_y / 2.0f) dy += gridnum_y;
+                    }
 
                 float r = std::sqrt(dx * dx + dy * dy);
                 sum += kernel->weight(r, h);
@@ -887,33 +1013,41 @@ void isotropic_kernel_deposition_2d_cpp(
     const float* hsm,          // (N)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    float* fields,             // (gridnum, gridnum, num_fields)
-    float* weights             // (gridnum, gridnum)
+    float* fields,             // (gridnum_x, gridnum_y, num_fields)
+    float* weights             // (gridnum_x, gridnum_y)
 ) {
     auto kernel = create_kernel(kernel_name, 2, false);
-
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float max_cell = std::max({1.0f, std::abs(cellSize_x), std::abs(cellSize_y)});
+    if (std::abs(cellSize_x - cellSize_y) > 1e-6f * max_cell) {
+        throw std::invalid_argument("isotropic_kernel_deposition_2d_cpp requires uniform cell sizes");
+    }
+    const float cellSize = cellSize_x;
     const float support_factor = kernel->support();
 
-    const int stride_x = gridnum * num_fields;
+    const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
-    const int weight_stride_x = gridnum;
+    const int weight_stride_x = gridnum_y;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     for (int n = 0; n < N; ++n) {
         float hsn = hsm[n] / cellSize;
         float support = support_factor * hsn;
 
-        float xpos = (pos[2*n + 0] - extent_min) / cellSize;
-        float ypos = (pos[2*n + 1] - extent_min) / cellSize;
+        float xpos = pos[2 * n + 0] / cellSize;
+        float ypos = pos[2 * n + 1] / cellSize;
 
         int i = static_cast<int>(xpos);
         int j = static_cast<int>(ypos);
@@ -927,17 +1061,22 @@ void isotropic_kernel_deposition_2d_cpp(
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
                 float w = compute_fraction_isotropic_2d_cpp(
                     integration_method, xpos, ypos,
-                    a, b, gridnum, periodic, hsn, kernel.get()
+                    a, b, gridnum_x, gridnum_y, periodic, hsn, kernel.get()
                 );
 
                 if (w == 0.0f) continue;
 
                 int an = a;
                 int bn = b;
-                if (periodic) {
-                    an = apply_pbc(an, gridnum);
-                    bn = apply_pbc(bn, gridnum);
-                } else if (an < 0 || an >= gridnum || bn < 0 || bn >= gridnum) {
+                if (periodic_x) {
+                    an = apply_pbc(an, gridnum_x);
+                } else if (an < 0 || an >= gridnum_x) {
+                    continue;
+                }
+
+                if (periodic_y) {
+                    bn = apply_pbc(bn, gridnum_y);
+                } else if (bn < 0 || bn >= gridnum_y) {
                     continue;
                 }
 
@@ -966,23 +1105,32 @@ static float compute_fraction_isotropic_3d_cpp(
     int a,
     int b,
     int c,
-    int gridnum,
-    bool periodic,
+    int gridnum_x,
+    int gridnum_y,
+    int gridnum_z,
+    const bool* periodic,
     float h,
     SPHKernel* kernel
 ) {
     float sigma = kernel->normalization(h);
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+
+    auto wrap_axis = [&](float& delta, int gridnum, bool axis_flag) {
+        if (!axis_flag) return;
+        if (delta > gridnum / 2.0f) delta -= gridnum;
+        if (delta < -gridnum / 2.0f) delta += gridnum;
+    };
 
     if (method == "midpoint") {
         float dx = xpos - (a + 0.5f);
         float dy = ypos - (b + 0.5f);
         float dz = zpos - (c + 0.5f);
 
-        if (periodic) {
-            if (dx > gridnum / 2.0f) dx -= gridnum;
-            if (dy > gridnum / 2.0f) dy -= gridnum;
-            if (dz > gridnum / 2.0f) dz -= gridnum;
-        }
+        wrap_axis(dx, gridnum_x, periodic_x);
+        wrap_axis(dy, gridnum_y, periodic_y);
+        wrap_axis(dz, gridnum_z, periodic_z);
 
         float r = std::sqrt(dx * dx + dy * dy + dz * dz);
         return kernel->weight(r, h) * sigma;
@@ -999,12 +1147,9 @@ static float compute_fraction_isotropic_3d_cpp(
             float dx = xpos - (a + offsets[i][0]);
             float dy = ypos - (b + offsets[i][1]);
             float dz = zpos - (c + offsets[i][2]);
-
-            if (periodic) {
-                if (dx > gridnum / 2.0f) dx -= gridnum;
-                if (dy > gridnum / 2.0f) dy -= gridnum;
-                if (dz > gridnum / 2.0f) dz -= gridnum;
-            }
+            wrap_axis(dx, gridnum_x, periodic_x);
+            wrap_axis(dy, gridnum_y, periodic_y);
+            wrap_axis(dz, gridnum_z, periodic_z);
 
             float r = std::sqrt(dx * dx + dy * dy + dz * dz);
             sum += kernel->weight(r, h);
@@ -1020,11 +1165,9 @@ static float compute_fraction_isotropic_3d_cpp(
             float dx = xpos - (a + 0.5f);
             float dy = ypos - (b + 0.5f);
             float dz = zpos - (c + 0.5f);
-            if (periodic) {
-                if (dx > gridnum / 2.0f) dx -= gridnum;
-                if (dy > gridnum / 2.0f) dy -= gridnum;
-                if (dz > gridnum / 2.0f) dz -= gridnum;
-            }
+            wrap_axis(dx, gridnum_x, periodic_x);
+            wrap_axis(dy, gridnum_y, periodic_y);
+            wrap_axis(dz, gridnum_z, periodic_z);
             float r = std::sqrt(dx * dx + dy * dy + dz * dz);
             sum += 8.0f * kernel->weight(r, h);
         }
@@ -1038,11 +1181,9 @@ static float compute_fraction_isotropic_3d_cpp(
             float dx = xpos - (a + face_offsets[i][0]);
             float dy = ypos - (b + face_offsets[i][1]);
             float dz = zpos - (c + face_offsets[i][2]);
-            if (periodic) {
-                if (dx > gridnum / 2.0f) dx -= gridnum;
-                if (dy > gridnum / 2.0f) dy -= gridnum;
-                if (dz > gridnum / 2.0f) dz -= gridnum;
-            }
+            wrap_axis(dx, gridnum_x, periodic_x);
+            wrap_axis(dy, gridnum_y, periodic_y);
+            wrap_axis(dz, gridnum_z, periodic_z);
             float r = std::sqrt(dx * dx + dy * dy + dz * dz);
             sum += 4.0f * kernel->weight(r, h);
         }
@@ -1053,11 +1194,9 @@ static float compute_fraction_isotropic_3d_cpp(
                     float dx = xpos - (a + dx_c);
                     float dy = ypos - (b + dy_c);
                     float dz = zpos - (c + dz_c);
-                    if (periodic) {
-                        if (dx > gridnum / 2.0f) dx -= gridnum;
-                        if (dy > gridnum / 2.0f) dy -= gridnum;
-                        if (dz > gridnum / 2.0f) dz -= gridnum;
-                    }
+                    wrap_axis(dx, gridnum_x, periodic_x);
+                    wrap_axis(dy, gridnum_y, periodic_y);
+                    wrap_axis(dz, gridnum_z, periodic_z);
                     float r = std::sqrt(dx * dx + dy * dy + dz * dz);
                     sum += kernel->weight(r, h);
                 }
@@ -1077,36 +1216,48 @@ void isotropic_kernel_deposition_3d_cpp(
     const float* hsm,          // (N)
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    float* fields,             // (gridnum, gridnum, gridnum, num_fields)
-    float* weights             // (gridnum, gridnum, gridnum)
+    float* fields,             // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights             // (gridnum_x, gridnum_y, gridnum_z)
 ) {
     auto kernel = create_kernel(kernel_name, 3, false);
-
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float cellSize_z = boxsizes[2] / static_cast<float>(gridnum_z);
+    const float max_cell = std::max({1.0f, std::abs(cellSize_x), std::abs(cellSize_y), std::abs(cellSize_z)});
+    if (std::abs(cellSize_x - cellSize_y) > 1e-6f * max_cell ||
+        std::abs(cellSize_x - cellSize_z) > 1e-6f * max_cell) {
+        throw std::invalid_argument("isotropic_kernel_deposition_3d_cpp requires uniform cell sizes");
+    }
+    const float cellSize = cellSize_x;
     const float support_factor = kernel->support();
 
-    const int stride_x = gridnum * gridnum * num_fields;
-    const int stride_y = gridnum * num_fields;
+    const int stride_x = gridnum_y * gridnum_z * num_fields;
+    const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
-    const int weight_stride_x = gridnum * gridnum;
-    const int weight_stride_y = gridnum;
+    const int weight_stride_x = gridnum_y * gridnum_z;
+    const int weight_stride_y = gridnum_z;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     for (int n = 0; n < N; ++n) {
         float hsn = hsm[n] / cellSize;
         float support = support_factor * hsn;
 
-        float xpos = (pos[3*n + 0] - extent_min) / cellSize;
-        float ypos = (pos[3*n + 1] - extent_min) / cellSize;
-        float zpos = (pos[3*n + 2] - extent_min) / cellSize;
+        float xpos = pos[3 * n + 0] / cellSize;
+        float ypos = pos[3 * n + 1] / cellSize;
+        float zpos = pos[3 * n + 2] / cellSize;
 
         int i = static_cast<int>(xpos);
         int j = static_cast<int>(ypos);
@@ -1124,7 +1275,7 @@ void isotropic_kernel_deposition_3d_cpp(
                 for (int c = k - num_front; c <= k + num_back; ++c) {
                     float w = compute_fraction_isotropic_3d_cpp(
                         integration_method, xpos, ypos, zpos,
-                        a, b, c, gridnum, periodic, hsn, kernel.get()
+                        a, b, c, gridnum_x, gridnum_y, gridnum_z, periodic, hsn, kernel.get()
                     );
 
                     if (w == 0.0f) continue;
@@ -1132,11 +1283,21 @@ void isotropic_kernel_deposition_3d_cpp(
                     int an = a;
                     int bn = b;
                     int cn = c;
-                    if (periodic) {
-                        an = apply_pbc(an, gridnum);
-                        bn = apply_pbc(bn, gridnum);
-                        cn = apply_pbc(cn, gridnum);
-                    } else if (an < 0 || an >= gridnum || bn < 0 || bn >= gridnum || cn < 0 || cn >= gridnum) {
+                    if (periodic_x) {
+                        an = apply_pbc(an, gridnum_x);
+                    } else if (an < 0 || an >= gridnum_x) {
+                        continue;
+                    }
+
+                    if (periodic_y) {
+                        bn = apply_pbc(bn, gridnum_y);
+                    } else if (bn < 0 || bn >= gridnum_y) {
+                        continue;
+                    }
+
+                    if (periodic_z) {
+                        cn = apply_pbc(cn, gridnum_z);
+                    } else if (cn < 0 || cn >= gridnum_z) {
                         continue;
                     }
 
@@ -1166,22 +1327,27 @@ static float compute_fraction_anisotropic_2d_cpp(
     float ypos,
     int a,
     int b,
-    int gridnum,
-    bool periodic,
+    int gridnum_x,
+    int gridnum_y,
+    const bool* periodic,
     SPHKernel* kernel
 ) {
     float detH = vals_gu[0] * vals_gu[1];
     float sigma = kernel->normalization(detH);
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
 
-    auto wrap = [&](float& d) {
-        if (d >  gridnum * 0.5f) d -= gridnum;
-        if (d < -gridnum * 0.5f) d += gridnum;
+    auto wrap_axis = [&](float& delta, int gridnum, bool axis_flag) {
+        if (!axis_flag) return;
+        if (delta > gridnum * 0.5f) delta -= gridnum;
+        if (delta < -gridnum * 0.5f) delta += gridnum;
     };
 
     auto eval = [&](float ox, float oy) {
         float dx = xpos - (a + ox);
         float dy = ypos - (b + oy);
-        if (periodic) { wrap(dx); wrap(dy); }
+        wrap_axis(dx, gridnum_x, periodic_x);
+        wrap_axis(dy, gridnum_y, periodic_y);
 
         float xi1 = (vecs[0] * dx + vecs[1] * dy) / vals_gu[0];
         float xi2 = (vecs[2] * dx + vecs[3] * dy) / vals_gu[1];
@@ -1233,10 +1399,9 @@ void anisotropic_kernel_deposition_2d_cpp(
     const float* hmat_eigvals,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     float* fields,
@@ -1244,15 +1409,25 @@ void anisotropic_kernel_deposition_2d_cpp(
 ) {
     auto kernel = create_kernel(kernel_name, 2, true);
 
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float max_cell = std::max({1.0f, std::abs(cellSize_x), std::abs(cellSize_y)});
+    if (std::abs(cellSize_x - cellSize_y) > 1e-6f * max_cell) {
+        throw std::invalid_argument("anisotropic_kernel_deposition_2d_cpp requires uniform cell sizes");
+    }
+    const float cellSize = cellSize_x;
     const float support_factor = kernel->support();
 
-    const int stride_x = gridnum * num_fields;
+    const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
-    const int weight_stride_x = gridnum;
+    const int weight_stride_x = gridnum_y;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     for (int n = 0; n < N; ++n) {
         const float* vecs = &hmat_eigvecs[n * 4];
@@ -1261,8 +1436,8 @@ void anisotropic_kernel_deposition_2d_cpp(
         float vals_gu[2] = { vals[0] / cellSize, vals[1] / cellSize };
         float krs = support_factor * std::max({ vals_gu[0], vals_gu[1] });
 
-        float xpos = (pos[2 * n + 0] - extent_min) / cellSize;
-        float ypos = (pos[2 * n + 1] - extent_min) / cellSize;
+        float xpos = pos[2 * n + 0] / cellSize;
+        float ypos = pos[2 * n + 1] / cellSize;
 
         int i = static_cast<int>(xpos);
         int j = static_cast<int>(ypos);
@@ -1276,17 +1451,24 @@ void anisotropic_kernel_deposition_2d_cpp(
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
                 float fraction = compute_fraction_anisotropic_2d_cpp(
                     integration_method, vecs, vals_gu,
-                    xpos, ypos, a, b, gridnum, periodic, kernel.get()
+                    xpos, ypos, a, b,
+                    gridnum_x, gridnum_y,
+                    periodic, kernel.get()
                 );
 
                 if (fraction == 0.0f) continue;
 
                 int an = a;
                 int bn = b;
-                if (periodic) {
-                    an = apply_pbc(an, gridnum);
-                    bn = apply_pbc(bn, gridnum);
-                } else if (an < 0 || an >= gridnum || bn < 0 || bn >= gridnum) {
+                if (periodic_x) {
+                    an = apply_pbc(an, gridnum_x);
+                } else if (an < 0 || an >= gridnum_x) {
+                    continue;
+                }
+
+                if (periodic_y) {
+                    bn = apply_pbc(bn, gridnum_y);
+                } else if (bn < 0 || bn >= gridnum_y) {
                     continue;
                 }
 
@@ -1317,23 +1499,31 @@ static float compute_fraction_anisotropic_3d_cpp(
     int a,
     int b,
     int c,
-    int gridnum,
-    bool periodic,
+    int gridnum_x,
+    int gridnum_y,
+    int gridnum_z,
+    const bool* periodic,
     SPHKernel* kernel
 ) {
     float detH = vals_gu[0] * vals_gu[1] * vals_gu[2];
     float sigma = kernel->normalization(detH);
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
 
-    auto wrap = [&](float& d) {
-        if (d >  gridnum * 0.5f) d -= gridnum;
-        if (d < -gridnum * 0.5f) d += gridnum;
+    auto wrap_axis = [&](float& delta, int gridnum, bool axis_flag) {
+        if (!axis_flag) return;
+        if (delta > gridnum * 0.5f) delta -= gridnum;
+        if (delta < -gridnum * 0.5f) delta += gridnum;
     };
 
     auto eval = [&](float ox, float oy, float oz) {
         float dx = xpos - (a + ox);
         float dy = ypos - (b + oy);
         float dz = zpos - (c + oz);
-        if (periodic) { wrap(dx); wrap(dy); wrap(dz); }
+        wrap_axis(dx, gridnum_x, periodic_x);
+        wrap_axis(dy, gridnum_y, periodic_y);
+        wrap_axis(dz, gridnum_z, periodic_z);
 
         float xi1 = (vecs[0] * dx + vecs[1] * dy + vecs[2] * dz) / vals_gu[0];
         float xi2 = (vecs[3] * dx + vecs[4] * dy + vecs[5] * dz) / vals_gu[1];
@@ -1365,11 +1555,13 @@ static float compute_fraction_anisotropic_3d_cpp(
                     sum += eval(i, j, k);
 
         // edge midpoints (12)
+        /*
         const int e[12][3] = {
             {0,0,1},{0,1,0},{1,0,0},{1,1,0},
             {1,0,1},{0,1,1},{0,0,1},{1,1,1},
             {0,1,0},{1,0,0},{0,0,0},{1,1,1}
         };
+        */
 
         // simpler explicit loops
         for (int i = 0; i <= 1; ++i)
@@ -1403,10 +1595,9 @@ void anisotropic_kernel_deposition_3d_cpp(
     const float* hmat_eigvals,
     int N,
     int num_fields,
-    float extent_min,
-    float extent_max,
-    int gridnum,
-    bool periodic,
+    const float* boxsizes,
+    const int* gridnums,
+    const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     float* fields,
@@ -1414,17 +1605,31 @@ void anisotropic_kernel_deposition_3d_cpp(
 ) {
     auto kernel = create_kernel(kernel_name, 3, true);
 
-    const float cellSize = (extent_max - extent_min) / static_cast<float>(gridnum);
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+    const bool periodic_x = axis_periodic(periodic, 0);
+    const bool periodic_y = axis_periodic(periodic, 1);
+    const bool periodic_z = axis_periodic(periodic, 2);
+    const float cellSize_x = boxsizes[0] / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsizes[1] / static_cast<float>(gridnum_y);
+    const float cellSize_z = boxsizes[2] / static_cast<float>(gridnum_z);
+    const float max_cell = std::max({1.0f, std::abs(cellSize_x), std::abs(cellSize_y), std::abs(cellSize_z)});
+    if (std::abs(cellSize_x - cellSize_y) > 1e-6f * max_cell ||
+        std::abs(cellSize_x - cellSize_z) > 1e-6f * max_cell) {
+        throw std::invalid_argument("anisotropic_kernel_deposition_3d_cpp requires uniform cell sizes");
+    }
+    const float cellSize = cellSize_x;
     const float support_factor = kernel->support();
 
-    const int stride_x = gridnum * gridnum * num_fields;
-    const int stride_y = gridnum * num_fields;
+    const int stride_x = gridnum_y * gridnum_z * num_fields;
+    const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
-    const int weight_stride_x = gridnum * gridnum;
-    const int weight_stride_y = gridnum;
+    const int weight_stride_x = gridnum_y * gridnum_z;
+    const int weight_stride_y = gridnum_z;
 
-    std::memset(fields,  0, sizeof(float) * gridnum * gridnum * gridnum * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum * gridnum * gridnum);
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     for (int n = 0; n < N; ++n) {
         const float* vecs = &hmat_eigvecs[n * 9];
@@ -1433,9 +1638,9 @@ void anisotropic_kernel_deposition_3d_cpp(
         float vals_gu[3] = { vals[0] / cellSize, vals[1] / cellSize, vals[2] / cellSize };
         float krs = support_factor * std::max({ vals_gu[0], vals_gu[1], vals_gu[2] });
 
-        float xpos = (pos[3 * n + 0] - extent_min) / cellSize;
-        float ypos = (pos[3 * n + 1] - extent_min) / cellSize;
-        float zpos = (pos[3 * n + 2] - extent_min) / cellSize;
+        float xpos = pos[3 * n + 0] / cellSize;
+        float ypos = pos[3 * n + 1] / cellSize;
+        float zpos = pos[3 * n + 2] / cellSize;
 
         int i = static_cast<int>(xpos);
         int j = static_cast<int>(ypos);
@@ -1453,7 +1658,7 @@ void anisotropic_kernel_deposition_3d_cpp(
                 for (int c = k - num_front; c <= k + num_back; ++c) {
                     float fraction = compute_fraction_anisotropic_3d_cpp(
                         integration_method, vecs, vals_gu,
-                        xpos, ypos, zpos, a, b, c, gridnum, periodic, kernel.get()
+                        xpos, ypos, zpos, a, b, c, gridnum_x, gridnum_y, gridnum_z, periodic, kernel.get()
                     );
 
                     if (fraction == 0.0f) continue;
@@ -1461,11 +1666,21 @@ void anisotropic_kernel_deposition_3d_cpp(
                     int an = a;
                     int bn = b;
                     int cn = c;
-                    if (periodic) {
-                        an = apply_pbc(an, gridnum);
-                        bn = apply_pbc(bn, gridnum);
-                        cn = apply_pbc(cn, gridnum);
-                    } else if (an < 0 || an >= gridnum || bn < 0 || bn >= gridnum || cn < 0 || cn >= gridnum) {
+                    if (periodic_x) {
+                        an = apply_pbc(an, gridnum_x);
+                    } else if (an < 0 || an >= gridnum_x) {
+                        continue;
+                    }
+
+                    if (periodic_y) {
+                        bn = apply_pbc(bn, gridnum_y);
+                    } else if (bn < 0 || bn >= gridnum_y) {
+                        continue;
+                    }
+
+                    if (periodic_z) {
+                        cn = apply_pbc(cn, gridnum_z);
+                    } else if (cn < 0 || cn >= gridnum_z) {
                         continue;
                     }
 
