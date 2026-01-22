@@ -41,6 +41,9 @@ class MainClass:
 		self.num_neighbors = num_neighbors
 		self.mode = mode
 
+		if self.verbose:
+			print(f"Computing smoothing lengths/tensors using mode='{mode}' with num_neighbors={num_neighbors}")
+
 		if mode == 'adaptive':
 			self.hsm, self.nn_inds, self.tree = compute_pcellsize_half(self.pos,
 																   num_neighbors=self.num_neighbors,
@@ -60,7 +63,7 @@ class MainClass:
 																			   boxsize=self.boxsize
 																			  )
 		else:
-			raise AssertionError(f"'mode' must be either 'isotropic' or 'anisotropic' but found {mode}")
+			raise AssertionError(f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {mode}")
 
 
 	def compute_density(self, 
@@ -95,8 +98,8 @@ class MainClass:
 		
 		if not hasattr(self, 'tree'):
 			print("Building kd-tree from tracer particles")
+			raise AttributeError("You must first compute nearest neighbors by calling 'compute_smoothing_lengths' before interpolating fields")
 
-		# TODO: need to check the paper again for the anisotropic case! so far this is only for isotropic case.
 		if not hasattr(self, 'density'):
 			print("Density not found, computing density first...")
 			self.compute_density(kernel)
@@ -104,9 +107,7 @@ class MainClass:
 
 		# compute nearest neighbors for interpolation positions
 		# TODO: check whether the routine here is correct mathematically
-		nn_dists, nn_inds = self.tree.query(interpolation_positions, 
-									  k=self.num_neighbors, 
-									  workers=-1)
+		nn_dists, nn_inds = self.tree.query(interpolation_positions, k=self.num_neighbors, workers=-1)
 		
 		if compute_gradients:
 			return self._interpolate_grad_fields(interpolation_positions, fields, nn_dists, nn_inds, kernel)
@@ -168,6 +169,8 @@ class MainClass:
 					 kernel: str = 'quintic',
 					 integration: str = 'midpoint',
 					 use_python: bool = False,
+					 use_openmp: bool = True,
+					 omp_threads: Optional[int] = None,
 					 ):
 		"""Deposit particle fields onto a structured grid using the requested scheme.
 
@@ -191,7 +194,20 @@ class MainClass:
 		:type integration: str
 		:param use_python: Use Python backend instead of C++ backend (this is mainly for debugging purposes).
 		:type use_python: bool
+		:param use_openmp: Enable OpenMP parallelism for the C++ backend. Ignored when ``use_python=True``.
+		:type use_openmp: bool
+		:param omp_threads: Optional positive integer overriding the number of OpenMP threads. ``None`` keeps the runtime default.
+		:type omp_threads: Optional[int]
 		"""
+
+		if omp_threads is not None:
+			if not isinstance(omp_threads, (int, np.integer)):
+				raise TypeError("'omp_threads' must be an integer if provided")
+			if omp_threads <= 0:
+				raise ValueError("'omp_threads' must be > 0 when specified")
+			omp_threads_value = int(omp_threads)
+		else:
+			omp_threads_value = 0
 
 		# deposition grid dimension is coordinate dimension unless projecting to 2D plane
 		deposition_dim = self.pos.shape[1] if plane_projection is None else 2
@@ -301,6 +317,13 @@ class MainClass:
 			h_eigvals_temp = eigvals_source[final_mask]
 			h_eigvecs_temp = eigvecs_source[final_mask]
 
+		if self.verbose and not use_python:
+			if use_openmp:
+				thread_desc = "runtime default" if omp_threads_value == 0 else str(omp_threads_value)
+				print(f"[sph_lib] OpenMP threads: {thread_desc}")
+			else:
+				print("[sph_lib] OpenMP disabled for this deposition call")
+
 		res = self._deposit_to_grid(
 					positions=pos_temp,
 					quantities=fields_temp,
@@ -316,6 +339,8 @@ class MainClass:
 					use_python=use_python,
 					kernel=kernel,
 					integration=integration,
+					use_openmp=use_openmp,
+					omp_threads=omp_threads_value,
 					)
 		return res
 
@@ -336,6 +361,8 @@ class MainClass:
 		use_python: bool,
 		kernel: str,
 		integration: str,
+		use_openmp: bool,
+		omp_threads: Optional[int],
 	) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
 		"""Dispatch particle-to-grid deposition to the selected backend.
 
@@ -355,6 +382,10 @@ class MainClass:
 			Per-axis flags.
 		method
 			Name of the deposition method (e.g., "ngp", "cic", "tsc").
+		use_openmp
+			Enable OpenMP parallelism for the compiled backend branch.
+		omp_threads
+			Optional positive integer overriding the OpenMP thread count (0 keeps the runtime default).
 
 		Returns
 		-------
@@ -366,8 +397,9 @@ class MainClass:
 		# select the deposition function based on the method, dim and use_python
 		namespace = pyfunc if use_python else cppfunc
 		func = getattr(namespace, f"{method}_{dim}d")
-		# print me the function name here for debugging
-		print(f"Using deposition function: {func.__name__}")
+		
+		if self.verbose:
+			print(f"Using deposition function: {func.__name__}")
 
 		if "adaptive" in method:
 			args = (
@@ -413,7 +445,11 @@ class MainClass:
 				periodic,
 			)
 
-		fields, weights = func(*args)
+		if use_python:
+			fields, weights = func(*args)
+		else:
+			threads_arg = 0 if omp_threads is None else int(omp_threads)
+			fields, weights = func(*args, use_openmp, threads_arg)
 
 		# divide averaged fields by weight
 		for i in range(len(averaged)):

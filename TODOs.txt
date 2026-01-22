@@ -1,9 +1,10 @@
-TODO's
+**TODO's**
 
 Interpolation
 [ ] double check the h_ij computation for the isotropic case
 [ ] derive/implent with the paper the formulas for the anisotropic case
   (I guess since the metric is deformed, the distance computations need to change)
+[ ] port functionality to cpp if possible
 [ ] rewrite test notebook
 
 Deposition
@@ -17,16 +18,16 @@ Deposition
   (e.g. if particle is enclosed in top right of cell, then estimating the integral at the midpoint is wrong)
 
 Both
-[ ] test openMP acceleration
-[ ] add verbosity to the whole class
+[ ] test / debug openMP acceleration
+[+] add verbosity to the whole class
 
 
-Features (so I don't forget)
+**Features** (so I don't forget)
 
 Interpolation
-+ many kernels
++ many kernels possible
 
 Deposition
-+ many kernels
-+ per axis periodic boundary conditions settings
++ many kernels possible
++ per axis periodic boundary conditions settings possible
 + non-uniform grids: varying pixel / voxel sizes for each axis possible

@@ -5,6 +5,9 @@
 #include <array>
 #include <string>
 #include <stdexcept>
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
 #include "kernels.h"
 #include "functions.h"
 
@@ -22,6 +25,70 @@ inline bool axis_periodic(const bool* periodic, int axis) {
 	return periodic ? periodic[axis] : false;
 }
 
+// -----------------------------------------------------------------------------
+// OpenMP helpers
+// -----------------------------------------------------------------------------
+
+inline bool allow_openmp(bool requested) {
+#if defined(_OPENMP)
+    return requested;
+#else
+    (void)requested;
+    return false;
+#endif
+}
+
+template <typename Func>
+inline void for_each_particle(int N, bool parallel, int threads, const Func& func) {
+#if defined(_OPENMP)
+    if (parallel) {
+        if (threads > 0) {
+#pragma omp parallel for schedule(static) num_threads(threads)
+            for (int n = 0; n < N; ++n) {
+                func(n);
+            }
+        } else {
+#pragma omp parallel for schedule(static)
+            for (int n = 0; n < N; ++n) {
+                func(n);
+            }
+        }
+        return;
+    }
+#else
+    (void)threads;
+#endif
+    for (int n = 0; n < N; ++n) {
+        func(n);
+    }
+}
+
+inline void accumulate(float* array, int idx, float value, bool parallel) {
+#if defined(_OPENMP)
+    if (parallel) {
+#pragma omp atomic update
+        array[idx] += value;
+        return;
+    }
+#endif
+    array[idx] += value;
+}
+
+inline void accumulate_fields(float* fields,
+                              int base_idx,
+                              const float* particle_values,
+                              int num_fields,
+                              float scale,
+                              bool parallel) {
+    for (int f = 0; f < num_fields; ++f) {
+        accumulate(fields, base_idx + f, scale * particle_values[f], parallel);
+    }
+}
+
+inline void accumulate_weight(float* weights, int idx, float value, bool parallel) {
+    accumulate(weights, idx, value, parallel);
+}
+
 // =============================================================================
 // pure C++ deposition functions
 // =============================================================================
@@ -34,6 +101,8 @@ void ngp_2d_cpp(
     const float* boxsizes,
     const int* gridnums,
     const bool* periodic,
+    bool use_openmp,
+    int omp_threads,
     float* fields,               // (gridnum_x, gridnum_y, num_fields)
     float* weights               // (gridnum_x, gridnum_y)
 ) {
@@ -50,27 +119,26 @@ void ngp_2d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
-    for (int n = 0; n < N; ++n) {
-        // map positions to grid indices, mimicking Python astype(int)
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         int ix = static_cast<int>(pos[2 * n + 0] * inv_dx_x);
         int iy = static_cast<int>(pos[2 * n + 1] * inv_dx_y);
 
         if (ix < 0 || ix >= gridnum_x) {
-            continue;
+            return;
         }
         if (iy < 0 || iy >= gridnum_y) {
-            continue;
+            return;
         }
 
         const int base_idx   = ix * field_stride_x + iy * field_stride_y;
         const int weight_idx = ix * gridnum_y + iy;
+        const float* particle = quantities + n * num_fields;
 
-        for (int f = 0; f < num_fields; ++f) {
-            fields[base_idx + f] += quantities[n * num_fields + f];
-        }
-
-        weights[weight_idx] += 1.0f; // matches Python increment
-    }
+        accumulate_fields(fields, base_idx, particle, num_fields, 1.0f, parallel);
+        accumulate_weight(weights, weight_idx, 1.0f, parallel);
+    });
 }
 
 
@@ -82,6 +150,8 @@ void ngp_3d_cpp(
     const float* boxsizes,
     const int* gridnums,
     const bool* periodic,
+    bool use_openmp,
+    int omp_threads,
     float* fields,               // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights               // (gridnum_x, gridnum_y, gridnum_z)
 ) {
@@ -101,32 +171,32 @@ void ngp_3d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
-    for (int n = 0; n < N; ++n) {
-        // map positions to grid indices, mimicking Python astype(int)
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         int ix = static_cast<int>(pos[3 * n + 0] * inv_dx_x);
         int iy = static_cast<int>(pos[3 * n + 1] * inv_dx_y);
         int iz = static_cast<int>(pos[3 * n + 2] * inv_dx_z);
 
         if (ix < 0 || ix >= gridnum_x) {
-            continue;
+            return;
         }
 
         if (iy < 0 || iy >= gridnum_y) {
-            continue;
+            return;
         }
 
         if (iz < 0 || iz >= gridnum_z) {
-            continue;
+            return;
         }
 
         const int base_idx   = ix * field_stride_x + iy * field_stride_y + iz * field_stride_z;
         const int weight_idx = ix * gridnum_y * gridnum_z + iy * gridnum_z + iz;
+        const float* particle = quantities + n * num_fields;
 
-        for (int f = 0; f < num_fields; ++f) {
-            fields[base_idx + f] += quantities[n * num_fields + f];
-        }
-        weights[weight_idx] += 1.0f; // matches Python increment
-    }
+        accumulate_fields(fields, base_idx, particle, num_fields, 1.0f, parallel);
+        accumulate_weight(weights, weight_idx, 1.0f, parallel);
+    });
 }
 
 
@@ -138,6 +208,8 @@ void cic_2d_cpp(
     const float* boxsizes,
     const int* gridnums,
     const bool* periodic,
+    bool use_openmp,
+    int omp_threads,
     float* fields,               // (gridnum_x, gridnum_y, num_fields)
     float* weights               // (gridnum_x, gridnum_y)
 ) {
@@ -156,14 +228,16 @@ void cic_2d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float xpos = pos[2 * n + 0] * inv_dx_x;
         float ypos = pos[2 * n + 1] * inv_dx_y;
 
-        // Skip particles completely outside the domain
         if ((!periodic_x && (xpos < 0.0f || xpos >= gridnum_x)) ||
-            (!periodic_y && (ypos < 0.0f || ypos >= gridnum_y)))
-            continue;
+            (!periodic_y && (ypos < 0.0f || ypos >= gridnum_y))) {
+            return;
+        }
 
         int i0 = static_cast<int>(std::floor(xpos));
         int j0 = static_cast<int>(std::floor(ypos));
@@ -175,8 +249,9 @@ void cic_2d_cpp(
         float dx_ = 1.0f - dx;
         float dy_ = 1.0f - dy;
         if ((!periodic_x && (xpos < 0.5f || xpos > gridnum_x - 0.5f)) ||
-            (!periodic_y && (ypos < 0.5f || ypos > gridnum_y - 0.5f)))
-            continue;
+            (!periodic_y && (ypos < 0.5f || ypos > gridnum_y - 0.5f))) {
+            return;
+        }
 
         if (periodic_x) {
             i0 = apply_pbc(i0, gridnum_x);
@@ -187,11 +262,11 @@ void cic_2d_cpp(
             j1 = apply_pbc(j1, gridnum_y);
         }
 
-        // weights for bilinear stencil
         float w00 = dx_ * dy_;
         float w10 = dx  * dy_;
         float w01 = dx_ * dy;
         float w11 = dx  * dy;
+        const float* particle = quantities + n * num_fields;
 
         auto deposit = [&](int ix, int jy, float w) {
             if (!periodic_x && (ix < 0 || ix >= gridnum_x)) return;
@@ -199,18 +274,15 @@ void cic_2d_cpp(
 
             int base_idx   = ix * field_stride_x + jy * field_stride_y;
             int weight_idx = ix * gridnum_y + jy;
-
-            for (int f = 0; f < num_fields; ++f) {
-                fields[base_idx + f] += w * quantities[n * num_fields + f];
-            }
-            weights[weight_idx] += w;
+            accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+            accumulate_weight(weights, weight_idx, w, parallel);
         };
 
         deposit(i0, j0, w00);
         deposit(i1, j0, w10);
         deposit(i0, j1, w01);
         deposit(i1, j1, w11);
-    }
+    });
 }
 
 
@@ -222,6 +294,8 @@ void cic_3d_cpp(
     const float* boxsizes,
     const int* gridnums,
     const bool* periodic,
+    bool use_openmp,
+    int omp_threads,
     float* fields,           // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights           // (gridnum_x, gridnum_y, gridnum_z)
 ) {
@@ -244,18 +318,19 @@ void cic_3d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float xpos = pos[3 * n + 0] * inv_dx_x;
         float ypos = pos[3 * n + 1] * inv_dx_y;
         float zpos = pos[3 * n + 2] * inv_dx_z;
 
-        // Skip particles completely outside the domain (non-periodic)
         if ((!periodic_x && (xpos < 0.0f || xpos >= gridnum_x)) ||
             (!periodic_y && (ypos < 0.0f || ypos >= gridnum_y)) ||
-            (!periodic_z && (zpos < 0.0f || zpos >= gridnum_z)))
-            continue;
+            (!periodic_z && (zpos < 0.0f || zpos >= gridnum_z))) {
+            return;
+        }
 
-        // Base indices and fractional distances
         int i0 = static_cast<int>(std::floor(xpos));
         int j0 = static_cast<int>(std::floor(ypos));
         int k0 = static_cast<int>(std::floor(zpos));
@@ -283,7 +358,6 @@ void cic_3d_cpp(
             k1 = apply_pbc(k1, gridnum_z);
         }
 
-        // Trilinear weights
         float w000 = dx_ * dy_ * dz_;
         float w100 = dx  * dy_ * dz_;
         float w010 = dx_ * dy  * dz_;
@@ -292,8 +366,8 @@ void cic_3d_cpp(
         float w101 = dx  * dy_ * dz;
         float w011 = dx_ * dy  * dz;
         float w111 = dx  * dy  * dz;
+        const float* particle = quantities + n * num_fields;
 
-        // Deposit lambda
         auto deposit = [&](int ix, int jy, int kz, float w) {
             if (!periodic_x && (ix < 0 || ix >= gridnum_x)) return;
             if (!periodic_y && (jy < 0 || jy >= gridnum_y)) return;
@@ -301,14 +375,10 @@ void cic_3d_cpp(
 
             int base_idx   = ix * field_stride_x + jy * field_stride_y + kz * field_stride_z;
             int weight_idx = ix * gridnum_y * gridnum_z + jy * gridnum_z + kz;
-
-            for (int f = 0; f < num_fields; ++f) {
-                fields[base_idx + f] += w * quantities[n * num_fields + f];
-            }
-            weights[weight_idx] += w;
+            accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+            accumulate_weight(weights, weight_idx, w, parallel);
         };
 
-        // Deposit to 8 surrounding grid points
         deposit(i0, j0, k0, w000);
         deposit(i1, j0, k0, w100);
         deposit(i0, j1, k0, w010);
@@ -317,7 +387,7 @@ void cic_3d_cpp(
         deposit(i1, j0, k1, w101);
         deposit(i0, j1, k1, w011);
         deposit(i1, j1, k1, w111);
-    }
+    });
 }
 
 void cic_2d_adaptive_cpp(
@@ -329,6 +399,8 @@ void cic_2d_adaptive_cpp(
     const int* gridnums,
     const bool* periodic,
     const float* pcellsizesHalf, // (N)
+    bool use_openmp,
+    int omp_threads,
     float* fields,            // (gridnum_x, gridnum_y, num_fields)
     float* weights            // (gridnum_x, gridnum_y)
 ) {
@@ -347,7 +419,9 @@ void cic_2d_adaptive_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float pcs_x = pcellsizesHalf[n] * inv_dx_x;
         float pcs_y = pcellsizesHalf[n] * inv_dx_y;
         float V = (2.0f * pcs_x) * (2.0f * pcs_y);
@@ -365,6 +439,7 @@ void cic_2d_adaptive_cpp(
 
         float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
         float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
+        const float* particle = quantities + n * num_fields;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
@@ -393,14 +468,11 @@ void cic_2d_adaptive_cpp(
 
                 int base_idx = an * stride_x + bn * stride_y;
                 int weight_idx = an * weight_stride_x + bn;
-
-                for (int f = 0; f < num_fields; ++f) {
-                    fields[base_idx + f] += fraction * quantities[n*num_fields + f];
-                }
-                weights[weight_idx] += fraction;
+                accumulate_fields(fields, base_idx, particle, num_fields, fraction, parallel);
+                accumulate_weight(weights, weight_idx, fraction, parallel);
             }
         }
-    }
+    });
 }
 
 void cic_3d_adaptive_cpp(
@@ -412,6 +484,8 @@ void cic_3d_adaptive_cpp(
     const int* gridnums,
     const bool* periodic,
     const float* pcellsizesHalf, // (N)
+    bool use_openmp,
+    int omp_threads,
     float* fields,            // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights            // (gridnum_x, gridnum_y, gridnum_z)
 ) {
@@ -437,7 +511,9 @@ void cic_3d_adaptive_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float pcs_x = pcellsizesHalf[n] * inv_dx_x;
         float pcs_y = pcellsizesHalf[n] * inv_dx_y;
         float pcs_z = pcellsizesHalf[n] * inv_dx_z;
@@ -461,6 +537,7 @@ void cic_3d_adaptive_cpp(
         float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
         float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
         float c5 = zpos - pcs_z, c6 = zpos + pcs_z;
+        const float* particle = quantities + n * num_fields;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
@@ -498,15 +575,12 @@ void cic_3d_adaptive_cpp(
 
                     int base_idx = an * stride_x + bn * stride_y + cn * stride_z;
                     int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn * weight_stride_z;
-
-                    for (int f = 0; f < num_fields; ++f) {
-                        fields[base_idx + f] += fraction * quantities[n*num_fields + f];
-                    }
-                    weights[weight_idx] += fraction;
+                    accumulate_fields(fields, base_idx, particle, num_fields, fraction, parallel);
+                    accumulate_weight(weights, weight_idx, fraction, parallel);
                 }
             }
         }
-    }
+    });
 }
 
 
@@ -527,6 +601,8 @@ void tsc_2d_cpp(
     const float* boxsizes,
     const int* gridnums,
     const bool* periodic,
+    bool use_openmp,
+    int omp_threads,
     float* fields,           // (gridnum_x, gridnum_y, num_fields)
     float* weights           // (gridnum_x, gridnum_y)
 ) {
@@ -548,8 +624,9 @@ void tsc_2d_cpp(
     // Neighbor offsets
     const int offsets[3] = {-1, 0, 1};
 
-    for (int n = 0; n < N; ++n) {
-        // Convert particle position to grid coordinates
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float xpos = pos[2 * n + 0] * inv_dx_x;
         float ypos = pos[2 * n + 1] * inv_dx_y;
 
@@ -559,12 +636,11 @@ void tsc_2d_cpp(
         float dx = xpos - i_base;
         float dy = ypos - j_base;
 
-        // Compute TSC weights along each axis
         float wx[3], wy[3];
         tsc_weights(dx, wx);
         tsc_weights(dy, wy);
+        const float* particle = quantities + n * num_fields;
 
-        // Loop over neighbor offsets
         for (int dx_i = 0; dx_i < 3; ++dx_i) {
             for (int dy_i = 0; dy_i < 3; ++dy_i) {
                 int ix = i_base + offsets[dx_i];
@@ -587,14 +663,11 @@ void tsc_2d_cpp(
 
                 int base_idx   = ix * stride_x + iy * stride_y;
                 int weight_idx = ix * gridnum_y + iy;
-
-                for (int f = 0; f < num_fields; ++f) {
-                    fields[base_idx + f] += w * quantities[n * num_fields + f];
-                }
-                weights[weight_idx] += w;
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
-    }
+    });
 }
 
 void tsc_3d_cpp(
@@ -605,6 +678,8 @@ void tsc_3d_cpp(
     const float* boxsizes,
     const int* gridnums,
     const bool* periodic,
+    bool use_openmp,
+    int omp_threads,
     float* fields,           // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights           // (gridnum_x, gridnum_y, gridnum_z)
 ) {
@@ -630,8 +705,9 @@ void tsc_3d_cpp(
     // Neighbor offsets
     const int offsets[3] = {-1, 0, 1};
 
-    for (int n = 0; n < N; ++n) {
-        // Convert particle position to grid coordinates
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float xpos = pos[3 * n + 0] * inv_dx_x;
         float ypos = pos[3 * n + 1] * inv_dx_y;
         float zpos = pos[3 * n + 2] * inv_dx_z;
@@ -644,13 +720,12 @@ void tsc_3d_cpp(
         float dy = ypos - j_base;
         float dz = zpos - k_base;
 
-        // Compute TSC weights along each axis
         float wx[3], wy[3], wz[3];
         tsc_weights(dx, wx);
         tsc_weights(dy, wy);
         tsc_weights(dz, wz);
+        const float* particle = quantities + n * num_fields;
 
-        // Loop over 3×3×3 neighbors
         for (int dx_i = 0; dx_i < 3; ++dx_i) {
             for (int dy_i = 0; dy_i < 3; ++dy_i) {
                 for (int dz_i = 0; dz_i < 3; ++dz_i) {
@@ -679,15 +754,12 @@ void tsc_3d_cpp(
 
                     int base_idx   = ix * stride_x + iy * stride_y + iz * stride_z;
                     int weight_idx = ix * gridnum_y * gridnum_z + iy * gridnum_z + iz;
-
-                    for (int f = 0; f < num_fields; ++f) {
-                        fields[base_idx + f] += w * quantities[n * num_fields + f];
-                    }
-                    weights[weight_idx] += w;
+                    accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                    accumulate_weight(weights, weight_idx, w, parallel);
                 }
             }
         }
-    }
+    });
 }
 
 
@@ -723,6 +795,8 @@ void tsc_2d_adaptive_cpp(
     const int* gridnums,
     const bool* periodic,
     const float* pcellsizesHalf, // (N)
+    bool use_openmp,
+    int omp_threads,
     float* fields,           // (gridnum_x, gridnum_y, num_fields)
     float* weights           // (gridnum_x, gridnum_y)
 ) {
@@ -743,7 +817,9 @@ void tsc_2d_adaptive_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float x = pos[2 * n + 0] * inv_dx_x;
         float y = pos[2 * n + 1] * inv_dx_y;
         float h_x = pcellsizesHalf[n] * inv_dx_x;
@@ -755,6 +831,7 @@ void tsc_2d_adaptive_cpp(
         int i_max = static_cast<int>(std::ceil(x + support_x));
         int j_min = static_cast<int>(std::floor(y - support_y));
         int j_max = static_cast<int>(std::ceil(y + support_y));
+        const float* particle = quantities + n * num_fields;
 
         for (int i = i_min; i <= i_max; ++i) {
             int ii = i;
@@ -775,14 +852,11 @@ void tsc_2d_adaptive_cpp(
                 float w = wx * wy;
                 int base_idx = ii * stride_x + jj * stride_y;
                 int weight_idx = ii * weight_stride_x + jj * weight_stride_y;
-
-                for (int f = 0; f < num_fields; ++f) {
-                    fields[base_idx + f] += w * quantities[n*num_fields + f];
-                }
-                weights[weight_idx] += w;
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
-    }
+    });
 }
 
 void tsc_3d_adaptive_cpp(
@@ -794,6 +868,8 @@ void tsc_3d_adaptive_cpp(
     const int* gridnums,
     const bool* periodic,
     const float* pcellsizesHalf, // (N)
+    bool use_openmp,
+    int omp_threads,
     float* fields,           // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights           // (gridnum_x, gridnum_y, gridnum_z)
 ) {
@@ -821,7 +897,9 @@ void tsc_3d_adaptive_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    for_each_particle(N, parallel, threads, [&](int n) {
         float x = pos[3 * n + 0] * inv_dx_x;
         float y = pos[3 * n + 1] * inv_dx_y;
         float z = pos[3 * n + 2] * inv_dx_z;
@@ -838,6 +916,7 @@ void tsc_3d_adaptive_cpp(
         int j_max = static_cast<int>(std::ceil(y + support_y));
         int k_min = static_cast<int>(std::floor(z - support_z));
         int k_max = static_cast<int>(std::ceil(z + support_z));
+        const float* particle = quantities + n * num_fields;
 
         for (int i = i_min; i <= i_max; ++i) {
             int ii = i;
@@ -846,17 +925,17 @@ void tsc_3d_adaptive_cpp(
             float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
             if (wx == 0.0f) continue;
 
-                for (int j = j_min; j <= j_max; ++j) {
-                    int jj = j;
-                    if (periodic_y) jj = apply_pbc(j, gridnum_y);
-                    else if (jj < 0 || jj >= gridnum_y) continue;
+            for (int j = j_min; j <= j_max; ++j) {
+                int jj = j;
+                if (periodic_y) jj = apply_pbc(j, gridnum_y);
+                else if (jj < 0 || jj >= gridnum_y) continue;
                 float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
                 if (wy == 0.0f) continue;
 
-                    for (int k = k_min; k <= k_max; ++k) {
-                        int kk = k;
-                        if (periodic_z) kk = apply_pbc(k, gridnum_z);
-                        else if (kk < 0 || kk >= gridnum_z) continue;
+                for (int k = k_min; k <= k_max; ++k) {
+                    int kk = k;
+                    if (periodic_z) kk = apply_pbc(k, gridnum_z);
+                    else if (kk < 0 || kk >= gridnum_z) continue;
                     float wz = tsc_integrated_weight_1d(z, float(k), float(k+1), h_z);
                     if (wz == 0.0f) continue;
 
@@ -864,15 +943,12 @@ void tsc_3d_adaptive_cpp(
 
                     int base_idx = ii * stride_x + jj * stride_y + kk * stride_z;
                     int weight_idx = ii * weight_stride_x + jj * weight_stride_y + kk * weight_stride_z;
-
-                    for (int f = 0; f < num_fields; ++f) {
-                        fields[base_idx + f] += w * quantities[n*num_fields + f];
-                    }
-                    weights[weight_idx] += w;
+                    accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                    accumulate_weight(weights, weight_idx, w, parallel);
                 }
             }
         }
-    }
+    });
 }
 
 
@@ -1018,6 +1094,8 @@ void isotropic_kernel_deposition_2d_cpp(
     const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
+    bool use_openmp,
+    int omp_threads,
     float* fields,             // (gridnum_x, gridnum_y, num_fields)
     float* weights             // (gridnum_x, gridnum_y)
 ) {
@@ -1042,7 +1120,10 @@ void isotropic_kernel_deposition_2d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    SPHKernel* kernel_ptr = kernel.get();
+    for_each_particle(N, parallel, threads, [&](int n) {
         float hsn = hsm[n] / cellSize;
         float support = support_factor * hsn;
 
@@ -1056,12 +1137,13 @@ void isotropic_kernel_deposition_2d_cpp(
         int num_right  = static_cast<int>(xpos + support + 0.5f) - i;
         int num_bottom = j - static_cast<int>(ypos - support);
         int num_top    = static_cast<int>(ypos + support + 0.5f) - j;
+        const float* particle = quantities + n * num_fields;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
                 float w = compute_fraction_isotropic_2d_cpp(
                     integration_method, xpos, ypos,
-                    a, b, gridnum_x, gridnum_y, periodic, hsn, kernel.get()
+                    a, b, gridnum_x, gridnum_y, periodic, hsn, kernel_ptr
                 );
 
                 if (w == 0.0f) continue;
@@ -1082,14 +1164,11 @@ void isotropic_kernel_deposition_2d_cpp(
 
                 int base_idx = an * stride_x + bn * stride_y;
                 int weight_idx = an * weight_stride_x + bn;
-
-                for (int f = 0; f < num_fields; ++f) {
-                    fields[base_idx + f] += quantities[n * num_fields + f] * w;
-                }
-                weights[weight_idx] += w;
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
-    }
+    });
 }
 
 
@@ -1221,6 +1300,8 @@ void isotropic_kernel_deposition_3d_cpp(
     const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
+    bool use_openmp,
+    int omp_threads,
     float* fields,             // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights             // (gridnum_x, gridnum_y, gridnum_z)
 ) {
@@ -1251,7 +1332,10 @@ void isotropic_kernel_deposition_3d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    SPHKernel* kernel_ptr = kernel.get();
+    for_each_particle(N, parallel, threads, [&](int n) {
         float hsn = hsm[n] / cellSize;
         float support = support_factor * hsn;
 
@@ -1269,13 +1353,14 @@ void isotropic_kernel_deposition_3d_cpp(
         int num_top    = static_cast<int>(ypos + support + 0.5f) - j;
         int num_front  = k - static_cast<int>(zpos - support);
         int num_back   = static_cast<int>(zpos + support + 0.5f) - k;
+        const float* particle = quantities + n * num_fields;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
                 for (int c = k - num_front; c <= k + num_back; ++c) {
                     float w = compute_fraction_isotropic_3d_cpp(
                         integration_method, xpos, ypos, zpos,
-                        a, b, c, gridnum_x, gridnum_y, gridnum_z, periodic, hsn, kernel.get()
+                        a, b, c, gridnum_x, gridnum_y, gridnum_z, periodic, hsn, kernel_ptr
                     );
 
                     if (w == 0.0f) continue;
@@ -1303,15 +1388,12 @@ void isotropic_kernel_deposition_3d_cpp(
 
                     int base_idx = an * stride_x + bn * stride_y + cn * stride_z;
                     int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn;
-
-                    for (int f = 0; f < num_fields; ++f) {
-                        fields[base_idx + f] += quantities[n * num_fields + f] * w;
-                    }
-                    weights[weight_idx] += w;
+                    accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                    accumulate_weight(weights, weight_idx, w, parallel);
                 }
             }
         }
-    }
+    });
 }
 
 
@@ -1404,6 +1486,8 @@ void anisotropic_kernel_deposition_2d_cpp(
     const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
+    bool use_openmp,
+    int omp_threads,
     float* fields,
     float* weights
 ) {
@@ -1429,7 +1513,10 @@ void anisotropic_kernel_deposition_2d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    SPHKernel* kernel_ptr = kernel.get();
+    for_each_particle(N, parallel, threads, [&](int n) {
         const float* vecs = &hmat_eigvecs[n * 4];
         const float* vals = &hmat_eigvals[n * 2];
 
@@ -1446,6 +1533,7 @@ void anisotropic_kernel_deposition_2d_cpp(
         int num_right  = static_cast<int>(xpos + krs + 0.5f) - i;
         int num_bottom = j - static_cast<int>(ypos - krs);
         int num_top    = static_cast<int>(ypos + krs + 0.5f) - j;
+        const float* particle = quantities + n * num_fields;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
@@ -1453,7 +1541,7 @@ void anisotropic_kernel_deposition_2d_cpp(
                     integration_method, vecs, vals_gu,
                     xpos, ypos, a, b,
                     gridnum_x, gridnum_y,
-                    periodic, kernel.get()
+                    periodic, kernel_ptr
                 );
 
                 if (fraction == 0.0f) continue;
@@ -1474,14 +1562,11 @@ void anisotropic_kernel_deposition_2d_cpp(
 
                 int base_idx = an * stride_x + bn * stride_y;
                 int weight_idx = an * weight_stride_x + bn;
-
-                for (int f = 0; f < num_fields; ++f) {
-                    fields[base_idx + f] += quantities[n * num_fields + f] * fraction;
-                }
-                weights[weight_idx] += fraction;
+                accumulate_fields(fields, base_idx, particle, num_fields, fraction, parallel);
+                accumulate_weight(weights, weight_idx, fraction, parallel);
             }
         }
-    }
+    });
 }
 
 
@@ -1600,6 +1685,8 @@ void anisotropic_kernel_deposition_3d_cpp(
     const bool* periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
+    bool use_openmp,
+    int omp_threads,
     float* fields,
     float* weights
 ) {
@@ -1631,7 +1718,10 @@ void anisotropic_kernel_deposition_3d_cpp(
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
-    for (int n = 0; n < N; ++n) {
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = (parallel && omp_threads > 0) ? omp_threads : 0;
+    SPHKernel* kernel_ptr = kernel.get();
+    for_each_particle(N, parallel, threads, [&](int n) {
         const float* vecs = &hmat_eigvecs[n * 9];
         const float* vals = &hmat_eigvals[n * 3];
 
@@ -1652,13 +1742,14 @@ void anisotropic_kernel_deposition_3d_cpp(
         int num_top    = static_cast<int>(ypos + krs + 0.5f) - j;
         int num_front  = k - static_cast<int>(zpos - krs);
         int num_back   = static_cast<int>(zpos + krs + 0.5f) - k;
+        const float* particle = quantities + n * num_fields;
 
         for (int a = i - num_left; a <= i + num_right; ++a) {
             for (int b = j - num_bottom; b <= j + num_top; ++b) {
                 for (int c = k - num_front; c <= k + num_back; ++c) {
                     float fraction = compute_fraction_anisotropic_3d_cpp(
                         integration_method, vecs, vals_gu,
-                        xpos, ypos, zpos, a, b, c, gridnum_x, gridnum_y, gridnum_z, periodic, kernel.get()
+                        xpos, ypos, zpos, a, b, c, gridnum_x, gridnum_y, gridnum_z, periodic, kernel_ptr
                     );
 
                     if (fraction == 0.0f) continue;
@@ -1686,13 +1777,10 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                     int base_idx = an * stride_x + bn * stride_y + cn * stride_z;
                     int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn;
-
-                    for (int f = 0; f < num_fields; ++f) {
-                        fields[base_idx + f] += quantities[n * num_fields + f] * fraction;
-                    }
-                    weights[weight_idx] += fraction;
+                    accumulate_fields(fields, base_idx, particle, num_fields, fraction, parallel);
+                    accumulate_weight(weights, weight_idx, fraction, parallel);
                 }
             }
         }
-    }
+    });
 }

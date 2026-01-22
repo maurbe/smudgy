@@ -76,23 +76,9 @@ def compute_hsm(pos, num_neighbors, boxsize=None):
 	hsm = nn_dists[:, -1] * 0.5
 	return hsm, nn_dists, nn_inds, tree
 
-
+"""
 def compute_hsm_tensor_OLD(pos, masses, num_neighbors, boxsize=None):
-    """
-    Computes the smoothing tensor H for each particle using the covariance-based method
-    from Marinho (2021), generalized for arbitrary dimension (D=2 or D=3).
-
-    Args:
-        pos:      (N, D) particle positions
-        masses:   (N,) particle masses (1D array)
-        num_neighbors:       int, number of neighbors
-        boxsize:  float or None, periodic box size
-
-    Returns:
-        H:        (N, D, D) smoothing tensor for each particle
-        eigvals:  (N, D) eigenvalues of the covariance matrix (scaled)
-        eigvecs:  (N, D, D) eigenvectors of the covariance matrix
-    """
+    
     N, D = pos.shape
     assert D in (2, 3), "Only 2D and 3D supported"
     
@@ -148,10 +134,25 @@ def compute_hsm_tensor_OLD(pos, masses, num_neighbors, boxsize=None):
     eigvals_H = zeta_max[:, np.newaxis] * sqrt_eigvals    # (N, D)
 
     return H, eigvals_H, eigvecs
-
+"""
 
 def compute_hsm_tensor(pos, masses, num_neighbors, boxsize):
+	"""
+    Computes the smoothing tensor H for each particle using the covariance-based method
+    from Marinho (2021), generalized for arbitrary dimension (D=2 or D=3).
 
+    Args:
+        pos:      (N, D) particle positions
+        masses:   (N,) particle masses (1D array)
+        num_neighbors:       int, number of neighbors
+        boxsize:  float or None, periodic box size
+
+    Returns:
+        H:        (N, D, D) smoothing tensor for each particle
+        eigvals:  (N, D) eigenvalues of the covariance matrix (scaled)
+        eigvecs:  (N, D, D) eigenvectors of the covariance matrix
+    """
+	
 	N, D = pos.shape
 	assert D in (2, 3), "Only 2D and 3D supported"
 
@@ -167,7 +168,6 @@ def compute_hsm_tensor(pos, masses, num_neighbors, boxsize):
 	# we have to account for pbc
 	r_jc = neighbor_coords - pos[:, np.newaxis, :]
 	r_jc = np.where(np.abs(r_jc) >= boxsize / 2.0, r_jc - np.sign(r_jc) * boxsize, r_jc)
-	print(r_jc.shape, neighbor_masses.shape)
 	
 	outer = np.einsum('...i, ...j -> ...ij', r_jc, r_jc)
 	outer = outer * neighbor_masses[..., np.newaxis, np.newaxis]
