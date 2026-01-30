@@ -4,7 +4,9 @@ import numpy as np
 from .utils import (compute_hsm, 
                     compute_hsm_tensor, 
                     compute_pcellsize_half, 
-                    project_hsm_tensor_to_2d)
+                    project_hsm_tensor_to_2d,
+					coordinate_difference_with_pbc
+					)
 from . import kernels
 from .python import functions as pyfunc
 from .cpp import functions as cppfunc
@@ -57,7 +59,8 @@ class MainClass:
 																		   )
 		
 		elif mode == 'anisotropic':
-			self.h_tensor, self.h_eigvals, self.h_eigvecs = compute_hsm_tensor(self.pos,
+			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds, self.tree = compute_hsm_tensor(
+																			   self.pos,
 																			   self.mass,
 																			   num_neighbors=self.num_neighbors,
 																			   boxsize=self.boxsize
@@ -71,6 +74,22 @@ class MainClass:
 		w_ij = kernel.evaluate_kernel(r_ij=self.nn_dists, h=self.hsm)
 		self.density = np.sum(self.mass[self.nn_inds] * w_ij , axis=1)
 	
+
+	def compute_density_anisotropic(self):
+		"""
+		Compute particle densities using anisotropic SPH kernels.
+		"""
+
+		# Kernel evaluation (anisotropic handled internally)
+		rel_pos = coordinate_difference_with_pbc(self.pos[self.nn_inds], self.pos[:, np.newaxis, :], self.boxsize)  # (N, K, 3)
+		w = self.kernel.evaluate_kernel(
+			r_ij=rel_pos,
+			h=None,
+			H=self.h_tensor)          # (N, K)
+
+		# Density summation
+		self.density = np.sum(self.mass[self.nn_inds] * w, axis=1)
+
 
 	def interpolate_fields(self,
 								fields: np.ndarray,
@@ -156,6 +175,55 @@ class MainClass:
 		grad_fields_at_positions = np.einsum('mkf,mkd,mk->fmd', fields_, grad_w_ij, weights)
 
 		return grad_fields_at_positions
+
+
+	def _interpolate_fields_anisotropic(
+			self,
+			interpolation_positions,
+			fields,
+			):
+		"""
+		Anisotropic SPH interpolation at arbitrary positions.
+		"""
+
+		# Neighbor search
+		nn_dists, nn_inds = self.tree.query(
+			interpolation_positions,
+			k=self.num_neighbors
+		)
+
+		# Relative positions (M, K, 3)
+		neighbor_pos = self.pos[nn_inds]
+		query_pos = interpolation_positions[:, None, :]
+		rel_pos = coordinate_difference_with_pbc(neighbor_pos, query_pos, self.boxsize)
+
+		# Compute smoothing tensors at interpolation positions
+		H = compute_H_tensor(rel_pos)      # (M, 3, 3)
+		NEED TO ADAPT THE COMPUTATION OF THE H-TENSOR TO GO BEYOND PARTICLE POSITIONS
+		I.E. WE NEED A WAY TO COMPUTE H AT ARBITRARY POSITIONS, MABE GIVING REL_POS IS NOT A BAD IDEA
+
+		# Kernel evaluation (anisotropic handled internally)
+		w = self.kernel.evaluate_kernel(
+			rel_pos=rel_pos,
+			H=H
+		)                                        # (M, K)
+
+		# SPH interpolation weights
+		weights = (
+			self.mass[nn_inds]
+			* w
+			/ (self.density[nn_inds] + 1e-12)
+		)
+
+		# Interpolate fields
+		fields_ = fields[nn_inds]
+		interp_fields = np.einsum(
+			'mkf,mk->mf',
+			fields_,
+			weights
+		)
+
+		return interp_fields
 
 
 	def deposit_to_grid(self,

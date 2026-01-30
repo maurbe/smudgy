@@ -47,7 +47,24 @@ def shift_particle_positions(pos):
 
 
 def coordinate_difference_with_pbc(x, y, boxsize):
-    return (x - y + 0.5 * boxsize) % boxsize - 0.5 * boxsize
+	diff = np.asarray(x) - np.asarray(y)
+	box_arr = np.asarray(boxsize)
+
+	if box_arr.ndim == 0:
+		half_box = 0.5 * box_arr
+		return (diff + half_box) % box_arr - half_box
+
+	if box_arr.ndim != 1:
+		raise ValueError("'boxsize' must be a scalar or 1D array")
+
+	if diff.ndim == 0:
+		raise ValueError("Vector 'boxsize' requires vector inputs for x and y")
+
+	if diff.shape[-1] != box_arr.shape[0]:
+		raise ValueError("Dimension mismatch between coordinates and 'boxsize'")
+
+	half_box = 0.5 * box_arr
+	return (diff + half_box) % box_arr - half_box
 
 
 def compute_pcellsize_half(pos, num_neighbors, boxsize=None):
@@ -160,14 +177,15 @@ def compute_hsm_tensor(pos, masses, num_neighbors, boxsize):
 	masses = masses.flatten() if masses.ndim > 1 else masses
 
 	# use compute_hsm() to find the nn_inds
-	_, _, nn_inds, _ = compute_hsm(pos, num_neighbors, boxsize)
+	_, _, nn_inds, tree = compute_hsm(pos, num_neighbors, boxsize)
 	
 	neighbor_coords = pos[nn_inds]
 	neighbor_masses = masses[nn_inds]
 	
 	# we have to account for pbc
 	r_jc = neighbor_coords - pos[:, np.newaxis, :]
-	r_jc = np.where(np.abs(r_jc) >= boxsize / 2.0, r_jc - np.sign(r_jc) * boxsize, r_jc)
+	#r_jc = np.where(np.abs(r_jc) >= boxsize / 2.0, r_jc - np.sign(r_jc) * boxsize, r_jc)
+	r_jc = coordinate_difference_with_pbc(neighbor_coords, pos[:, np.newaxis, :], boxsize)
 	
 	outer = np.einsum('...i, ...j -> ...ij', r_jc, r_jc)
 	outer = outer * neighbor_masses[..., np.newaxis, np.newaxis]
@@ -183,7 +201,7 @@ def compute_hsm_tensor(pos, masses, num_neighbors, boxsize):
 	Λ = eigvals[..., np.newaxis] * np.eye(pos.shape[-1])
 	H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
 	
-	return H, eigvals, eigvecs
+	return H, eigvals, eigvecs, nn_inds, tree
 
 
 def project_hsm_tensor_to_2d(hmat, plane):

@@ -16,9 +16,14 @@ Deposition
 [+] test the entire pipeline - test the accordance between python / cpp
 [ ] think about the integral estimation for the sph cases and implement solution
   (e.g. if particle is enclosed in top right of cell, then estimating the integral at the midpoint is wrong)
+[ ] primary selection of neighbors in anisotropic case;
+    Anisotropic kNN (Marinho-pure)
+	  •	Neighbor search uses Mahalanobis distance:
+      \delta = |H^{-1}(r_p - r_q)|
+    •	Outer neighbor satisfies \delta = 1
 
 Both
-[ ] test / debug openMP acceleration
+[ ] test / debug openMP acceleration -> need to troubleshoot on Intel cluster
 [+] add verbosity to the whole class
 
 
