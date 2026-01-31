@@ -1,11 +1,11 @@
 **TODO's**
 
 Interpolation
-[ ] double check the h_ij computation for the isotropic case
-[ ] derive/implent with the paper the formulas for the anisotropic case
+[x] double check the h_ij computation for the isotropic case -> correct
+[x] derive/implent with the paper the formulas for the anisotropic case
   (I guess since the metric is deformed, the distance computations need to change)
-[ ] port functionality to cpp if possible
 [ ] rewrite test notebook
+[ ] port functionality to cpp if possible and test it
 
 Deposition
 [+] port the p2g function to the main class and rename it

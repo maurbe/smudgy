@@ -7,7 +7,7 @@ from .utils import (compute_hsm,
                     project_hsm_tensor_to_2d,
 					coordinate_difference_with_pbc
 					)
-from . import kernels
+from kernels import Kernel
 from .python import functions as pyfunc
 from .cpp import functions as cppfunc
 
@@ -94,16 +94,16 @@ class MainClass:
 	def interpolate_fields(self,
 								fields: np.ndarray,
 								interpolation_positions: np.ndarray,
-								kernel=None,
+								kernel_name=None,
 								compute_gradients=False
 								):
 		
-		if kernel is None:
+		if kernel_name is None:
 			raise ValueError("You must specify a kernel for interpolation")
 		else:
 			try:
-				kernel_class = getattr(kernels, kernel)
-				kernel = kernel_class(dim=self.dim)
+				kernel = Kernel(kernel_name, dim=self.dim) # getattr(kernels, kernel)
+				#kernel = kernel_class(dim=self.dim)
 			except AttributeError:
 				raise ValueError(f"Kernel '{kernel}' is not implemented")
 		
