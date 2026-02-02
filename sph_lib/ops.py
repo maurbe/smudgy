@@ -40,13 +40,31 @@ class MainClass:
 			self.boxsize = np.repeat(boxsize, self.dim)
 		else:
 			self.boxsize = np.asarray(boxsize)
-			assert self.boxsize.shape[0]==self.dim, f"Boxsize must define {self.dim} extents but found {self.boxsize.shape}"
 
 
 	def compute_smoothing_lengths(self, 
 							   	  num_neighbors: int,
-								  mode: str = 'isotropic'
+								  mode: str = 'isotropic',
+								  query_pos: Optional[np.ndarray] = None
 								  ):
+		"""Compute smoothing lengths or tensors for SPH calculations.
+
+		Args:
+			num_neighbors: Number of nearest neighbors used for smoothing length estimation.
+			mode: Type of smoothing to compute. Options are:
+				- 'adaptive': Compute rectangular particle extent as half-distance to Nth neighbor.
+				- 'isotropic': Compute scalar smoothing length as half-distance to Nth neighbor.
+				- 'anisotropic': Compute smoothing tensor using covariance-based method.
+			query_pos: Optional array of shape (M, D) with positions where smoothing is evaluated.
+				If None, uses particle positions from the instance.
+
+		Returns:
+			None. Results are stored as instance attributes:
+				- `hsm`: Smoothing lengths (adaptive/isotropic modes).
+				- `h_tensor`, `h_eigvals`, `h_eigvecs`: Smoothing tensor, eigenvalues and -vectors (anisotropic mode).
+				- `nn_inds`: Nearest neighbor indices for all modes.
+				- `nn_dists`: Nearest neighbor distances (isotropic mode only).
+		"""
 		
 		self.num_neighbors = num_neighbors
 		self.mode = mode
@@ -59,30 +77,23 @@ class MainClass:
 		if self.verbose:
 			print(f"Computing smoothing lengths/tensors using mode='{mode}' with num_neighbors={num_neighbors}")
 
+		# construct kwargs
+		kwargs = {
+			'tree': self.tree,
+			'query_pos': query_pos,
+			'num_neighbors': num_neighbors,
+			'boxsize': self.boxsize
+		}
+
 		if mode == 'adaptive':
-			self.hsm, self.nn_inds = compute_pcellsize_half(
-				self.tree,
-				self.pos,
-				num_neighbors=self.num_neighbors,
-				boxsize=self.boxsize
-				)
+			self.hsm, self.nn_inds = compute_pcellsize_half(**kwargs)
 
 		if mode == 'isotropic':
-			self.hsm, self.nn_dists, self.nn_inds = compute_hsm(
-				self.tree,
-				self.pos, 
-				num_neighbors=self.num_neighbors, 
-				boxsize=self.boxsize
-				)
+			self.hsm, self.nn_dists, self.nn_inds = compute_hsm(**kwargs)
 		
 		elif mode == 'anisotropic':
-			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds = compute_hsm_tensor(
-				self.tree,
-				self.pos,
-				self.mass,
-				num_neighbors=self.num_neighbors,
-				boxsize=self.boxsize
-				)
+			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds = compute_hsm_tensor(**kwargs, masses=self.mass)	
+				
 		else:
 			raise AssertionError(f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {mode}")
 

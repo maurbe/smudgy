@@ -5,6 +5,7 @@ Interpolation
 [x] derive/implent with the paper the formulas for the anisotropic case
   (I guess since the metric is deformed, the distance computations need to change)
 [ ] re-design the functionality of computing hsm and hsm_tensor wrt particle cloud and sampling coordinates
+[ ] re-factor the functions in ops.py
 [ ] rewrite test notebook
 [ ] port functionality to cpp if possible and test it
 
