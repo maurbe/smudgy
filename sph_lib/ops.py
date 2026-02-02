@@ -1,7 +1,8 @@
 from typing import Optional, Sequence, Tuple, Union, List
 import numpy as np
 
-from .utils import (compute_hsm, 
+from .utils import (build_kdtree,
+					compute_hsm, 
                     compute_hsm_tensor, 
                     compute_pcellsize_half, 
                     project_hsm_tensor_to_2d,
@@ -26,13 +27,20 @@ class MainClass:
 		
 		self.pos = positions
 		self.mass = masses
-		self.boxsize = boxsize
 		self.verbose = verbose
 
 		if boxsize is None:
 			self.periodic = False
 		else:
 			self.periodic = True
+
+		# construct boxsize array
+		self.boxsize = boxsize
+		if np.ndim(boxsize) == 0:
+			self.boxsize = np.repeat(boxsize, self.dim)
+		else:
+			self.boxsize = np.asarray(boxsize)
+			assert self.boxsize.shape[0]==self.dim, f"Boxsize must define {self.dim} extents but found {self.boxsize.shape}"
 
 
 	def compute_smoothing_lengths(self, 
@@ -43,34 +51,44 @@ class MainClass:
 		self.num_neighbors = num_neighbors
 		self.mode = mode
 
+		if not hasattr(self, 'tree'):
+			if self.verbose:
+				print("Building kd-tree from particle positions")
+			self.tree = build_kdtree(self.pos, boxsize=self.boxsize)
+
 		if self.verbose:
 			print(f"Computing smoothing lengths/tensors using mode='{mode}' with num_neighbors={num_neighbors}")
 
 		if mode == 'adaptive':
-			self.hsm, self.nn_inds, self.tree = compute_pcellsize_half(self.pos,
-																   num_neighbors=self.num_neighbors,
-																   boxsize=self.boxsize
-																   )
+			self.hsm, self.nn_inds = compute_pcellsize_half(
+				self.tree,
+				self.pos,
+				num_neighbors=self.num_neighbors,
+				boxsize=self.boxsize
+				)
 
 		if mode == 'isotropic':
-			self.hsm, self.nn_dists, self.nn_inds, self.tree = compute_hsm(self.pos, 
-																		   num_neighbors=self.num_neighbors, 
-																		   boxsize=self.boxsize
-																		   )
+			self.hsm, self.nn_dists, self.nn_inds = compute_hsm(
+				self.tree,
+				self.pos, 
+				num_neighbors=self.num_neighbors, 
+				boxsize=self.boxsize
+				)
 		
 		elif mode == 'anisotropic':
-			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds, self.tree = compute_hsm_tensor(
-																			   self.pos,
-																			   self.mass,
-																			   num_neighbors=self.num_neighbors,
-																			   boxsize=self.boxsize
-																			  )
+			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds = compute_hsm_tensor(
+				self.tree,
+				self.pos,
+				self.mass,
+				num_neighbors=self.num_neighbors,
+				boxsize=self.boxsize
+				)
 		else:
 			raise AssertionError(f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {mode}")
 
 
-	def compute_density(self, 
-					 kernel):
+	def compute_density(self, kernel_name):
+		kernel = Kernel(kernel_name, dim=self.dim)
 		w_ij = kernel.evaluate_kernel(r_ij=self.nn_dists, h=self.hsm)
 		self.density = np.sum(self.mass[self.nn_inds] * w_ij , axis=1)
 	
