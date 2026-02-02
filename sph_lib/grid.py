@@ -6,7 +6,6 @@ import numpy as np
 import numpy.typing as npt
 
 
-FloatArray = npt.NDArray[np.float64]
 Float32Array = npt.NDArray[np.float32]
 IntArray = npt.NDArray[np.int_]
 BoxInput = float | Sequence[float] | npt.ArrayLike
@@ -14,8 +13,16 @@ CountInput = int | Sequence[int] | npt.ArrayLike
 
 
 def _normalize_boxsize(boxsize: BoxInput, 
-                       dims: int) -> FloatArray:
-    """Return per-dimension box lengths given scalar or array-like input."""
+                       dims: int) -> npt.NDArray[np.floating]:
+    """Return per-dimension box lengths given scalar or array-like input.
+    
+    Args:
+        boxsize: Scalar or array-like input specifying box lengths.
+        dims: Number of spatial dimensions.
+    
+    Returns:
+        np.ndarray of shape (dims,) with floating-point box lengths.
+    """
     box_array = np.asarray(boxsize, dtype=float)
     if box_array.ndim == 0:
         return np.full(dims, float(box_array))
@@ -26,7 +33,15 @@ def _normalize_boxsize(boxsize: BoxInput,
 
 def _normalize_counts(counts: CountInput, 
                       dims: int) -> IntArray:
-    """Return per-dimension integer counts given scalar or array-like input."""
+    """Return per-dimension integer counts given scalar or array-like input.
+    
+    Args:
+        counts: Scalar or array-like input specifying grid resolution.
+        dims: Number of spatial dimensions.
+    
+    Returns:
+        np.ndarray of shape (dims,) with integer counts.
+    """
     count_array = np.asarray(counts, dtype=int)
     if count_array.ndim == 0:
         value = int(count_array)
@@ -40,20 +55,20 @@ def _normalize_counts(counts: CountInput,
     return count_array.astype(int, copy=False)
 
 
-def create_grid_1d(nx: int, 
+def create_grid_1d(n_cells: int, 
                    boxsize: float) -> Float32Array:
     """Generate 1D grid cell centers.
 
     Args:
-        nx: Number of cells along the axis.
+        n_cells: Number of cells along the axis.
         boxsize: Physical size of the domain (scalar).
 
     Returns:
-        np.ndarray of shape (nx, 1) with cell-center coordinates.
+        Float32 array of shape (n_cells, 1) with cell-center coordinates.
     """
 
-    dx = boxsize / nx
-    x = np.linspace(dx / 2.0, boxsize - dx / 2.0, nx)
+    dx = boxsize / n_cells
+    x = np.linspace(dx / 2.0, boxsize - dx / 2.0, n_cells)
     x = x[:, np.newaxis]
     return x.astype("float32")
 
@@ -67,7 +82,7 @@ def create_grid_2d(n_cells: CountInput,
         boxsize: Scalar or (2,) iterable with domain lengths.
 
     Returns:
-        np.ndarray of shape (nx * ny, 2) containing cell centers.
+        Float32 array of shape (nx * ny, 2) containing cell centers.
     """
 
     counts = _normalize_counts(n_cells, 2)
@@ -92,7 +107,7 @@ def create_grid_3d(n_cells: CountInput,
         boxsize: Scalar or (3,) iterable with domain lengths.
 
     Returns:
-        np.ndarray of shape (nx * ny * nz, 3) containing cell centers.
+        Float32 array of shape (nx * ny * nz, 3) containing cell centers.
     """
 
     counts = _normalize_counts(n_cells, 3)
@@ -106,7 +121,5 @@ def create_grid_3d(n_cells: CountInput,
     z = np.linspace(dz / 2.0, box_lengths[2] - dz / 2.0, counts[2])
 
     xx, yy, zz = np.meshgrid(x, y, z, indexing="ij")
-    grid_positions = np.stack((xx.ravel(), yy.ravel(), zz.ravel()), axis=-1).astype(
-        "float32"
-    )
+    grid_positions = np.stack((xx.ravel(), yy.ravel(), zz.ravel()), axis=-1).astype("float32")
     return grid_positions
