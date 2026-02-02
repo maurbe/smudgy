@@ -1,7 +1,9 @@
-from typing import Optional, Sequence, Tuple, Union, List
+from typing import Any, Optional, Sequence, Tuple, Union, List, Literal
 import numpy as np
+import numpy.typing as npt
 
 from .utils import (build_kdtree,
+					query_kdtree,
 					compute_hsm, 
                     compute_hsm_tensor, 
                     compute_pcellsize_half, 
@@ -42,11 +44,12 @@ class MainClass:
 			self.boxsize = np.asarray(boxsize)
 
 
-	def compute_smoothing_lengths(self, 
-							   	  num_neighbors: int,
-								  mode: str = 'isotropic',
-								  query_pos: Optional[np.ndarray] = None
-								  ):
+	def compute_smoothing_lengths(
+		self, 
+		num_neighbors: int,
+		mode: Literal['adaptive', 'isotropic', 'anisotropic'] = 'isotropic',
+		query_pos: Optional[npt.ArrayLike] = None
+	) -> None:
 		"""Compute smoothing lengths or tensors for SPH calculations.
 
 		Args:
@@ -89,170 +92,212 @@ class MainClass:
 			self.hsm, self.nn_inds = compute_pcellsize_half(**kwargs)
 
 		if mode == 'isotropic':
-			self.hsm, self.nn_dists, self.nn_inds = compute_hsm(**kwargs)
+			self.hsm, self.nn_inds, self.nn_dists = compute_hsm(**kwargs)
 		
 		elif mode == 'anisotropic':
-			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds = compute_hsm_tensor(**kwargs, masses=self.mass)	
+			self.h_tensor, self.h_eigvals, self.h_eigvecs, self.nn_inds, self.nn_dists, self.rel_coords = compute_hsm_tensor(**kwargs, masses=self.mass)	
 				
 		else:
 			raise AssertionError(f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {mode}")
 
 
-	def compute_density(self, kernel_name):
-		kernel = Kernel(kernel_name, dim=self.dim)
-		w_ij = kernel.evaluate_kernel(r_ij=self.nn_dists, h=self.hsm)
-		self.density = np.sum(self.mass[self.nn_inds] * w_ij , axis=1)
+	def compute_density(self, kernel_name: str) -> None:
+		"""Compute particle densities using SPH kernels.
+
+		Supports both isotropic and anisotropic smoothing modes. Requires that
+		`compute_smoothing_lengths` has been called first.
+
+		Args:
+			kernel_name: Name of the SPH kernel to use for density estimation.
+
+		Returns:
+			None. Result is stored in the instance attribute `density`.
+		"""
+		assert self.mode in ['isotropic', 'anisotropic'], "`mode` must be one of ['isotropic', 'anisotropic'] to compute density"
+		self.kernel = Kernel(kernel_name, dim=self.dim)
+		
+		# if hsm or h_tensor not computed yet, raise error
+		if not hasattr(self, 'hsm') and not hasattr(self, 'h_tensor'):
+			raise AttributeError("You must first compute smoothing lengths or tensors using the 'compute_smoothing_lengths' method before computing density")
+
+		# Build kernel arguments based on mode
+		kwargs = {}
+		if self.mode == 'isotropic':
+			kwargs['r_ij'] = self.nn_dists
+			kwargs['h'] = self.hsm
+		elif self.mode == 'anisotropic':
+			kwargs['H'] = self.h_tensor
+
+		# Kernel evaluation and density computation
+		w = self.kernel.evaluate_kernel(**kwargs)
+		self.density = np.sum(self.mass[self.nn_inds] * w, axis=1)
 	
 
-	def compute_density_anisotropic(self):
+	def interpolate_fields(
+		self,
+		fields: npt.ArrayLike,
+		query_positions: npt.ArrayLike,
+		kernel_name: Optional[str] = None,
+		compute_gradients: bool = False
+	) -> npt.NDArray[np.floating]:
+		"""Interpolate particle fields to arbitrary query positions using SPH.
+
+		Requires that `compute_smoothing_lengths` and `compute_density` have been 
+		called first. Automatically computes density if not already available.
+
+		Args:
+			fields: Array of shape (N, num_fields) or (N,) with particle field data.
+			query_positions: Array of shape (M, D) with positions where fields are interpolated.
+			kernel_name: Name of the SPH kernel to use. If None, uses the previously set kernel.
+			compute_gradients: If True, compute field gradients at query positions instead
+				of field values.
+
+		Returns:
+			Array of interpolated field values or gradients:
+				- If compute_gradients=False: shape (M, num_fields) with interpolated values.
+				- If compute_gradients=True: shape (M, num_fields, D) with interpolated gradients.
+
+		Raises:
+			ValueError: If kernel_name is not implemented.
+			AssertionError: If fields length does not match number of particles.
 		"""
-		Compute particle densities using anisotropic SPH kernels.
-		"""
-
-		# Kernel evaluation (anisotropic handled internally)
-		rel_pos = coordinate_difference_with_pbc(self.pos[self.nn_inds], self.pos[:, np.newaxis, :], self.boxsize)  # (N, K, 3)
-		w = self.kernel.evaluate_kernel(
-			r_ij=rel_pos,
-			h=None,
-			H=self.h_tensor)          # (N, K)
-
-		# Density summation
-		self.density = np.sum(self.mass[self.nn_inds] * w, axis=1)
-
-
-	def interpolate_fields(self,
-								fields: np.ndarray,
-								interpolation_positions: np.ndarray,
-								kernel_name=None,
-								compute_gradients=False
-								):
-		
-		if kernel_name is None:
-			raise ValueError("You must specify a kernel for interpolation")
-		else:
-			try:
-				kernel = Kernel(kernel_name, dim=self.dim) # getattr(kernels, kernel)
-				#kernel = kernel_class(dim=self.dim)
-			except AttributeError:
-				raise ValueError(f"Kernel '{kernel}' is not implemented")
 		
 		if not isinstance(fields, np.ndarray):
-			raise TypeError("'fields' must be a np.ndarray")
-		if not fields.shape[0] == self.pos.shape[0]: # check that fields has the same length as positions
+			fields = np.asarray(fields)
+		
+		if fields.shape[0] != self.pos.shape[0]:
 			raise AssertionError(f"'fields' array must have the same length as positions array but found position length = {self.pos.shape[0]} and fields length={fields.shape[0]}")
+		
 		if fields.ndim == 1:
 			fields = fields[:, np.newaxis]  # make it (N, 1)
 		
-		
-		if not hasattr(self, 'tree'):
-			print("Building kd-tree from tracer particles")
-			raise AttributeError("You must first compute nearest neighbors by calling 'compute_smoothing_lengths' before interpolating fields")
-
 		if not hasattr(self, 'density'):
-			print("Density not found, computing density first...")
-			self.compute_density(kernel)
+			if self.verbose:
+				print("Particle density has not been computed yet, computing now")
+			self.compute_density(kernel_name)
 
-
-		# compute nearest neighbors for interpolation positions
-		# TODO: check whether the routine here is correct mathematically
-		nn_dists, nn_inds = self.tree.query(interpolation_positions, k=self.num_neighbors, workers=-1)
-		
-		if compute_gradients:
-			return self._interpolate_grad_fields(interpolation_positions, fields, nn_dists, nn_inds, kernel)
+		if kernel_name is None:
+			kernel = self.kernel
 		else:
-			return self._interpolate_fields(fields, nn_dists, nn_inds, kernel)
+			try:
+				kernel = Kernel(kernel_name, dim=self.dim)
+			except AttributeError:
+				raise ValueError(f"Kernel '{kernel_name}' is not implemented")
 		
+		return self._interpolate_fields(
+			self.tree,
+			self.pos,
+			self.mass,
+			self.density,
+			fields, 
+			kernel,
+			num_neighbors=self.num_neighbors,
+			query_positions=query_positions,
+			mode=self.mode,
+			compute_gradients=compute_gradients,
+		)
 
-	def interpolate_grad_fields(self,
-								interpolation_positions: np.ndarray,
-								kernel=None,
-								):
-		return self.interpolate_fields(interpolation_positions, kernel, compute_gradients=True)
+
+	def interpolate_grad_fields(
+		self,
+		query_positions: npt.ArrayLike,
+		kernel_name: Optional[str] = None
+	) -> npt.NDArray[np.floating]:
+		"""Compute gradients of particle fields at arbitrary query positions using SPH.
+
+		Convenience wrapper around `interpolate_fields` with `compute_gradients=True`.
+
+		Args:
+			query_positions: Array of shape (M, D) with positions where gradients are evaluated.
+			kernel_name: Name of the SPH kernel to use. If None, uses the previously set kernel.
+
+		Returns:
+			Array of shape (M, num_fields, D) with interpolated field gradients.
+		"""
+		return self.interpolate_fields(query_positions, kernel_name, compute_gradients=True)
 			
 
-	def _interpolate_fields(self, 
-						 	fields: np.ndarray, 
-							nn_dists: np.ndarray, 
-							nn_inds: np.ndarray, 
-							kernel
-							):
-		
-		h_ij = 0.5 * nn_dists[:, -1:]
-		w_ij = kernel.evaluate_kernel(r_ij=nn_dists, h=h_ij)
+	def _interpolate_fields(
+		self,
+		tree: Any,
+		positions: npt.NDArray[np.floating],
+		masses: npt.NDArray[np.floating],
+		density: npt.NDArray[np.floating],
+		fields: npt.NDArray[np.floating],
+		kernel: Any,
+		num_neighbors: int,
+		query_positions: npt.ArrayLike,
+		mode: Literal['isotropic', 'anisotropic'],
+		compute_gradients: bool = False
+	) -> npt.NDArray[np.floating]:
+		"""Interpolate or compute gradients of particle fields at query positions.
 
-		fields_ = fields[nn_inds]
-		weights = self.mass[nn_inds] * w_ij / (self.density[nn_inds] + 1e-8)
-		fields_at_positions = np.einsum('mkf,mk->fm', fields_, weights)
-		
-		return fields_at_positions
+		Internal helper for SPH field interpolation supporting both isotropic and 
+		anisotropic smoothing kernels.
 
+		Args:
+			tree: Spatial index structure (cKDTree) for nearest neighbor queries.
+			positions: Particle positions with shape (N, D).
+			masses: Particle masses with shape (N,).
+			density: Particle densities with shape (N,). Used for SPH weighting.
+			fields: Particle field values with shape (N, num_fields).
+			kernel: Kernel instance with evaluate_kernel() and evaluate_gradient() methods.
+			num_neighbors: Number of nearest neighbors to use for interpolation.
+			query_positions: Positions where fields are evaluated, shape (M, D).
+			mode: Smoothing mode - 'isotropic' uses scalar smoothing lengths, 
+				'anisotropic' uses smoothing tensors.
+			compute_gradients: If True, compute field gradients via kernel.evaluate_gradient().
+				If False, compute field values via kernel.evaluate_kernel().
 
-	def _interpolate_grad_fields(self, 
-								interpolation_positions: np.ndarray,
-								fields: np.ndarray, 
-								nn_dists: np.ndarray, 
-								nn_inds: np.ndarray, 
-								kernel
-								):
-		
-		h_ij = 0.5 * nn_dists[:, -1:]
-		r_ij_vec = self.pos[nn_inds] - interpolation_positions[:, np.newaxis, :]
-		grad_w_ij = kernel.evaluate_gradient(r_ij_vec=r_ij_vec, h=h_ij)
-
-		fields_ = fields[nn_inds]
-		weights = self.mass[nn_inds] / (self.density[nn_inds] + 1e-8)
-		grad_fields_at_positions = np.einsum('mkf,mkd,mk->fmd', fields_, grad_w_ij, weights)
-
-		return grad_fields_at_positions
-
-
-	def _interpolate_fields_anisotropic(
-			self,
-			interpolation_positions,
-			fields,
-			):
+		Returns:
+			- If compute_gradients=False: array of shape (M, num_fields) with interpolated field values.
+			- If compute_gradients=True: array of shape (M, num_fields, D) with interpolated gradients.
 		"""
-		Anisotropic SPH interpolation at arbitrary positions.
-		"""
+		
+		if mode == 'isotropic':
+			# Compute smoothing lengths at query positions
+			hsm, nn_inds, nn_dists = compute_hsm(
+				tree, 
+				query_positions, 
+				k=num_neighbors,
+			)
+			if compute_gradients:
+				# For gradients, need relative coordinate vectors
+				rel_coords = coordinate_difference_with_pbc(
+					positions[nn_inds],
+					query_positions[:, np.newaxis, :],
+					self.boxsize,
+				)
+				kernel_kwargs = {'r_ij_vec': rel_coords, 'h': hsm}
+			else:
+				kernel_kwargs = {'r_ij': nn_dists, 'h': hsm}
 
-		# Neighbor search
-		nn_dists, nn_inds = self.tree.query(
-			interpolation_positions,
-			k=self.num_neighbors
-		)
+		elif mode == 'anisotropic':
+			# Compute smoothing tensors at query positions
+			h_tensor, _, _, nn_inds, _, rel_coords = compute_hsm_tensor(
+				tree,
+				masses=masses,
+				num_neighbors=num_neighbors,
+				query_positions=query_positions,
+			)
+			kernel_key = 'r_ij_vec' if compute_gradients else 'r_ij'
+			kernel_kwargs = {kernel_key: rel_coords, 'H': h_tensor}
 
-		# Relative positions (M, K, 3)
-		neighbor_pos = self.pos[nn_inds]
-		query_pos = interpolation_positions[:, None, :]
-		rel_pos = coordinate_difference_with_pbc(neighbor_pos, query_pos, self.boxsize)
+		else:
+			raise ValueError(f"Unsupported interpolation mode '{mode}'")
 
-		# Compute smoothing tensors at interpolation positions
-		H = compute_H_tensor(rel_pos)      # (M, 3, 3)
-		NEED TO ADAPT THE COMPUTATION OF THE H-TENSOR TO GO BEYOND PARTICLE POSITIONS
-		I.E. WE NEED A WAY TO COMPUTE H AT ARBITRARY POSITIONS, MABE GIVING REL_POS IS NOT A BAD IDEA
-
-		# Kernel evaluation (anisotropic handled internally)
-		w = self.kernel.evaluate_kernel(
-			rel_pos=rel_pos,
-			H=H
-		)                                        # (M, K)
-
-		# SPH interpolation weights
-		weights = (
-			self.mass[nn_inds]
-			* w
-			/ (self.density[nn_inds] + 1e-12)
-		)
-
-		# Interpolate fields
+		# Unified weight computation and kernel evaluation
+		weights = masses[nn_inds] / (density[nn_inds] + 1e-8)
 		fields_ = fields[nn_inds]
-		interp_fields = np.einsum(
-			'mkf,mk->mf',
-			fields_,
-			weights
-		)
-
-		return interp_fields
+		
+		if compute_gradients:
+			w = kernel.evaluate_gradient(**kernel_kwargs)
+			result = np.einsum('mkf,mkd,mk->mfd', fields_, w, weights)
+		else:
+			w = kernel.evaluate_kernel(**kernel_kwargs)
+			result = np.einsum('mkf,mk,mk->mf', fields_, w, weights)
+		
+		return result
 
 
 	def deposit_to_grid(self,

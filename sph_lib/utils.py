@@ -122,7 +122,7 @@ def compute_hsm(
 	tree: spatial.cKDTree,
 	query_pos: npt.ArrayLike,
 	num_neighbors: int
-) -> Tuple[FloatArray, FloatArray, IntArray]:
+) -> Tuple[FloatArray, IntArray, FloatArray]:
 	"""Estimate smoothing length as half the distance to the Nth nearest neighbor.
 
 	Args:
@@ -131,13 +131,13 @@ def compute_hsm(
 		num_neighbors: Number of neighbors used for the estimate.
 
 	Returns:
-		Tuple of ``(hsm, nn_dists, nn_inds)`` where ``hsm`` has shape (M,),
+		Tuple of ``(hsm, nn_inds, nn_dists)`` where ``hsm`` has shape (M,),
 		``nn_dists`` has shape (M, num_neighbors), and ``nn_inds`` has shape
 		(M, num_neighbors).
 	"""
 	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
 	hsm = nn_dists[:, -1] * 0.5
-	return hsm, nn_dists, nn_inds
+	return hsm, nn_inds, nn_dists
 
 
 def compute_hsm_tensor(
@@ -145,7 +145,7 @@ def compute_hsm_tensor(
 	masses: npt.ArrayLike,
 	num_neighbors: int,
 	query_pos: Optional[npt.ArrayLike] = None
-) -> Tuple[FloatArray, FloatArray, FloatArray, IntArray]:
+) -> Tuple[FloatArray, FloatArray, FloatArray, IntArray, FloatArray]:
 	"""Compute anisotropic smoothing tensor using covariance-based method.
 
 	Implements the method from Marinho (2021), generalized for 2D and 3D.
@@ -158,9 +158,9 @@ def compute_hsm_tensor(
 			If None, uses particle positions from the tree.
 
 	Returns:
-		Tuple of ``(H, eigvals, eigvecs, nn_inds)`` where ``H`` has shape (M, D, D),
+		Tuple of ``(H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords)`` where ``H`` has shape (M, D, D),
 		``eigvals`` has shape (M, D), ``eigvecs`` has shape (M, D, D),
-		and ``nn_inds`` has shape (M, num_neighbors).
+		``nn_inds`` has shape (M, num_neighbors) and ``nn_dists`` has shape (M, num_neighbors) and ``rel_coords`` has shape (M, num_neighbors, D).
 	"""
 	
 	# Get particle positions and boxsize from the tree object
@@ -196,8 +196,11 @@ def compute_hsm_tensor(
 	eigvals = np.sqrt(eigvals)
 	Λ = eigvals[..., np.newaxis] * np.eye(D)
 	H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
+
+	# compute the relative coordinate vectors from neighbors to query positions
+	rel_coords = coordinate_difference_with_pbc(neighbor_coords, query_pos[:, np.newaxis, :], boxsize)
 	
-	return H, eigvals, eigvecs, nn_inds
+	return H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords
 
 
 def project_hsm_tensor_to_2d(
