@@ -1,20 +1,80 @@
+from __future__ import annotations
+
+from typing import Optional, Sequence, Tuple
+
 import numpy as np
+import numpy.typing as npt
 from scipy import spatial
 
 
-def build_kdtree(points, boxsize=None):
-	"""Construct a cKDTree with optional per-dimension periodic box sizes."""
+FloatArray = npt.NDArray[np.floating]
+IntArray = npt.NDArray[np.int_]
+BoxInput = float | Sequence[float] | npt.ArrayLike
+
+
+def build_kdtree(
+	points: npt.ArrayLike,
+	boxsize: Optional[BoxInput] = None
+) -> spatial.cKDTree:
+	"""Construct a cKDTree with optional per-dimension periodic box sizes.
+
+	Args:
+		points: Array of shape (N, D) with particle coordinates.
+		boxsize: Scalar or (D,) array defining periodic box lengths, or None.
+
+	Returns:
+		scipy.spatial.cKDTree built from ``points``.
+	"""
 	return spatial.cKDTree(points, boxsize=boxsize)
 
-def query_kdtree(tree, points, k):
-	"""Query a cKDTree for the k nearest neighbors of given points."""
+
+def query_kdtree(
+	tree: spatial.cKDTree,
+	points: npt.ArrayLike,
+	k: int
+) -> Tuple[FloatArray, IntArray]:
+	"""Query a cKDTree for the k nearest neighbors of given points.
+
+	Args:
+		tree: cKDTree instance to query.
+		points: Array of shape (M, D) with query coordinates.
+		k: Number of nearest neighbors to return.
+
+	Returns:
+		Tuple of ``(distances, indices)`` from ``cKDTree.query``.
+	"""
 	return tree.query(points, k=k, workers=-1)
 
-def shift_particle_positions(pos):
-    shifted_pos = pos - pos.min(axis=0)
-    return shifted_pos
 
-def coordinate_difference_with_pbc(x, y, boxsize):
+def shift_particle_positions(pos: npt.ArrayLike) -> FloatArray:
+	"""Shift particle positions so the minimum per-axis value is at zero.
+
+	Args:
+		pos: Array of shape (N, D) with particle coordinates.
+
+	Returns:
+		Array of shifted coordinates with the same shape as ``pos``.
+	"""
+	pos_array = np.asarray(pos)
+	return pos_array - pos_array.min(axis=0)
+
+
+def coordinate_difference_with_pbc(
+	x: npt.ArrayLike,
+	y: npt.ArrayLike,
+	boxsize: BoxInput
+) -> FloatArray:
+	"""Compute coordinate differences with periodic boundary conditions.
+
+	Args:
+		x: Array-like coordinates.
+		y: Array-like coordinates to subtract from ``x``.
+		boxsize: Scalar or (D,) array defining periodic box lengths.
+
+	Returns:
+		Array of coordinate differences wrapped into the range
+		$[-0.5 * boxsize, 0.5 * boxsize)$ per dimension.
+	"""
 	diff = np.asarray(x) - np.asarray(y)
 	box_arr = np.asarray(boxsize)
 
@@ -35,121 +95,159 @@ def coordinate_difference_with_pbc(x, y, boxsize):
 	return (diff + half_box) % box_arr - half_box
 
 
-def compute_pcellsize_half(tree, pos, num_neighbors):
-	# [0]=distances; [:, -1] we only need the last NN
-	# this follows the same "definition" of the smoothing length as 0.5 * distance to Nth nearest neighbor
-	nn_dists, nn_inds = tree.query(x=pos, k=num_neighbors, workers=-1)
-	nn_dists = nn_dists[:, -1] * 0.5
-	nn_dists = nn_dists.astype('float32')
-	return nn_dists, nn_inds
-
-
-def compute_hsm(tree, pos, num_neighbors, query_pos=None):
-	"""
-	Estimate smoothing length as half the distance to the Nth nearest neighbor.
+def compute_pcellsize_half(
+	tree: spatial.cKDTree,
+	query_pos: npt.ArrayLike,
+	num_neighbors: int
+) -> Tuple[FloatArray, IntArray]:
+	"""Estimate rectangular particle extent as half-distance to the Nth nearest neighbor.
 
 	Args:
-		tree:     cKDTree built from particle positions
-		pos:      (N, D) particle positions
-		num_neighbors:       int, number of neighbors
-		query_pos: (M, D) positions where the smoothing length is evaluated
-	
+		tree: cKDTree built from particle positions.
+		query_pos: Array of shape (N, D) with particle coordinates.
+		num_neighbors: Number of neighbors used for the estimate.
+
 	Returns:
-		hsm:      (N,) estimated smoothing lengths
-		nn_dists: (N, num_neighbors) distances to nearest neighbors
-		nn_inds:  (N, num_neighbors) indices of nearest neighbors
+		Tuple of ``(h_cellsize, nn_inds)`` where ``h_cellsize`` has shape (N,)
+		and contains half the distance to the Nth neighbor, and ``nn_inds``
+		has shape (N, num_neighbors).
 	"""
-	if query_pos is None:
-		query_pos = pos
+	# this follows the same "definition" of the smoothing length as 0.5 * distance to Nth nearest neighbor
+	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
+	h_cellsize = nn_dists[:, -1] * 0.5
+	return h_cellsize, nn_inds
+
+
+def compute_hsm(
+	tree: spatial.cKDTree,
+	query_pos: npt.ArrayLike,
+	num_neighbors: int
+) -> Tuple[FloatArray, FloatArray, IntArray]:
+	"""Estimate smoothing length as half the distance to the Nth nearest neighbor.
+
+	Args:
+		tree: cKDTree built from particle positions.
+		query_pos: Array of shape (M, D) with positions where smoothing length is evaluated.
+		num_neighbors: Number of neighbors used for the estimate.
+
+	Returns:
+		Tuple of ``(hsm, nn_dists, nn_inds)`` where ``hsm`` has shape (M,),
+		``nn_dists`` has shape (M, num_neighbors), and ``nn_inds`` has shape
+		(M, num_neighbors).
+	"""
 	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
 	hsm = nn_dists[:, -1] * 0.5
 	return hsm, nn_dists, nn_inds
 
 
-def compute_hsm_tensor(tree, pos, masses, num_neighbors, query_pos=None):
+def compute_hsm_tensor(
+	tree: spatial.cKDTree,
+	masses: npt.ArrayLike,
+	num_neighbors: int,
+	query_pos: Optional[npt.ArrayLike] = None
+) -> Tuple[FloatArray, FloatArray, FloatArray, IntArray]:
+	"""Compute anisotropic smoothing tensor using covariance-based method.
+
+	Implements the method from Marinho (2021), generalized for 2D and 3D.
+
+	Args:
+		tree: cKDTree built from particle positions.
+		masses: Array of shape (N,) with particle masses.
+		num_neighbors: Number of neighbors used for covariance estimation.
+		query_pos: Array of shape (M, D) where smoothing tensor is evaluated.
+			If None, uses particle positions from the tree.
+
+	Returns:
+		Tuple of ``(H, eigvals, eigvecs, nn_inds)`` where ``H`` has shape (M, D, D),
+		``eigvals`` has shape (M, D), ``eigvecs`` has shape (M, D, D),
+		and ``nn_inds`` has shape (M, num_neighbors).
 	"""
-    Computes the smoothing tensor H for each particle using the covariance-based method
-    from Marinho (2021), generalized for arbitrary dimension (D=2 or D=3).
-
-    Args:
-		tree:     cKDTree built from particle positions
-        pos:      (N, D) particle positions
-        masses:   (N,) particle masses (1D array)
-        num_neighbors:       int, number of neighbors
-        query_pos: (M, D) positions where the smoothing tensor is evaluated
-
-    Returns:
-        H:        (N, D, D) smoothing tensor for each particle
-        eigvals:  (N, D) eigenvalues of the covariance matrix (scaled)
-        eigvecs:  (N, D, D) eigenvectors of the covariance matrix
-		nn_inds:  (N, num_neighbors) indices of nearest neighbors
-    """
 	
-	N, D = pos.shape
-	assert D in (2, 3), "Only 2D and 3D supported"
+	# Get particle positions and boxsize from the tree object
+	pos = tree.data
+	boxsize = tree.boxsize
+	D = pos.shape[-1]
+	
+	if D not in (2, 3):
+		raise ValueError("Only 2D and 3D positions are supported for anisotropic smoothing tensors.")
 
-	# Ensure masses is 1D (flattens any extra dimensions from indexing)
+	# Use particle positions if query_pos not provided
+	if query_pos is None:
+		query_pos = pos
+	
+	# Ensure masses is 1D
 	masses = masses.flatten() if masses.ndim > 1 else masses
 
-	# get the boxsize from the tree object
-	boxsize = tree.boxsize
-
-	# use compute_hsm() to find the nn_inds
-	nn_dists, nn_inds = query_kdtree(tree, pos, k=num_neighbors)
-	
+	# Find nearest neighbors
+	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
 	neighbor_coords = pos[nn_inds]
 	neighbor_masses = masses[nn_inds]
 	
-	# here we can switch between particle or coordinate-based query
-	if query_pos is None:
-		query_pos = pos
-	r_jc = neighbor_coords - query_pos[:, np.newaxis, :]
-	
-	# we have to account for pbc
+	# Account for periodic boundary conditions
 	r_jc = coordinate_difference_with_pbc(neighbor_coords, query_pos[:, np.newaxis, :], boxsize)
 	
+	# Compute mass-weighted covariance matrix
 	outer = np.einsum('...i, ...j -> ...ij', r_jc, r_jc)
 	outer = outer * neighbor_masses[..., np.newaxis, np.newaxis]
 	Sigma = np.sum(outer, axis=1) / np.sum(neighbor_masses, axis=1)[..., np.newaxis, np.newaxis]
 
-	# eigvecs are returned normalized
-	# eigvecs are the same for H
-	# eigvals are the sqrt of the ones of Sigma
+	# Compute eigendecomposition and construct smoothing tensor H = VΛV^T
 	eigvals, eigvecs = np.linalg.eigh(Sigma)
 	eigvals = np.sqrt(eigvals)
-	
-	# also compute H = VΛV.T
-	Λ = eigvals[..., np.newaxis] * np.eye(query_pos.shape[-1])
+	Λ = eigvals[..., np.newaxis] * np.eye(D)
 	H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
 	
 	return H, eigvals, eigvecs, nn_inds
 
 
-def project_hsm_tensor_to_2d(hmat, plane):
-	# need to project the smoothing ellipses on the cartesian plane
-	if plane == (0, 1):
-		e1 = [1, 0, 0]
-		e2 = [0, 1, 0]
-	elif plane == (0, 2):
-		e1 = [1, 0, 0]
-		e2 = [0, 0, 1]
-	elif plane == (1, 2):
-		e1 = [0, 1, 0]
-		e2 = [0, 0, 1]
+def project_hsm_tensor_to_2d(
+	h_tensor: npt.ArrayLike,
+	plane: Optional[str] = None,
+	basis: Optional[Tuple[Sequence[float], Sequence[float]]] = None
+) -> Tuple[FloatArray, FloatArray, FloatArray]:
+	"""Project 3D smoothing tensors onto a 2D plane.
+
+	Args:
+		h_tensor: Array of shape (N, 3, 3) with 3D smoothing tensors.
+		plane: String specifying projection plane: 'xy', 'xz', or 'yz'.
+			Mutually exclusive with ``basis``.
+		basis: 2-tuple of basis vectors (e1, e2) spanning the projection plane.
+			Each vector should be array-like of length 3.
+			Mutually exclusive with ``plane``.
+
+	Returns:
+		Tuple of ``(h_tensor_2d, eigvals, eigvecs)`` where ``h_tensor_2d`` has shape (N, 2, 2),
+		``eigvals`` has shape (N, 2), and ``eigvecs`` has shape (N, 2, 2).
+	"""
+	# Validate inputs
+	if plane is None and basis is None:
+		raise ValueError("Either 'plane' or 'basis' must be provided")
+	if plane is not None and basis is not None:
+		raise ValueError("'plane' and 'basis' are mutually exclusive")
+	
+	# Define projection basis vectors
+	if basis is not None:
+		if len(basis) != 2:
+			raise ValueError("'basis' must be a 2-tuple of vectors")
+		e1, e2 = basis
 	else:
-		print("Plane must be either xy, yz or xz.")
+		if plane == 'xy':
+			e1, e2 = [1, 0, 0], [0, 1, 0]
+		elif plane == 'xz':
+			e1, e2 = [1, 0, 0], [0, 0, 1]
+		elif plane == 'yz':
+			e1, e2 = [0, 1, 0], [0, 0, 1]
+		else:
+			raise ValueError("'plane' must be one of 'xy', 'xz', or 'yz'")
 
-	# Compute (P * M_inverse * P_transpose)^-1
-	projection_matrix = np.array([e1, e2]).astype('float32')  # (2, 3)
-	hmat_inv = np.linalg.inv(hmat)
-	hmat_2d = []
-
-	for i in range(len(hmat_inv)):
-		# Compute P @ H_inv @ P^T, then invert
-		temp = np.dot(projection_matrix, np.dot(hmat_inv[i], projection_matrix.T))  # (2,3) @ (3,3) @ (3,2) = (2,2)
-		hmat_2d.append(np.linalg.inv(temp))
-	hmat_2d = np.asarray(hmat_2d)
-
-	# compute the new eigenvectors (2d)
-	evals, evecs = np.linalg.eigh(hmat_2d)
-	return hmat_2d, evals, evecs
+	# Compute projected tensors: (P @ H^-1 @ P^T)^-1
+	projection_matrix = np.array([e1, e2], dtype='float32')  # (2, 3)
+	h_tensor_inv = np.linalg.inv(h_tensor)  # (N, 3, 3)
+	
+	# Vectorized computation: P @ H_inv @ P^T for all particles
+	temp = np.einsum('ij,njk,lk->nil', projection_matrix, h_tensor_inv, projection_matrix)
+	h_tensor_2d = np.linalg.inv(temp)  # (N, 2, 2)
+	
+	# Compute eigendecomposition of 2D tensors
+	eigvals, eigvecs = np.linalg.eigh(h_tensor_2d)
+	return h_tensor_2d, eigvals, eigvecs
