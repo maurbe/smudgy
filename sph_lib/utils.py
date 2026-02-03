@@ -184,10 +184,10 @@ def compute_hsm_tensor(
 	neighbor_masses = masses[nn_inds]
 	
 	# Account for periodic boundary conditions
-	r_jc = coordinate_difference_with_pbc(neighbor_coords, query_pos[:, np.newaxis, :], boxsize)
+	rel_coords = coordinate_difference_with_pbc(neighbor_coords, query_pos[:, np.newaxis, :], boxsize)
 	
 	# Compute mass-weighted covariance matrix
-	outer = np.einsum('...i, ...j -> ...ij', r_jc, r_jc)
+	outer = np.einsum('...i, ...j -> ...ij', rel_coords, rel_coords)
 	outer = outer * neighbor_masses[..., np.newaxis, np.newaxis]
 	Sigma = np.sum(outer, axis=1) / np.sum(neighbor_masses, axis=1)[..., np.newaxis, np.newaxis]
 
@@ -197,9 +197,6 @@ def compute_hsm_tensor(
 	Λ = eigvals[..., np.newaxis] * np.eye(D)
 	H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
 
-	# compute the relative coordinate vectors from neighbors to query positions
-	rel_coords = coordinate_difference_with_pbc(neighbor_coords, query_pos[:, np.newaxis, :], boxsize)
-	
 	return H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords
 
 

@@ -101,7 +101,8 @@ class MainClass:
 			raise AssertionError(f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {mode}")
 
 
-	def compute_density(self, kernel_name: str) -> None:
+	def compute_density(self, 
+					 kernel_name: str) -> None:
 		"""Compute particle densities using SPH kernels.
 
 		Supports both isotropic and anisotropic smoothing modes. Requires that
@@ -134,12 +135,12 @@ class MainClass:
 	
 
 	def interpolate_fields(
-		self,
-		fields: npt.ArrayLike,
-		query_positions: npt.ArrayLike,
-		kernel_name: Optional[str] = None,
-		compute_gradients: bool = False
-	) -> npt.NDArray[np.floating]:
+			self,
+			fields: npt.ArrayLike,
+			query_positions: npt.ArrayLike,
+			kernel_name: Optional[str] = None,
+			compute_gradients: bool = False
+			) -> npt.NDArray[np.floating]:
 		"""Interpolate particle fields to arbitrary query positions using SPH.
 
 		Requires that `compute_smoothing_lengths` and `compute_density` have been 
@@ -199,10 +200,10 @@ class MainClass:
 
 
 	def interpolate_grad_fields(
-		self,
-		query_positions: npt.ArrayLike,
-		kernel_name: Optional[str] = None
-	) -> npt.NDArray[np.floating]:
+			self,
+			query_positions: npt.ArrayLike,
+			kernel_name: Optional[str] = None
+			) -> npt.NDArray[np.floating]:
 		"""Compute gradients of particle fields at arbitrary query positions using SPH.
 
 		Convenience wrapper around `interpolate_fields` with `compute_gradients=True`.
@@ -300,46 +301,51 @@ class MainClass:
 		return result
 
 
-	def deposit_to_grid(self,
-					 fields: np.ndarray,
-					 averaged: Sequence[bool],
-					 gridnums: Union[int, Sequence[int]],
-					 method: str,
-					 extent: Optional[Sequence[Sequence[float]]] = None,
-					 plane_projection: Optional[str] = None,
-					 return_weights: bool = False,
-					 kernel: str = 'quintic',
-					 integration: str = 'midpoint',
-					 use_python: bool = False,
-					 use_openmp: bool = True,
-					 omp_threads: Optional[int] = None,
-					 ):
+	def deposit_to_grid(
+		self,
+		fields: npt.ArrayLike,
+		averaged: Sequence[bool],
+		gridnums: Union[int, Sequence[int]],
+		method: str,
+		extent: Optional[Sequence[Sequence[float]]] = None,
+		plane_projection: Optional[str] = None,
+		return_weights: bool = False,
+		kernel: str = 'quintic',
+		integration: str = 'midpoint',
+		use_python: bool = False,
+		use_openmp: bool = True,
+		omp_threads: Optional[int] = None,
+	) -> Union[npt.NDArray[np.floating], Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
 		"""Deposit particle fields onto a structured grid using the requested scheme.
 
-		:param fields: Particle quantities with shape (num_particles, num_fields).
-		:type fields: np.ndarray
-		:param averaged: Flags indicating which fields should be averaged by the weight grid.
-		:type averaged: Sequence[bool]
-		:param gridnums: Number of grid cells per spatial dimension (scalar or per-axis sequence).
-		:type gridnums: Union[int, Sequence[int]]
-		:param method: Deposition method (e.g. "cic", "tsc", "isotropic").
-		:type method: str
-		:param extent: Optional sequence of [min, max] pairs per axis defining the region to deposit.
-		:type extent: Optional[Sequence[Sequence[float]]]
-		:param plane_projection: Optional plane spec ("(0, 1)", "(0, 2)", "(1, 2)") to project 3D tensors to 2D before deposition.
-		:type plane_projection: Optional[str]
-		:param return_weights: Whether to also return the grid of accumulated weights.
-		:type return_weights: bool
-		:param kernel: SPH kernel name used for isotropic/anisotropic methods.
-		:type kernel: str
-		:param integration: Quadrature rule for SPH kernel integration.
-		:type integration: str
-		:param use_python: Use Python backend instead of C++ backend (this is mainly for debugging purposes).
-		:type use_python: bool
-		:param use_openmp: Enable OpenMP parallelism for the C++ backend. Ignored when ``use_python=True``.
-		:type use_openmp: bool
-		:param omp_threads: Optional positive integer overriding the number of OpenMP threads. ``None`` keeps the runtime default.
-		:type omp_threads: Optional[int]
+		Supports multiple deposition methods (CIC, TSC, SPH-based) with optional
+		plane projection for 3D→2D anisotropic tensor reduction.
+
+		Args:
+			fields: Particle quantities with shape (num_particles, num_fields).
+			averaged: Flags indicating which fields should be averaged by the weight grid.
+			gridnums: Number of grid cells per spatial dimension (scalar or per-axis sequence).
+			method: Deposition method name (e.g., "cic", "tsc", "isotropic", "anisotropic").
+			extent: Optional sequence of [min, max] pairs per axis defining the region to deposit.
+				If None, deposits over [0, boxsize] for periodic boundaries.
+			plane_projection: Optional plane spec ("xy"/"01", "xz"/"02", "yz"/"12") to project 
+				3D smoothing tensors to 2D before deposition. Only valid for 3D positions.
+			return_weights: Whether to also return the grid of accumulated weights.
+			kernel: SPH kernel name used for isotropic/anisotropic methods.
+			integration: Quadrature rule for SPH kernel integration (e.g., "midpoint").
+			use_python: Use Python backend instead of C++ backend (mainly for debugging).
+			use_openmp: Enable OpenMP parallelism for the C++ backend. Ignored when use_python=True.
+			omp_threads: Optional positive integer overriding the number of OpenMP threads.
+				If None, uses runtime default.
+
+		Returns:
+			- If return_weights=False: array of shape (gridnums..., num_fields) with deposited fields.
+			- If return_weights=True: tuple of (fields, weights) arrays.
+
+		Raises:
+			TypeError: If omp_threads is not an integer when provided.
+			ValueError: If omp_threads <= 0, or extent/boxsize dimensions mismatch.
+			AttributeError: If smoothing lengths/tensors not computed for SPH methods.
 		"""
 
 		if omp_threads is not None:
@@ -354,11 +360,9 @@ class MainClass:
 		# deposition grid dimension is coordinate dimension unless projecting to 2D plane
 		deposition_dim = self.pos.shape[1] if plane_projection is None else 2
 
-
 		# check that plane_projection is only specified for 3D point clouds
 		if plane_projection and self.dim != 3:
 			raise ValueError(f"Plane projection can only be specified for 3D particle positions, but found positions with shape {self.pos.shape}")
-
 
 		# check and typecast the 'fields' parameter
 		fields = np.asarray(fields, dtype=np.float32)
@@ -366,7 +370,6 @@ class MainClass:
 			raise ValueError(
 				f"'fields' array length ({fields.shape[0]}) must match number of particles ({self.pos.shape[0]})"
 			)
-
 
 		# check that either smoothing lengths or tensors have been computed if necessary
 		if method in ['isotropic', 'anisotropic'] and not hasattr(self, 'hsm') and not hasattr(self, 'h_tensor'):
@@ -487,52 +490,55 @@ class MainClass:
 		return res
 
 
-	def _deposit_to_grid(self,
-		positions: np.ndarray,
-		quantities: np.ndarray,
+	def _deposit_to_grid(
+		self,
+		positions: npt.NDArray[np.floating],
+		quantities: npt.NDArray[np.floating],
 		averaged: Sequence[bool],
-		gridnums: Union[int, Sequence[int]],
-		boxsizes: np.ndarray,
-		periodic: Union[int, Sequence[bool]],
+		gridnums: npt.NDArray[np.int32],
+		boxsizes: npt.NDArray[np.floating],
+		periodic: npt.NDArray[np.bool_],
 		*,
 		method: str,
-		hsm: Optional[np.ndarray],
-		hmat_eigvecs: Optional[np.ndarray],
-		hmat_eigvals: Optional[np.ndarray],
+		hsm: Optional[npt.NDArray[np.floating]],
+		hmat_eigvecs: Optional[npt.NDArray[np.floating]],
+		hmat_eigvals: Optional[npt.NDArray[np.floating]],
 		return_weights: bool,
 		use_python: bool,
 		kernel: str,
 		integration: str,
 		use_openmp: bool,
 		omp_threads: Optional[int],
-	) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+	) -> Union[npt.NDArray[np.floating], Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
 		"""Dispatch particle-to-grid deposition to the selected backend.
 
-		Parameters
-		----------
-		positions
-			Particle coordinates with shape (N, dim).
-		quantities
-			Fields to deposit with shape (N, num_fields).
-		averaged
-			Flags indicating which fields should be normalized by weights.
-		gridnums
-			Number of cells per dimension (scalar replicated across axes is allowed).
-		boxsizes
-			Domain extents for each axis expressed as maximum lengths.
-		periodic
-			Per-axis flags.
-		method
-			Name of the deposition method (e.g., "ngp", "cic", "tsc").
-		use_openmp
-			Enable OpenMP parallelism for the compiled backend branch.
-		omp_threads
-			Optional positive integer overriding the OpenMP thread count (0 keeps the runtime default).
+		Internal helper that routes deposition to Python or C++ backend based on
+		method and user preferences.
 
-		Returns
-		-------
-		Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]
-			Deposited fields, optionally accompanied by weights.
+		Args:
+			positions: Particle coordinates with shape (N, dim), shifted to domain origin.
+			quantities: Fields to deposit with shape (N, num_fields).
+			averaged: Flags indicating which fields should be normalized by weights.
+			gridnums: Number of grid cells per dimension, shape (dim,).
+			boxsizes: Domain extents (max - min) for each axis, shape (dim,).
+			periodic: Per-axis periodicity flags, shape (dim,).
+			method: Name of the deposition method (e.g., "ngp", "cic", "tsc", "isotropic").
+			hsm: Smoothing lengths for isotropic/adaptive methods, shape (N,) or None.
+			hmat_eigvecs: Smoothing tensor eigenvectors for anisotropic method, shape (N, D, D) or None.
+			hmat_eigvals: Smoothing tensor eigenvalues for anisotropic method, shape (N, D) or None.
+			return_weights: Whether to return accumulated weights alongside deposited fields.
+			use_python: Use Python backend instead of compiled C++ backend.
+			kernel: SPH kernel name for SPH-based methods.
+			integration: Quadrature rule name for kernel integration.
+			use_openmp: Enable OpenMP parallelism in C++ backend.
+			omp_threads: Number of OpenMP threads (0 = runtime default).
+
+		Returns:
+			- If return_weights=False: array of shape (gridnums..., num_fields) with deposited fields.
+			- If return_weights=True: tuple of (deposited_fields, weight_grid) arrays.
+
+		Raises:
+			AttributeError: If requested deposition function not found in backend module.
 		"""
 		dim = positions.shape[-1]
 
