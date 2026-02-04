@@ -14,7 +14,7 @@ py::tuple ngp_2d_py(py::array_t<float> pos,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
                     py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp = true, int omp_threads = 0)
+                    bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -55,7 +55,7 @@ py::tuple ngp_3d_py(py::array_t<float> pos,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
                     py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp = true, int omp_threads = 0)
+                    bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -97,7 +97,7 @@ py::tuple cic_2d_py(py::array_t<float> pos,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
                     py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp = true, int omp_threads = 0)
+                    bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -139,7 +139,7 @@ py::tuple cic_3d_py(py::array_t<float> pos,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
                     py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp = true, int omp_threads = 0)
+                    bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -184,7 +184,7 @@ py::tuple cic_2d_adaptive_py(py::array_t<float> pos,
                      py::array_t<int> gridnums,
                      py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
                      py::array_t<float> pcellsizesHalf,
-                     bool use_openmp = true, int omp_threads = 0)
+                     bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -229,7 +229,7 @@ py::tuple cic_3d_adaptive_py(py::array_t<float> pos,
                      py::array_t<int> gridnums,
                      py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
                      py::array_t<float> pcellsizesHalf,
-                     bool use_openmp = true, int omp_threads = 0)
+                     bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -273,7 +273,7 @@ py::tuple tsc_2d_py(py::array_t<float> pos,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
              py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-             bool use_openmp = true, int omp_threads = 0)
+            bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -314,7 +314,7 @@ py::tuple tsc_3d_py(py::array_t<float> pos,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
              py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-             bool use_openmp = true, int omp_threads = 0)
+            bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -358,7 +358,7 @@ py::tuple tsc_2d_adaptive_py(py::array_t<float> pos,
              py::array_t<int> gridnums,
              py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
              py::array_t<float> pcellsizesHalf,
-             bool use_openmp = true, int omp_threads = 0)
+            bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -403,7 +403,7 @@ py::tuple tsc_3d_adaptive_py(py::array_t<float> pos,
              py::array_t<int> gridnums,
              py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
              py::array_t<float> pcellsizesHalf,
-             bool use_openmp = true, int omp_threads = 0)
+            bool use_openmp, int omp_threads)
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -452,7 +452,8 @@ py::tuple isotropic_2d_py(
     py::array_t<float> hsm,
     const std::string& kernel_name,
     const std::string& integration_method,
-    bool use_openmp = true, int omp_threads = 0)
+    int min_kernel_evaluations,
+    bool use_openmp, int omp_threads)
 {
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
@@ -491,6 +492,7 @@ py::tuple isotropic_2d_py(
         periodic_ptr,
         kernel_name,
         integration_method,
+        min_kernel_evaluations,
         use_openmp,
         omp_threads,
         fields_ptr,
@@ -509,7 +511,8 @@ py::tuple isotropic_3d_py(
     py::array_t<float> hsm,
     const std::string& kernel_name,
     const std::string& integration_method,
-    bool use_openmp = true, int omp_threads = 0)
+    int min_kernel_evaluations,
+    bool use_openmp, int omp_threads)
 {
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
@@ -549,6 +552,7 @@ py::tuple isotropic_3d_py(
         periodic_ptr,
         kernel_name,
         integration_method,
+        min_kernel_evaluations,
         use_openmp,
         omp_threads,
         fields_ptr,
@@ -568,7 +572,8 @@ py::tuple anisotropic_2d_py(
     py::array_t<float> hmat_eigvals,
     const std::string& kernel_name,
     const std::string& integration_method,
-    bool use_openmp = true, int omp_threads = 0)
+    int min_kernel_evaluations,
+    bool use_openmp, int omp_threads)
 {
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
@@ -610,6 +615,7 @@ py::tuple anisotropic_2d_py(
         periodic_ptr,
         kernel_name,
         integration_method,
+        min_kernel_evaluations,
         use_openmp,
         omp_threads,
         fields_ptr,
@@ -629,7 +635,8 @@ py::tuple anisotropic_3d_py(
     py::array_t<float> hmat_eigvals,
     const std::string& kernel_name,
     const std::string& integration_method,
-    bool use_openmp = true, int omp_threads = 0)
+    int min_kernel_evaluations,
+    bool use_openmp, int omp_threads)
 {
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
@@ -672,6 +679,7 @@ py::tuple anisotropic_3d_py(
         periodic_ptr,
         kernel_name,
         integration_method,
+        min_kernel_evaluations,
         use_openmp,
         omp_threads,
         fields_ptr,
@@ -693,8 +701,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("ngp_3d", &ngp_3d_py, 
         "NGP deposition 3D",
@@ -703,8 +711,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("cic_2d", &cic_2d_py, 
         "CIC deposition 2D",
@@ -713,8 +721,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("cic_3d", &cic_3d_py,     
         "CIC deposition 3D",
@@ -723,8 +731,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("cic_2d_adaptive", &cic_2d_adaptive_py,     
         "CIC adaptive deposition 2D",
@@ -734,8 +742,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("gridnums"),
         py::arg("periodic"),
         py::arg("pcellsizesHalf"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("cic_3d_adaptive", &cic_3d_adaptive_py,     
         "CIC adaptive deposition 3D",
@@ -745,8 +753,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("gridnums"),
         py::arg("periodic"),
         py::arg("pcellsizesHalf"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("tsc_2d", &tsc_2d_py,     
         "TSC deposition 2D",
@@ -755,8 +763,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("tsc_3d", &tsc_3d_py,     
         "TSC deposition 3D",
@@ -765,8 +773,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("tsc_2d_adaptive", &tsc_2d_adaptive_py,     
         "TSC adaptive deposition 2D",
@@ -776,8 +784,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("gridnums"),
         py::arg("periodic"),
         py::arg("pcellsizesHalf"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("tsc_3d_adaptive", &tsc_3d_adaptive_py,     
         "TSC adaptive deposition 3D",
@@ -787,8 +795,8 @@ PYBIND11_MODULE(functions, m) {
         py::arg("gridnums"),
         py::arg("periodic"),
         py::arg("pcellsizesHalf"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("isotropic_2d", &isotropic_2d_py,
         "Isotropic SPH kernel deposition 2D",
@@ -800,8 +808,9 @@ PYBIND11_MODULE(functions, m) {
         py::arg("hsm"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("min_kernel_evaluations"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("isotropic_3d", &isotropic_3d_py,
         "Isotropic SPH kernel deposition 3D",
@@ -813,8 +822,9 @@ PYBIND11_MODULE(functions, m) {
         py::arg("hsm"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("min_kernel_evaluations"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("anisotropic_2d", &anisotropic_2d_py,
         "Anisotropic SPH kernel deposition 2D",
@@ -827,8 +837,9 @@ PYBIND11_MODULE(functions, m) {
         py::arg("hmat_eigvals"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("min_kernel_evaluations"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 
     m.def("anisotropic_3d", &anisotropic_3d_py,
         "Anisotropic SPH kernel deposition 3D",
@@ -841,6 +852,7 @@ PYBIND11_MODULE(functions, m) {
         py::arg("hmat_eigvals"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("use_openmp") = true,
-        py::arg("omp_threads") = 0);
+        py::arg("min_kernel_evaluations"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"));
 }

@@ -312,6 +312,7 @@ class MainClass:
 		return_weights: bool = False,
 		kernel: str = 'quintic',
 		integration: str = 'midpoint',
+		min_kernel_evaluations: int = 128,
 		use_python: bool = False,
 		use_openmp: bool = True,
 		omp_threads: Optional[int] = None,
@@ -333,6 +334,7 @@ class MainClass:
 			return_weights: Whether to also return the grid of accumulated weights.
 			kernel: SPH kernel name used for isotropic/anisotropic methods.
 			integration: Quadrature rule for SPH kernel integration (e.g., "midpoint").
+			min_kernel_evaluations: Minimum number of kernel samples for SPH methods.
 			use_python: Use Python backend instead of C++ backend (mainly for debugging).
 			use_openmp: Enable OpenMP parallelism for the C++ backend. Ignored when use_python=True.
 			omp_threads: Optional positive integer overriding the number of OpenMP threads.
@@ -484,6 +486,7 @@ class MainClass:
 					use_python=use_python,
 					kernel=kernel,
 					integration=integration,
+					min_kernel_evaluations=min_kernel_evaluations,
 					use_openmp=use_openmp,
 					omp_threads=omp_threads_value,
 					)
@@ -507,6 +510,7 @@ class MainClass:
 		use_python: bool,
 		kernel: str,
 		integration: str,
+		min_kernel_evaluations: int,
 		use_openmp: bool,
 		omp_threads: Optional[int],
 	) -> Union[npt.NDArray[np.floating], Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
@@ -530,6 +534,7 @@ class MainClass:
 			use_python: Use Python backend instead of compiled C++ backend.
 			kernel: SPH kernel name for SPH-based methods.
 			integration: Quadrature rule name for kernel integration.
+			min_kernel_evaluations: Minimum number of kernel samples for SPH methods.
 			use_openmp: Enable OpenMP parallelism in C++ backend.
 			omp_threads: Number of OpenMP threads (0 = runtime default).
 
@@ -544,6 +549,11 @@ class MainClass:
 
 		# select the deposition function based on the method, dim and use_python
 		namespace = pyfunc if use_python else cppfunc
+		if use_python and ("adaptive" in method or method in ["isotropic", "anisotropic"]):
+			raise NotImplementedError(
+				"Python backend does not implement adaptive or SPH deposition methods. "
+				"Set use_python=False to use the C++ backend."
+			)
 		func = getattr(namespace, f"{method}_{dim}d")
 		
 		if self.verbose:
@@ -569,6 +579,7 @@ class MainClass:
 				hsm,
 				kernel,
 				integration,
+				min_kernel_evaluations,
 			)
 
 		elif "anisotropic" == method:
@@ -582,6 +593,7 @@ class MainClass:
 				hmat_eigvals,
 				kernel,
 				integration,
+				min_kernel_evaluations,
 			)
 
 		else:
