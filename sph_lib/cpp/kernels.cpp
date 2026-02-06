@@ -240,7 +240,7 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kerne
     grid.count = min_kernel_evaluations;
     grid.coords.reserve(static_cast<size_t>(min_kernel_evaluations) * grid.dim);
     grid.q.reserve(min_kernel_evaluations);
-    grid.values.reserve(min_kernel_evaluations);
+    grid.integrals.reserve(min_kernel_evaluations);
 
     constexpr float pi = 3.14159265358979323846f;
     const float support = kernel.support();
@@ -260,11 +260,12 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kerne
                 float y = r * std::sin(theta);
                 float q = r;
                 float value = kernel.evaluate(q);
+                float integral = value * r * dr * dtheta;
 
                 grid.coords.push_back(x);
                 grid.coords.push_back(y);
                 grid.q.push_back(q);
-                grid.values.push_back(value);
+                grid.integrals.push_back(integral);
             }
         }
         return grid;
@@ -291,12 +292,13 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kerne
                     float z = r * std::cos(phi);
                     float q = r;
                     float value = kernel.evaluate(q);
+                    float integral = value * (r * r) * sin_phi * dr * dtheta * dphi;
 
                     grid.coords.push_back(x);
                     grid.coords.push_back(y);
                     grid.coords.push_back(z);
                     grid.q.push_back(q);
-                    grid.values.push_back(value);
+                    grid.integrals.push_back(integral);
                 }
             }
         }

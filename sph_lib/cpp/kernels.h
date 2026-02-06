@@ -24,7 +24,7 @@ struct KernelSampleGrid {
     int count;
     std::vector<float> coords;
     std::vector<float> q;
-    std::vector<float> values;
+    std::vector<float> integrals;
 };
 
 KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kernel_evaluations);
