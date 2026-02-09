@@ -16,7 +16,10 @@
 // Utilities
 // =============================================================================
 
-inline int apply_pbc(int idx, int gridnum) {
+inline int apply_pbc(int idx, int gridnum, bool periodic) {
+    if (!periodic) {
+        return idx;
+    }
     int r = idx % gridnum;
     return (r < 0) ? r + gridnum : r;
 }
@@ -24,7 +27,6 @@ inline int apply_pbc(int idx, int gridnum) {
 inline bool is_outside_domain(int index, int gridnum) {
     return (index < 0 || index >= gridnum);
 }
-
 
 inline std::optional<int> cell_index_from_pos(float pos, float boxsize, int gridnum, bool periodic) {
     // Periodic: wrap position into [0, boxsize) before indexing.
@@ -146,8 +148,8 @@ void ngp_2d_cpp(
     // extract grid parameters and precompute inverse cell sizes
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
 
     // prepare output arrays
     const int field_stride_x = gridnum_y * num_fields;
@@ -159,8 +161,8 @@ void ngp_2d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute cell index of mother cell
-        int ix = static_cast<int>(pos[2 * n + 0] * inv_dx_x);
-        int iy = static_cast<int>(pos[2 * n + 1] * inv_dx_y);
+        int ix = static_cast<int>(pos[2 * n + 0] * inv_cell_size_x);
+        int iy = static_cast<int>(pos[2 * n + 1] * inv_cell_size_y);
 
         // early-out if particle lies outside the grid domain
         if (is_outside_domain(ix, gridnum_x)) return;
@@ -197,9 +199,9 @@ void ngp_3d_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
 
     // prepare output arrays
     const int field_stride_x = gridnum_y * gridnum_z * num_fields;
@@ -212,9 +214,9 @@ void ngp_3d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute cell index of mother cell
-        int ix = static_cast<int>(pos[3 * n + 0] * inv_dx_x);
-        int iy = static_cast<int>(pos[3 * n + 1] * inv_dx_y);
-        int iz = static_cast<int>(pos[3 * n + 2] * inv_dx_z);
+        int ix = static_cast<int>(pos[3 * n + 0] * inv_cell_size_x);
+        int iy = static_cast<int>(pos[3 * n + 1] * inv_cell_size_y);
+        int iz = static_cast<int>(pos[3 * n + 2] * inv_cell_size_z);
 
         // early-out if particle lies outside the grid domain
         if (is_outside_domain(ix, gridnum_x)) return;
@@ -251,8 +253,8 @@ void cic_2d_cpp(
     // extract grid parameters and precompute inverse cell sizes
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -268,8 +270,8 @@ void cic_2d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // identify indices of the 4 surrounding grid cells
-        float xpos = pos[2 * n + 0] * inv_dx_x;
-        float ypos = pos[2 * n + 1] * inv_dx_y;
+        float xpos = pos[2 * n + 0] * inv_cell_size_x;
+        float ypos = pos[2 * n + 1] * inv_cell_size_y;
         int i0 = static_cast<int>(std::floor(xpos));
         int j0 = static_cast<int>(std::floor(ypos));
         int i1 = i0 + 1;
@@ -293,17 +295,13 @@ void cic_2d_cpp(
             int ii = i;
             int jj = j;
 
-            // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            if (periodic_x) {
-                ii = apply_pbc(ii, gridnum_x);
-            } else if (is_outside_domain(ii, gridnum_x)) {
-                return;
-            }
-            if (periodic_y) {
-                jj = apply_pbc(jj, gridnum_y);
-            } else if (is_outside_domain(jj, gridnum_y)) {
-                return;
-            }
+            // wrap indices if periodic
+            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            jj = apply_pbc(jj, gridnum_y, periodic_y);
+
+            // early-out if cell lies outside the grid domain (only relevant for non-periodic case)
+            if (is_outside_domain(ii, gridnum_x)) return;
+            if (is_outside_domain(jj, gridnum_y)) return;
 
             // deposit to grid
             int base_idx   = ii * field_stride_x + jj * field_stride_y;
@@ -342,9 +340,9 @@ void cic_3d_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
 
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -362,9 +360,9 @@ void cic_3d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // identify indices of the 8 surrounding grid cells
-        float xpos = pos[3 * n + 0] * inv_dx_x;
-        float ypos = pos[3 * n + 1] * inv_dx_y;
-        float zpos = pos[3 * n + 2] * inv_dx_z;
+        float xpos = pos[3 * n + 0] * inv_cell_size_x;
+        float ypos = pos[3 * n + 1] * inv_cell_size_y;
+        float zpos = pos[3 * n + 2] * inv_cell_size_z;
         int i0 = static_cast<int>(std::floor(xpos));
         int j0 = static_cast<int>(std::floor(ypos));
         int k0 = static_cast<int>(std::floor(zpos));
@@ -397,22 +395,15 @@ void cic_3d_cpp(
             int jj = j;
             int kk = k;
 
-            // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            if (periodic_x) {
-                ii = apply_pbc(ii, gridnum_x);
-            } else if (is_outside_domain(ii, gridnum_x)) {
-                return;
-            }
-            if (periodic_y) {
-                jj = apply_pbc(jj, gridnum_y);
-            } else if (is_outside_domain(jj, gridnum_y)) {
-                return;
-            }
-            if (periodic_z) {
-                kk = apply_pbc(kk, gridnum_z);
-            } else if (is_outside_domain(kk, gridnum_z)) {
-                return;
-            }
+            // wrap indices if periodic
+            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            jj = apply_pbc(jj, gridnum_y, periodic_y);
+            kk = apply_pbc(kk, gridnum_z, periodic_z);
+
+            // early-out if particle lies outside the grid domain (only relevant for non-periodic case)
+            if (is_outside_domain(ii, gridnum_x)) return;
+            if (is_outside_domain(jj, gridnum_y)) return;
+            if (is_outside_domain(kk, gridnum_z)) return;
 
             // deposit to grid
             int base_idx   = ii * field_stride_x + jj * field_stride_y + kk * field_stride_z;
@@ -455,8 +446,8 @@ void cic_2d_adaptive_cpp(
     // extract grid parameters and precompute inverse cell sizes
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -473,13 +464,13 @@ void cic_2d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute half cell sizes in grid units and particle volume
-        float pcs_x = pcellsizesHalf[n] * inv_dx_x;
-        float pcs_y = pcellsizesHalf[n] * inv_dx_y;
+        float pcs_x = pcellsizesHalf[n] * inv_cell_size_x;
+        float pcs_y = pcellsizesHalf[n] * inv_cell_size_y;
         float V = (2.0f * pcs_x) * (2.0f * pcs_y);
 
         // compute mother cell index and bounding box
-        float xpos = pos[2 * n + 0] * inv_dx_x;
-        float ypos = pos[2 * n + 1] * inv_dx_y;
+        float xpos = pos[2 * n + 0] * inv_cell_size_x;
+        float ypos = pos[2 * n + 1] * inv_cell_size_y;
         float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
         float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
 
@@ -495,11 +486,8 @@ void cic_2d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            if (periodic_x) {
-                ii = apply_pbc(i, gridnum_x);
-            } else if (is_outside_domain(i, gridnum_x)) {
-                continue;
-            }
+            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute cell edge coordinates for current grid cell
             float e1 = static_cast<float>(i);
@@ -509,11 +497,8 @@ void cic_2d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                if (periodic_y) {
-                    jj = apply_pbc(j, gridnum_y);
-                } else if (is_outside_domain(j, gridnum_y)) {
-                    continue;
-                }
+                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute cell edge coordinates for current grid cell
                 float e3 = static_cast<float>(j);
@@ -559,9 +544,9 @@ void cic_3d_adaptive_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
     
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -582,15 +567,15 @@ void cic_3d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute half cell sizes in grid units and particle volume
-        float pcs_x = pcellsizesHalf[n] * inv_dx_x;
-        float pcs_y = pcellsizesHalf[n] * inv_dx_y;
-        float pcs_z = pcellsizesHalf[n] * inv_dx_z;
+        float pcs_x = pcellsizesHalf[n] * inv_cell_size_x;
+        float pcs_y = pcellsizesHalf[n] * inv_cell_size_y;
+        float pcs_z = pcellsizesHalf[n] * inv_cell_size_z;
         float V = (2.0f * pcs_x) * (2.0f * pcs_y) * (2.0f * pcs_z);
 
         // compute mother cell index and bounding box
-        float xpos = pos[3 * n + 0] * inv_dx_x;
-        float ypos = pos[3 * n + 1] * inv_dx_y;
-        float zpos = pos[3 * n + 2] * inv_dx_z;
+        float xpos = pos[3 * n + 0] * inv_cell_size_x;
+        float ypos = pos[3 * n + 1] * inv_cell_size_y;
+        float zpos = pos[3 * n + 2] * inv_cell_size_z;
         float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
         float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
         float c5 = zpos - pcs_z, c6 = zpos + pcs_z;
@@ -609,11 +594,8 @@ void cic_3d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            if (periodic_x) {
-                ii = apply_pbc(i, gridnum_x);
-            } else if (is_outside_domain(i, gridnum_x)) {
-                continue;
-            }
+            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute cell edge coordinates for current grid cell
             float e1 = static_cast<float>(i);
@@ -623,11 +605,8 @@ void cic_3d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                if (periodic_y) {
-                    jj = apply_pbc(j, gridnum_y);
-                } else if (is_outside_domain(j, gridnum_y)) {
-                    continue;
-                }
+                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute cell edge coordinates for current grid cell
                 float e3 = static_cast<float>(j);
@@ -637,11 +616,8 @@ void cic_3d_adaptive_cpp(
                     int kk = k;
 
                     // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                    if (periodic_z) {
-                        kk = apply_pbc(k, gridnum_z);
-                    } else if (is_outside_domain(k, gridnum_z)) {
-                        continue;
-                    }
+                    kk = apply_pbc(kk, gridnum_z, periodic_z);
+                    if (is_outside_domain(kk, gridnum_z)) continue;
 
                     // compute cell edge coordinates for current grid cell
                     float e5 = static_cast<float>(k);
@@ -699,8 +675,8 @@ void tsc_2d_cpp(
     // extract grid parameters and precompute inverse cell sizes
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -719,8 +695,8 @@ void tsc_2d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float xpos = pos[2 * n + 0] * inv_dx_x;
-        float ypos = pos[2 * n + 1] * inv_dx_y;
+        float xpos = pos[2 * n + 0] * inv_cell_size_x;
+        float ypos = pos[2 * n + 1] * inv_cell_size_y;
         int i_base = static_cast<int>(std::floor(xpos));
         int j_base = static_cast<int>(std::floor(ypos));
 
@@ -737,21 +713,15 @@ void tsc_2d_cpp(
             int ix = i_base + offsets[i];
 
             // check periodicity and apply PBC if needed, early-out if outside domain
-            if (periodic_x) {
-                ix = apply_pbc(ix, gridnum_x);
-            } else if (is_outside_domain(ix, gridnum_x)) {
-                continue;
-            }
+            ix = apply_pbc(ix, gridnum_x, periodic_x);
+            if (is_outside_domain(ix, gridnum_x)) continue;
             
             for (int j = 0; j < 3; ++j) {
                 int iy = j_base + offsets[j];
 
                 // check periodicity and apply PBC if needed, early-out if outside domain
-                if (periodic_y) {
-                    iy = apply_pbc(iy, gridnum_y);
-                } else if (is_outside_domain(iy, gridnum_y)) {
-                    continue;
-                }
+                iy = apply_pbc(iy, gridnum_y, periodic_y);
+                if (is_outside_domain(iy, gridnum_y)) continue;
 
                 // compute combined weight for this neighbor cell
                 float w = wx[i] * wy[j];
@@ -792,9 +762,9 @@ void tsc_3d_cpp(
     const bool periodic_x = periodic[0];
     const bool periodic_y = periodic[1];
     const bool periodic_z = periodic[2];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
 
     // Strides for C-contiguous layout (x, y, z, f)
     const int stride_x = gridnum_y * gridnum_z * num_fields;
@@ -811,9 +781,9 @@ void tsc_3d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float xpos = pos[3 * n + 0] * inv_dx_x;
-        float ypos = pos[3 * n + 1] * inv_dx_y;
-        float zpos = pos[3 * n + 2] * inv_dx_z;
+        float xpos = pos[3 * n + 0] * inv_cell_size_x;
+        float ypos = pos[3 * n + 1] * inv_cell_size_y;
+        float zpos = pos[3 * n + 2] * inv_cell_size_z;
 
         // compute base cell index (mother cell)
         int i_base = static_cast<int>(std::floor(xpos));
@@ -836,31 +806,22 @@ void tsc_3d_cpp(
             int ix = i_base + offsets[i];
 
             // check periodicity and apply PBC if needed, early-out if outside domain
-            if (periodic_x) {
-                ix = apply_pbc(ix, gridnum_x);
-            } else if (is_outside_domain(ix, gridnum_x)) {
-                continue;
-            }
+            ix = apply_pbc(ix, gridnum_x, periodic_x);
+            if (is_outside_domain(ix, gridnum_x)) continue;
             
             for (int j = 0; j < 3; ++j) {
                 int iy = j_base + offsets[j];
 
                 // check periodicity and apply PBC if needed, early-out if outside domain
-                if (periodic_y) {
-                    iy = apply_pbc(iy, gridnum_y);
-                } else if (is_outside_domain(iy, gridnum_y)) {
-                    continue;
-                }
+                iy = apply_pbc(iy, gridnum_y, periodic_y);
+                if (is_outside_domain(iy, gridnum_y)) continue;
                 
                 for (int k = 0; k < 3; ++k) {
                     int iz = k_base + offsets[k];
 
                     // check periodicity and apply PBC if needed, early-out if outside domain
-                    if (periodic_z) {
-                        iz = apply_pbc(iz, gridnum_z);
-                    } else if (is_outside_domain(iz, gridnum_z)) {
-                        continue;
-                    }
+                    iz = apply_pbc(iz, gridnum_z, periodic_z);
+                    if (is_outside_domain(iz, gridnum_z)) continue;
 
                     // compute combined weight for this neighbor cell
                     float w = wx[i] * wy[j] * wz[k];
@@ -922,8 +883,8 @@ void tsc_2d_adaptive_cpp(
     // extract grid parameters and precompute inverse cell sizes
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -941,10 +902,10 @@ void tsc_2d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x = pos[2 * n + 0] * inv_dx_x;
-        float y = pos[2 * n + 1] * inv_dx_y;
-        float h_x = pcellsizesHalf[n] * inv_dx_x;
-        float h_y = pcellsizesHalf[n] * inv_dx_y;
+        float x = pos[2 * n + 0] * inv_cell_size_x;
+        float y = pos[2 * n + 1] * inv_cell_size_y;
+        float h_x = pcellsizesHalf[n] * inv_cell_size_x;
+        float h_y = pcellsizesHalf[n] * inv_cell_size_y;
         float support_x = 1.5f * h_x;
         float support_y = 1.5f * h_y;
 
@@ -960,8 +921,8 @@ void tsc_2d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            if (periodic_x) ii = apply_pbc(i, gridnum_x);
-            else if (is_outside_domain(ii, gridnum_x)) continue;
+            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute integrated weight for this cell in x direction
             float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
@@ -972,8 +933,8 @@ void tsc_2d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                if (periodic_y) jj = apply_pbc(j, gridnum_y);
-                else if (is_outside_domain(jj, gridnum_y)) continue;
+                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute integrated weight for this cell in y direction
                 float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
@@ -1014,9 +975,9 @@ void tsc_3d_adaptive_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-    const float inv_dx_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_dx_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_dx_z = static_cast<float>(gridnum_z) / boxsizes[2];
+    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
+    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
+    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
     
     // extract periodicity flags
     const bool periodic_x = periodic[0];
@@ -1037,12 +998,12 @@ void tsc_3d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x = pos[3 * n + 0] * inv_dx_x;
-        float y = pos[3 * n + 1] * inv_dx_y;
-        float z = pos[3 * n + 2] * inv_dx_z;
-        float h_x = pcellsizesHalf[n] * inv_dx_x;
-        float h_y = pcellsizesHalf[n] * inv_dx_y;
-        float h_z = pcellsizesHalf[n] * inv_dx_z;
+        float x = pos[3 * n + 0] * inv_cell_size_x;
+        float y = pos[3 * n + 1] * inv_cell_size_y;
+        float z = pos[3 * n + 2] * inv_cell_size_z;
+        float h_x = pcellsizesHalf[n] * inv_cell_size_x;
+        float h_y = pcellsizesHalf[n] * inv_cell_size_y;
+        float h_z = pcellsizesHalf[n] * inv_cell_size_z;
         float support_x = 1.5f * h_x;
         float support_y = 1.5f * h_y;
         float support_z = 1.5f * h_z;
@@ -1061,8 +1022,8 @@ void tsc_3d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, early-out if outside domain
-            if (periodic_x) ii = apply_pbc(i, gridnum_x);
-            else if (is_outside_domain(ii, gridnum_x)) continue;
+            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            if (is_outside_domain(ii, gridnum_x)) continue;
             
             // compute integrated weight for this cell in x direction
             float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
@@ -1073,8 +1034,8 @@ void tsc_3d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, early-out if outside domain
-                if (periodic_y) jj = apply_pbc(j, gridnum_y);
-                else if (is_outside_domain(jj, gridnum_y)) continue;
+                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute integrated weight for this cell in y direction
                 float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
@@ -1085,8 +1046,8 @@ void tsc_3d_adaptive_cpp(
                     int kk = k;
 
                     // check periodicity and apply PBC if needed, early-out if outside domain
-                    if (periodic_z) kk = apply_pbc(k, gridnum_z);
-                    else if (is_outside_domain(kk, gridnum_z)) continue;
+                    kk = apply_pbc(kk, gridnum_z, periodic_z);
+                    if (is_outside_domain(kk, gridnum_z)) continue;
 
                     // compute integrated weight for this cell in z direction
                     float wz = tsc_integrated_weight_1d(z, float(k), float(k+1), h_z);
@@ -1320,19 +1281,13 @@ void isotropic_kernel_deposition_2d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                if (periodic_x) {
-                    an = apply_pbc(an, gridnum_x);
-                } else if (is_outside_domain(an, gridnum_x)) {
-                    continue;
-                }
+                an = apply_pbc(an, gridnum_x, periodic_x);
+                if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    if (periodic_y) {
-                        bn = apply_pbc(bn, gridnum_y);
-                    } else if (is_outside_domain(bn, gridnum_y)) {
-                        continue;
-                    }
+                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    if (is_outside_domain(bn, gridnum_y)) continue;
 
                     // set up helper function for integral evaluation using method
                     auto eval = [&](float ox, float oy) {
@@ -1499,27 +1454,18 @@ void isotropic_kernel_deposition_3d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                if (periodic_x) {
-                    an = apply_pbc(an, gridnum_x);
-                } else if (is_outside_domain(an, gridnum_x)) {
-                    continue;
-                }
+                an = apply_pbc(an, gridnum_x, periodic_x);
+                if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    if (periodic_y) {
-                        bn = apply_pbc(bn, gridnum_y);
-                    } else if (is_outside_domain(bn, gridnum_y)) {
-                        continue;
-                    }
+                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    if (is_outside_domain(bn, gridnum_y)) continue;
 
                     for (int c = k_min; c <= k_max; ++c) {
                         int cn = c;
-                        if (periodic_z) {
-                            cn = apply_pbc(cn, gridnum_z);
-                        } else if (is_outside_domain(cn, gridnum_z)) {
-                            continue;
-                        }
+                        cn = apply_pbc(cn, gridnum_z, periodic_z);
+                        if (is_outside_domain(cn, gridnum_z)) continue;
 
                         // set up helper function for integral evaluation using method
                         auto eval = [&](float ox, float oy, float oz) {
@@ -1685,19 +1631,13 @@ void anisotropic_kernel_deposition_2d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                if (periodic_x) {
-                    an = apply_pbc(an, gridnum_x);
-                } else if (is_outside_domain(an, gridnum_x)) {
-                    continue;
-                }
+                an = apply_pbc(an, gridnum_x, periodic_x);
+                if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    if (periodic_y) {
-                        bn = apply_pbc(bn, gridnum_y);
-                    } else if (is_outside_domain(bn, gridnum_y)) {
-                        continue;
-                    }
+                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    if (is_outside_domain(bn, gridnum_y)) continue;
 
                     // set up helper function for integral evaluation using method
                     auto eval = [&](float ox, float oy) {
@@ -1886,15 +1826,18 @@ void anisotropic_kernel_deposition_3d_cpp(
         // large-support path: integrate directly over grid cells
         else {
             for (int a = i_min; a <= i_max; ++a) {
-                int an = periodic_x ? apply_pbc(a, gridnum_x) : a;
+                int an = a;
+                an = apply_pbc(an, gridnum_x, periodic_x);
                 if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
-                    int bn = periodic_y ? apply_pbc(b, gridnum_y) : b;
+                    int bn = b;
+                    bn = apply_pbc(bn, gridnum_y, periodic_y);
                     if (is_outside_domain(bn, gridnum_y)) continue;
 
                     for (int c = k_min; c <= k_max; ++c) {
-                        int cn = periodic_z ? apply_pbc(c, gridnum_z) : c;
+                        int cn = c;
+                        cn = apply_pbc(cn, gridnum_z, periodic_z);
                         if (is_outside_domain(cn, gridnum_z)) continue;
 
                         // set up helper function for integral evaluation using method
