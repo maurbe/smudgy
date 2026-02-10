@@ -694,8 +694,40 @@ py::tuple anisotropic_3d_py(
 PYBIND11_MODULE(functions, m) {
     m.doc() = "C++ deposition functions";
 
+#ifdef OPENMP_AVAILABLE
+    m.attr("has_openmp") = true;
+#else
+    m.attr("has_openmp") = false;
+#endif
+
     m.def("ngp_2d", &ngp_2d_py, 
-        "NGP deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using NGP (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions, where ``N`` is the number of particles.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -705,7 +737,33 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("ngp_3d", &ngp_3d_py, 
-        "NGP deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using NGP (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions, where ``N`` is the number of particles.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -715,7 +773,33 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("cic_2d", &cic_2d_py, 
-        "CIC deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using CIC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -725,7 +809,33 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("cic_3d", &cic_3d_py,     
-        "CIC deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using CIC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -735,7 +845,35 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("cic_2d_adaptive", &cic_2d_adaptive_py,     
-        "CIC adaptive deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using adaptive CIC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+pcellsizesHalf : numpy.ndarray, shape (N, 2)
+    Half cell sizes per particle (adaptive support).
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -746,7 +884,35 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("cic_3d_adaptive", &cic_3d_adaptive_py,     
-        "CIC adaptive deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using adaptive CIC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+pcellsizesHalf : numpy.ndarray, shape (N, 3)
+    Half cell sizes per particle (adaptive support).
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -757,7 +923,33 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("tsc_2d", &tsc_2d_py,     
-        "TSC deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using TSC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -767,7 +959,33 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("tsc_3d", &tsc_3d_py,     
-        "TSC deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using TSC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -777,7 +995,35 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("tsc_2d_adaptive", &tsc_2d_adaptive_py,     
-        "TSC adaptive deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using adaptive TSC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+pcellsizesHalf : numpy.ndarray, shape (N, 2)
+    Half cell sizes per particle (adaptive support).
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -788,7 +1034,35 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("tsc_3d_adaptive", &tsc_3d_adaptive_py,     
-        "TSC adaptive deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using adaptive TSC (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+pcellsizesHalf : numpy.ndarray, shape (N, 3)
+    Half cell sizes per particle (adaptive support).
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -799,7 +1073,41 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("isotropic_2d", &isotropic_2d_py,
-        "Isotropic SPH kernel deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using an isotropic SPH kernel (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+hsm : numpy.ndarray, shape (N,)
+    Smoothing lengths per particle.
+kernel_name : str
+    Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+integration_method : str
+    Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+min_kernel_evaluations : int
+    Minimum kernel samples per particle.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"),
         py::arg("quantities"),
         py::arg("boxsizes"),
@@ -813,7 +1121,41 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("isotropic_3d", &isotropic_3d_py,
-        "Isotropic SPH kernel deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using an isotropic SPH kernel (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+hsm : numpy.ndarray, shape (N,)
+    Smoothing lengths per particle.
+kernel_name : str
+    Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+integration_method : str
+    Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+min_kernel_evaluations : int
+    Minimum kernel samples per particle.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"),
         py::arg("quantities"),
         py::arg("boxsizes"),
@@ -827,7 +1169,43 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("anisotropic_2d", &anisotropic_2d_py,
-        "Anisotropic SPH kernel deposition 2D",
+        R"doc(
+Deposit particle quantities onto a 2D grid using an anisotropic SPH kernel (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 2)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (2,)
+    Domain size per axis.
+gridnums : array_like, shape (2,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (2,)
+    Periodic boundaries per axis.
+hmat_eigvecs : numpy.ndarray, shape (N, 2, 2)
+    Eigenvectors of the smoothing tensor per particle.
+hmat_eigvals : numpy.ndarray, shape (N, 2)
+    Eigenvalues of the smoothing tensor per particle.
+kernel_name : str
+    Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+integration_method : str
+    Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+min_kernel_evaluations : int
+    Minimum kernel samples per particle.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy)
+    Weight sum per cell.
+)doc",
         py::arg("pos"),
         py::arg("quantities"),
         py::arg("boxsizes"),
@@ -842,7 +1220,43 @@ PYBIND11_MODULE(functions, m) {
         py::arg("omp_threads"));
 
     m.def("anisotropic_3d", &anisotropic_3d_py,
-        "Anisotropic SPH kernel deposition 3D",
+        R"doc(
+Deposit particle quantities onto a 3D grid using an anisotropic SPH kernel (C++ backend).
+
+Parameters
+----------
+pos : numpy.ndarray, shape (N, 3)
+    Particle positions.
+quantities : numpy.ndarray, shape (N, F)
+    Per-particle fields to deposit.
+boxsizes : array_like, shape (3,)
+    Domain size per axis.
+gridnums : array_like, shape (3,)
+    Number of grid cells per axis.
+periodic : array_like of bool, shape (3,)
+    Periodic boundaries per axis.
+hmat_eigvecs : numpy.ndarray, shape (N, 3, 3)
+    Eigenvectors of the smoothing tensor per particle.
+hmat_eigvals : numpy.ndarray, shape (N, 3)
+    Eigenvalues of the smoothing tensor per particle.
+kernel_name : str
+    Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+integration_method : str
+    Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+min_kernel_evaluations : int
+    Minimum kernel samples per particle.
+use_openmp : bool
+    Enable OpenMP parallelism.
+omp_threads : int
+    Number of OpenMP threads (0 uses the default).
+
+Returns
+-------
+fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+    Deposited field values.
+weights : numpy.ndarray, shape (Gx, Gy, Gz)
+    Weight sum per cell.
+)doc",
         py::arg("pos"),
         py::arg("quantities"),
         py::arg("boxsizes"),

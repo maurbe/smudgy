@@ -3,19 +3,18 @@ import numpy as np
 import numpy.typing as npt
 
 from .utils import (build_kdtree,
-					query_kdtree,
 					compute_hsm, 
-                    compute_hsm_tensor, 
-                    compute_pcellsize_half, 
-                    project_hsm_tensor_to_2d,
+					compute_hsm_tensor, 
+					compute_pcellsize_half, 
+					project_hsm_tensor_to_2d,
 					coordinate_difference_with_pbc
 					)
-from kernels import Kernel
+from .kernels import Kernel
 from .python import functions as pyfunc
 from .cpp import functions as cppfunc
 
 
-class MainClass:
+class PointCloud:
 
 	def __init__(self,
 				 positions: np.ndarray,
@@ -52,21 +51,22 @@ class MainClass:
 	) -> None:
 		"""Compute smoothing lengths or tensors for SPH calculations.
 
-		Args:
-			num_neighbors: Number of nearest neighbors used for smoothing length estimation.
-			mode: Type of smoothing to compute. Options are:
-				- 'adaptive': Compute rectangular particle extent as half-distance to Nth neighbor.
-				- 'isotropic': Compute scalar smoothing length as half-distance to Nth neighbor.
-				- 'anisotropic': Compute smoothing tensor using covariance-based method.
-			query_pos: Optional array of shape (M, D) with positions where smoothing is evaluated.
-				If None, uses particle positions from the instance.
+		Parameters
+		----------
+		num_neighbors
+			Number of nearest neighbors used for smoothing length estimation.
+		mode
+			Smoothing mode: ``"adaptive"``, ``"isotropic"``, or ``"anisotropic"``.
+		query_pos
+			Optional array of shape ``(M, D)`` with positions where smoothing is evaluated.
+			If ``None``, uses the particle positions from the instance.
 
-		Returns:
-			None. Results are stored as instance attributes:
-				- `hsm`: Smoothing lengths (adaptive/isotropic modes).
-				- `h_tensor`, `h_eigvals`, `h_eigvecs`: Smoothing tensor, eigenvalues and -vectors (anisotropic mode).
-				- `nn_inds`: Nearest neighbor indices for all modes.
-				- `nn_dists`: Nearest neighbor distances (isotropic mode only).
+		Returns
+		-------
+		None
+			Results are stored on the instance: ``hsm`` (adaptive/isotropic),
+			``h_tensor``/``h_eigvals``/``h_eigvecs`` (anisotropic), ``nn_inds``
+			(all modes), and ``nn_dists`` (isotropic only).
 		"""
 		
 		self.num_neighbors = num_neighbors
@@ -143,24 +143,32 @@ class MainClass:
 			) -> npt.NDArray[np.floating]:
 		"""Interpolate particle fields to arbitrary query positions using SPH.
 
-		Requires that `compute_smoothing_lengths` and `compute_density` have been 
+		Requires that ``compute_smoothing_lengths`` and ``compute_density`` have been
 		called first. Automatically computes density if not already available.
 
-		Args:
-			fields: Array of shape (N, num_fields) or (N,) with particle field data.
-			query_positions: Array of shape (M, D) with positions where fields are interpolated.
-			kernel_name: Name of the SPH kernel to use. If None, uses the previously set kernel.
-			compute_gradients: If True, compute field gradients at query positions instead
-				of field values.
+		Parameters
+		----------
+		fields
+			Array of shape ``(N, num_fields)`` or ``(N,)`` with particle field data.
+		query_positions
+			Array of shape ``(M, D)`` with positions where fields are interpolated.
+		kernel_name
+			Name of the SPH kernel to use. If ``None``, uses the previously set kernel.
+		compute_gradients
+			If ``True``, compute field gradients at query positions instead of values.
 
-		Returns:
-			Array of interpolated field values or gradients:
-				- If compute_gradients=False: shape (M, num_fields) with interpolated values.
-				- If compute_gradients=True: shape (M, num_fields, D) with interpolated gradients.
+		Returns
+		-------
+		numpy.ndarray
+			If ``compute_gradients=False``: shape ``(M, num_fields)``.
+			If ``compute_gradients=True``: shape ``(M, num_fields, D)``.
 
-		Raises:
-			ValueError: If kernel_name is not implemented.
-			AssertionError: If fields length does not match number of particles.
+		Raises
+		------
+		ValueError
+			If ``kernel_name`` is not implemented.
+		AssertionError
+			If ``fields`` length does not match the number of particles.
 		"""
 		
 		if not isinstance(fields, np.ndarray):
@@ -322,32 +330,52 @@ class MainClass:
 		Supports multiple deposition methods (CIC, TSC, SPH-based) with optional
 		plane projection for 3D→2D anisotropic tensor reduction.
 
-		Args:
-			fields: Particle quantities with shape (num_particles, num_fields).
-			averaged: Flags indicating which fields should be averaged by the weight grid.
-			gridnums: Number of grid cells per spatial dimension (scalar or per-axis sequence).
-			method: Deposition method name (e.g., "cic", "tsc", "isotropic", "anisotropic").
-			extent: Optional sequence of [min, max] pairs per axis defining the region to deposit.
-				If None, deposits over [0, boxsize] for periodic boundaries.
-			plane_projection: Optional plane spec ("xy"/"01", "xz"/"02", "yz"/"12") to project 
-				3D smoothing tensors to 2D before deposition. Only valid for 3D positions.
-			return_weights: Whether to also return the grid of accumulated weights.
-			kernel: SPH kernel name used for isotropic/anisotropic methods.
-			integration: Quadrature rule for SPH kernel integration (e.g., "midpoint").
-			min_kernel_evaluations: Minimum number of kernel samples for SPH methods.
-			use_python: Use Python backend instead of C++ backend (mainly for debugging).
-			use_openmp: Enable OpenMP parallelism for the C++ backend. Ignored when use_python=True.
-			omp_threads: Optional positive integer overriding the number of OpenMP threads.
-				If None, uses runtime default.
+		Parameters
+		----------
+		fields
+			Particle quantities with shape ``(num_particles, num_fields)``.
+		averaged
+			Flags indicating which fields should be averaged by the weight grid.
+		gridnums
+			Number of grid cells per spatial dimension (scalar or per-axis sequence).
+		method
+			Deposition method name (e.g., ``"cic"``, ``"tsc"``, ``"isotropic"``).
+		extent
+			Optional sequence of ``[min, max]`` pairs per axis defining the region to deposit.
+			If ``None``, deposits over ``[0, boxsize]`` for periodic boundaries.
+		plane_projection
+			Optional plane spec (``"xy"/"01"``, ``"xz"/"02"``, ``"yz"/"12"``) to project
+			3D smoothing tensors to 2D before deposition. Only valid for 3D positions.
+		return_weights
+			Whether to also return the grid of accumulated weights.
+		kernel
+			SPH kernel name used for isotropic/anisotropic methods.
+		integration
+			Quadrature rule for SPH kernel integration (e.g., ``"midpoint"``).
+		min_kernel_evaluations
+			Minimum number of kernel samples for SPH methods.
+		use_python
+			Use Python backend instead of C++ backend (mainly for debugging).
+		use_openmp
+			Enable OpenMP parallelism for the C++ backend. Ignored when ``use_python=True``.
+		omp_threads
+			Optional positive integer overriding the number of OpenMP threads.
+			If ``None``, uses runtime default.
 
-		Returns:
-			- If return_weights=False: array of shape (gridnums..., num_fields) with deposited fields.
-			- If return_weights=True: tuple of (fields, weights) arrays.
+		Returns
+		-------
+		numpy.ndarray or Tuple[numpy.ndarray, numpy.ndarray]
+			If ``return_weights=False``: array of shape ``(gridnums..., num_fields)``.
+			If ``return_weights=True``: tuple ``(fields, weights)``.
 
-		Raises:
-			TypeError: If omp_threads is not an integer when provided.
-			ValueError: If omp_threads <= 0, or extent/boxsize dimensions mismatch.
-			AttributeError: If smoothing lengths/tensors not computed for SPH methods.
+		Raises
+		------
+		TypeError
+			If ``omp_threads`` is not an integer when provided.
+		ValueError
+			If ``omp_threads <= 0`` or extent/boxsize dimensions mismatch.
+		AttributeError
+			If smoothing lengths/tensors were not computed for SPH methods.
 		"""
 
 		if omp_threads is not None:
@@ -620,6 +648,4 @@ class MainClass:
 			return fields, weights
 		else:
 			return fields
-
-
 

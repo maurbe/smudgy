@@ -1,13 +1,40 @@
+import os
 import platform
+import tempfile
+import textwrap
 from setuptools import setup, find_packages
+from distutils.ccompiler import new_compiler
+from distutils.sysconfig import customize_compiler
 
 import numpy as np
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 
 system = platform.system()
+has_openmp = False
 extra_compile_args = []
 extra_link_args = []
+
+
+def _supports_openmp(compile_args, link_args) -> bool:
+    test_code = textwrap.dedent(
+        """
+        #include <omp.h>
+        int main() { return 0; }
+        """
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "omp_test.cpp")
+        with open(src, "w", encoding="utf-8") as handle:
+            handle.write(test_code)
+        compiler = new_compiler()
+        customize_compiler(compiler)
+        try:
+            obj_files = compiler.compile([src], extra_postargs=compile_args)
+            compiler.link_executable(obj_files, os.path.join(tmp, "a.out"), extra_postargs=link_args)
+            return True
+        except Exception:
+            return False
 
 if system == "Darwin":  # macOS
     extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
@@ -19,6 +46,13 @@ else:
     extra_compile_args = ["/std:c++17", "/O2", "/openmp"]
     extra_link_args = []
 
+if not _supports_openmp(extra_compile_args, extra_link_args):
+    extra_compile_args = ["-std=c++17", "-O3"] if system != "Windows" else ["/std:c++17", "/O2"]
+    extra_link_args = []
+    has_openmp = False
+else:
+    has_openmp = True
+
 
 ext_modules = [
     Pybind11Extension(
@@ -27,10 +61,12 @@ ext_modules = [
             "sph_lib/bindings/bindings.cpp",
             "sph_lib/cpp/functions.cpp",
             "sph_lib/cpp/kernels.cpp",
+            "sph_lib/cpp/integration.cpp",
         ],
         include_dirs=["sph_lib/cpp", np.get_include()],
         extra_compile_args=extra_compile_args,
         extra_link_args=extra_link_args,
+        define_macros=[("OPENMP_AVAILABLE", "1")] if has_openmp else [],
         language="c++",
     ),
 ]

@@ -10,6 +10,7 @@
 #include <omp.h>
 #endif
 #include "kernels.h"
+#include "integration.h"
 #include "functions.h"
 
 // =============================================================================
@@ -34,13 +35,14 @@ inline std::optional<int> cell_index_from_pos(float pos, float boxsize, int grid
         pos = std::fmod(pos, boxsize);
         if (pos < 0.0f) pos += boxsize;
     // Non-periodic: early-out if position lies outside the domain.
-    } else if (pos < 0.0f || pos >= boxsize) {
+    } 
+    else if (pos < 0.0f || pos >= boxsize) {
         return std::nullopt;
     }
 
     // Convert position to cell index; for non-periodic, guard against edge round-off.
     int idx = static_cast<int>(pos * (static_cast<float>(gridnum) / boxsize));
-    if (!periodic && (idx < 0 || idx >= gridnum)) {
+    if (!periodic && is_outside_domain(idx, gridnum)) {
         return std::nullopt;
     }
     return idx;
@@ -270,16 +272,16 @@ void cic_2d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // identify indices of the 4 surrounding grid cells
-        float xpos = pos[2 * n + 0] * inv_cell_size_x;
-        float ypos = pos[2 * n + 1] * inv_cell_size_y;
-        int i0 = static_cast<int>(std::floor(xpos));
-        int j0 = static_cast<int>(std::floor(ypos));
+        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
+        int i0 = static_cast<int>(std::floor(x_cell));
+        int j0 = static_cast<int>(std::floor(y_cell));
         int i1 = i0 + 1;
         int j1 = j0 + 1;
 
         // compute overlaps for the 4 surrounding grid cells
-        float dx = xpos - i0;
-        float dy = ypos - j0;
+        float dx = x_cell - i0;
+        float dy = y_cell - j0;
         float dx_ = 1.0f - dx;
         float dy_ = 1.0f - dy;
 
@@ -360,20 +362,20 @@ void cic_3d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // identify indices of the 8 surrounding grid cells
-        float xpos = pos[3 * n + 0] * inv_cell_size_x;
-        float ypos = pos[3 * n + 1] * inv_cell_size_y;
-        float zpos = pos[3 * n + 2] * inv_cell_size_z;
-        int i0 = static_cast<int>(std::floor(xpos));
-        int j0 = static_cast<int>(std::floor(ypos));
-        int k0 = static_cast<int>(std::floor(zpos));
+        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
+        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
+        int i0 = static_cast<int>(std::floor(x_cell));
+        int j0 = static_cast<int>(std::floor(y_cell));
+        int k0 = static_cast<int>(std::floor(z_cell));
         int i1 = i0 + 1;
         int j1 = j0 + 1;
         int k1 = k0 + 1;
 
         // compute overlaps for the 8 surrounding grid cells
-        float dx = xpos - i0;
-        float dy = ypos - j0;
-        float dz = zpos - k0;
+        float dx = x_cell - i0;
+        float dy = y_cell - j0;
+        float dz = z_cell - k0;
         float dx_ = 1.0f - dx;
         float dy_ = 1.0f - dy;
         float dz_ = 1.0f - dz;
@@ -469,16 +471,16 @@ void cic_2d_adaptive_cpp(
         float V = (2.0f * pcs_x) * (2.0f * pcs_y);
 
         // compute mother cell index and bounding box
-        float xpos = pos[2 * n + 0] * inv_cell_size_x;
-        float ypos = pos[2 * n + 1] * inv_cell_size_y;
-        float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
-        float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
+        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
+        float c1 = x_cell - pcs_x, c2 = x_cell + pcs_x;
+        float c3 = y_cell - pcs_y, c4 = y_cell + pcs_y;
 
         // compute inclusive index bounds that the particle overlaps with
-        int i_min = static_cast<int>(std::round(xpos - pcs_x - 0.5f));
-        int i_max = static_cast<int>(xpos + pcs_x);
-        int j_min = static_cast<int>(std::round(ypos - pcs_y - 0.5f));
-        int j_max = static_cast<int>(ypos + pcs_y);
+        int i_min = static_cast<int>(std::floor(x_cell - pcs_x));
+        int j_min = static_cast<int>(std::floor(y_cell - pcs_y));
+        int i_max = static_cast<int>(x_cell + pcs_x);
+        int j_max = static_cast<int>(y_cell + pcs_y);
         const float* particle = quantities + n * num_fields;
 
         // iterate over all grid cells that the particle overlaps with
@@ -567,26 +569,26 @@ void cic_3d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute half cell sizes in grid units and particle volume
-        float pcs_x = pcellsizesHalf[n] * inv_cell_size_x;
-        float pcs_y = pcellsizesHalf[n] * inv_cell_size_y;
-        float pcs_z = pcellsizesHalf[n] * inv_cell_size_z;
-        float V = (2.0f * pcs_x) * (2.0f * pcs_y) * (2.0f * pcs_z);
+        float h_x = pcellsizesHalf[n] * inv_cell_size_x;
+        float h_y = pcellsizesHalf[n] * inv_cell_size_y;
+        float h_z = pcellsizesHalf[n] * inv_cell_size_z;
+        float V = (2.0f * h_x) * (2.0f * h_y) * (2.0f * h_z);
 
         // compute mother cell index and bounding box
-        float xpos = pos[3 * n + 0] * inv_cell_size_x;
-        float ypos = pos[3 * n + 1] * inv_cell_size_y;
-        float zpos = pos[3 * n + 2] * inv_cell_size_z;
-        float c1 = xpos - pcs_x, c2 = xpos + pcs_x;
-        float c3 = ypos - pcs_y, c4 = ypos + pcs_y;
-        float c5 = zpos - pcs_z, c6 = zpos + pcs_z;
+        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
+        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
+        float c1 = x_cell - h_x, c2 = x_cell + h_x;
+        float c3 = y_cell - h_y, c4 = y_cell + h_y;
+        float c5 = z_cell - h_z, c6 = z_cell + h_z;
 
         // compute inclusive index bounds that the particle overlaps with
-        int i_min = static_cast<int>(std::round(xpos - pcs_x - 0.5f));
-        int i_max = static_cast<int>(xpos + pcs_x);
-        int j_min = static_cast<int>(std::round(ypos - pcs_y - 0.5f));
-        int j_max = static_cast<int>(ypos + pcs_y);
-        int k_min = static_cast<int>(std::round(zpos - pcs_z - 0.5f));
-        int k_max = static_cast<int>(zpos + pcs_z);
+        int i_min = static_cast<int>(std::floor(x_cell - h_x));
+        int j_min = static_cast<int>(std::floor(y_cell - h_y));
+        int k_min = static_cast<int>(std::floor(z_cell - h_z));
+        int i_max = static_cast<int>(x_cell + h_x);
+        int j_max = static_cast<int>(y_cell + h_y);
+        int k_max = static_cast<int>(z_cell + h_z);
         const float* particle = quantities + n * num_fields;
 
         // iterate over all grid cells that the particle overlaps with
@@ -695,15 +697,14 @@ void tsc_2d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float xpos = pos[2 * n + 0] * inv_cell_size_x;
-        float ypos = pos[2 * n + 1] * inv_cell_size_y;
-        int i_base = static_cast<int>(std::floor(xpos));
-        int j_base = static_cast<int>(std::floor(ypos));
+        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
+        int i_base = static_cast<int>(std::floor(x_cell));
+        int j_base = static_cast<int>(std::floor(y_cell));
 
         // compute fractional distance within cell
-        float dx = xpos - i_base;
-        float dy = ypos - j_base;
-
+        float dx = x_cell - i_base;
+        float dy = y_cell - j_base;
         auto wx = tsc_weights(dx);
         auto wy = tsc_weights(dy);
         const float* particle = quantities + n * num_fields;
@@ -781,19 +782,19 @@ void tsc_3d_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float xpos = pos[3 * n + 0] * inv_cell_size_x;
-        float ypos = pos[3 * n + 1] * inv_cell_size_y;
-        float zpos = pos[3 * n + 2] * inv_cell_size_z;
+        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
+        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
 
         // compute base cell index (mother cell)
-        int i_base = static_cast<int>(std::floor(xpos));
-        int j_base = static_cast<int>(std::floor(ypos));
-        int k_base = static_cast<int>(std::floor(zpos));
+        int i_base = static_cast<int>(std::floor(x_cell));
+        int j_base = static_cast<int>(std::floor(y_cell));
+        int k_base = static_cast<int>(std::floor(z_cell));
 
         // compute fractional distance within cell
-        float dx = xpos - i_base;
-        float dy = ypos - j_base;
-        float dz = zpos - k_base;
+        float dx = x_cell - i_base;
+        float dy = y_cell - j_base;
+        float dz = z_cell - k_base;
 
         // compute TSC weights for each dimension
         auto wx = tsc_weights(dx);
@@ -902,18 +903,18 @@ void tsc_2d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x = pos[2 * n + 0] * inv_cell_size_x;
-        float y = pos[2 * n + 1] * inv_cell_size_y;
+        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
         float h_x = pcellsizesHalf[n] * inv_cell_size_x;
         float h_y = pcellsizesHalf[n] * inv_cell_size_y;
         float support_x = 1.5f * h_x;
         float support_y = 1.5f * h_y;
 
         // compute bounding box of grid cells that the particle overlaps with
-        int i_min = static_cast<int>(std::floor(x - support_x));
-        int i_max = static_cast<int>(std::ceil(x + support_x));
-        int j_min = static_cast<int>(std::floor(y - support_y));
-        int j_max = static_cast<int>(std::ceil(y + support_y));
+        int i_min = static_cast<int>(std::floor(x_cell - support_x));
+        int j_min = static_cast<int>(std::floor(y_cell - support_y));
+        int i_max = static_cast<int>(std::ceil(x_cell + support_x));
+        int j_max = static_cast<int>(std::ceil(y_cell + support_y));
         const float* particle = quantities + n * num_fields;
 
         // iterate over grid cells in x direction
@@ -925,7 +926,7 @@ void tsc_2d_adaptive_cpp(
             if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute integrated weight for this cell in x direction
-            float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
+            float wx = tsc_integrated_weight_1d(x_cell, float(i), float(i+1), h_x);
             if (wx == 0.0f) continue;
 
             // iterate over grid cells in y direction
@@ -937,7 +938,7 @@ void tsc_2d_adaptive_cpp(
                 if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute integrated weight for this cell in y direction
-                float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
+                float wy = tsc_integrated_weight_1d(y_cell, float(j), float(j+1), h_y);
                 if (wy == 0.0f) continue;
 
                 // compute combined weight for this grid cell
@@ -998,9 +999,9 @@ void tsc_3d_adaptive_cpp(
     for_each_particle(N, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x = pos[3 * n + 0] * inv_cell_size_x;
-        float y = pos[3 * n + 1] * inv_cell_size_y;
-        float z = pos[3 * n + 2] * inv_cell_size_z;
+        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
+        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
+        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
         float h_x = pcellsizesHalf[n] * inv_cell_size_x;
         float h_y = pcellsizesHalf[n] * inv_cell_size_y;
         float h_z = pcellsizesHalf[n] * inv_cell_size_z;
@@ -1009,12 +1010,12 @@ void tsc_3d_adaptive_cpp(
         float support_z = 1.5f * h_z;
 
         // compute bounding box of grid cells that the particle overlaps with
-        int i_min = static_cast<int>(std::floor(x - support_x));
-        int i_max = static_cast<int>(std::ceil(x + support_x));
-        int j_min = static_cast<int>(std::floor(y - support_y));
-        int j_max = static_cast<int>(std::ceil(y + support_y));
-        int k_min = static_cast<int>(std::floor(z - support_z));
-        int k_max = static_cast<int>(std::ceil(z + support_z));
+        int i_min = static_cast<int>(std::floor(x_cell - support_x));
+        int j_min = static_cast<int>(std::floor(y_cell - support_y));
+        int k_min = static_cast<int>(std::floor(z_cell - support_z));
+        int i_max = static_cast<int>(std::ceil(x_cell + support_x));
+        int j_max = static_cast<int>(std::ceil(y_cell + support_y));
+        int k_max = static_cast<int>(std::ceil(z_cell + support_z));
         const float* particle = quantities + n * num_fields;
 
         // iterate over grid cells in x direction
@@ -1026,7 +1027,7 @@ void tsc_3d_adaptive_cpp(
             if (is_outside_domain(ii, gridnum_x)) continue;
             
             // compute integrated weight for this cell in x direction
-            float wx = tsc_integrated_weight_1d(x, float(i), float(i+1), h_x);
+            float wx = tsc_integrated_weight_1d(x_cell, float(i), float(i+1), h_x);
             if (wx == 0.0f) continue;
 
             // iterate over grid cells in y direction
@@ -1038,7 +1039,7 @@ void tsc_3d_adaptive_cpp(
                 if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute integrated weight for this cell in y direction
-                float wy = tsc_integrated_weight_1d(y, float(j), float(j+1), h_y);
+                float wy = tsc_integrated_weight_1d(y_cell, float(j), float(j+1), h_y);
                 if (wy == 0.0f) continue;
 
                 // iterate over grid cells in z direction
@@ -1050,7 +1051,7 @@ void tsc_3d_adaptive_cpp(
                     if (is_outside_domain(kk, gridnum_z)) continue;
 
                     // compute integrated weight for this cell in z direction
-                    float wz = tsc_integrated_weight_1d(z, float(k), float(k+1), h_z);
+                    float wz = tsc_integrated_weight_1d(z_cell, float(k), float(k+1), h_z);
                     if (wz == 0.0f) continue;
 
                     // compute combined weight for this grid cell
@@ -1065,99 +1066,6 @@ void tsc_3d_adaptive_cpp(
             }
         }
     });
-}
-
-
-// =============================================================================
-// Helper functions for iso- and anisotropic kernel depositions
-// =============================================================================
-
-template <typename Eval2D>
-static float integrate_cell_2d(const std::string& method, const Eval2D& eval) {
-    if (method == "midpoint") {
-        return eval(0.5f, 0.5f);
-    }
-
-    if (method == "trapezoidal") {
-        float sum = 0.0f;
-        sum += eval(0.0f, 0.0f);
-        sum += eval(1.0f, 0.0f);
-        sum += eval(0.0f, 1.0f);
-        sum += eval(1.0f, 1.0f);
-        return (sum / 4.0f);
-    }
-
-    if (method == "simpson") {
-        float sum = 0.0f;
-
-        // corners
-        sum += eval(0.0f, 0.0f);
-        sum += eval(1.0f, 0.0f);
-        sum += eval(0.0f, 1.0f);
-        sum += eval(1.0f, 1.0f);
-
-        // edge midpoints
-        sum += 4.0f * eval(0.5f, 0.0f);
-        sum += 4.0f * eval(0.5f, 1.0f);
-        sum += 4.0f * eval(0.0f, 0.5f);
-        sum += 4.0f * eval(1.0f, 0.5f);
-
-        // center
-        sum += 16.0f * eval(0.5f, 0.5f);
-
-        return (sum / 36.0f);
-    }
-
-    throw std::invalid_argument("Unknown integration method: " + method);
-}
-
-template <typename Eval3D>
-static float integrate_cell_3d(const std::string& method, const Eval3D& eval) {
-    if (method == "midpoint") {
-        return eval(0.5f, 0.5f, 0.5f);
-    }
-
-    if (method == "trapezoidal") {
-        float sum = 0.0f;
-        for (int i = 0; i <= 1; ++i)
-            for (int j = 0; j <= 1; ++j)
-                for (int k = 0; k <= 1; ++k)
-                    sum += eval(i, j, k);
-        return (sum / 8.0f);
-    }
-
-    if (method == "simpson") {
-        float sum = 0.0f;
-
-        // corners
-        for (int i = 0; i <= 1; ++i)
-            for (int j = 0; j <= 1; ++j)
-                for (int k = 0; k <= 1; ++k)
-                    sum += eval(i, j, k);
-
-        // edge midpoints
-        for (int i = 0; i <= 1; ++i)
-            for (int j = 0; j <= 1; ++j) {
-                sum += 4.0f * eval(0.5f, i, j);
-                sum += 4.0f * eval(i, 0.5f, j);
-                sum += 4.0f * eval(i, j, 0.5f);
-            }
-
-        // face centers
-        sum += 16.0f * eval(0.5f, 0.5f, 0.0f);
-        sum += 16.0f * eval(0.5f, 0.5f, 1.0f);
-        sum += 16.0f * eval(0.5f, 0.0f, 0.5f);
-        sum += 16.0f * eval(0.5f, 1.0f, 0.5f);
-        sum += 16.0f * eval(0.0f, 0.5f, 0.5f);
-        sum += 16.0f * eval(1.0f, 0.5f, 0.5f);
-
-        // center
-        sum += 64.0f * eval(0.5f, 0.5f, 0.5f);
-
-        return (sum / 216.0f);
-    }
-
-    throw std::invalid_argument("Unknown integration method: " + method);
 }
 
 
@@ -1190,7 +1098,7 @@ void isotropic_kernel_deposition_2d_cpp(
     auto kernel = create_kernel(kernel_name, 2);
     SPHKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations);
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations, integration_method);
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1229,8 +1137,8 @@ void isotropic_kernel_deposition_2d_cpp(
         float y_cell = y_pos / cellSize_y;
 
         // identify mother cell of particle
-        int i = static_cast<int>(x_cell);
-        int j = static_cast<int>(y_cell);
+        //int i = static_cast<int>(x_cell);
+        //int j = static_cast<int>(y_cell);
 
         // compute kernel support in physical and cell units
         float support_phys = kernel_support * hsm_current;
@@ -1348,7 +1256,7 @@ void isotropic_kernel_deposition_3d_cpp(
     // set up the kernel and cache integral samples
     auto kernel = create_kernel(kernel_name, 3);
     SPHKernel* kernel_ptr = kernel.get();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations);
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations, integration_method);
     const float kernel_support = kernel->support();
 
     // extract boxsize parameters
@@ -1396,9 +1304,9 @@ void isotropic_kernel_deposition_3d_cpp(
         float z_cell = z_pos / cellSize_z;
 
         // identify mother cell of particle
-        int i = static_cast<int>(x_cell);
-        int j = static_cast<int>(y_cell);
-        int k = static_cast<int>(z_cell);
+        //int i = static_cast<int>(x_cell);
+        //int j = static_cast<int>(y_cell);
+        //int k = static_cast<int>(z_cell);
 
         // compute kernel support in physical and cell units
         float support_phys = kernel_support * hsm_current;
@@ -1531,7 +1439,7 @@ void anisotropic_kernel_deposition_2d_cpp(
     auto kernel = create_kernel(kernel_name, 2);
     SPHKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations);
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations, integration_method);
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1573,8 +1481,8 @@ void anisotropic_kernel_deposition_2d_cpp(
         float y_cell = y_pos / cellSize_y;
 
         // identify mother cell of particle
-        int i = static_cast<int>(x_cell);
-        int j = static_cast<int>(y_cell);
+        //int i = static_cast<int>(x_cell);
+        //int j = static_cast<int>(y_cell);
 
         // figure out the extent of the kernel 
         float support_x_cell = kernel_support * std::sqrt(
@@ -1702,7 +1610,7 @@ void anisotropic_kernel_deposition_3d_cpp(
     auto kernel = create_kernel(kernel_name, 3);
     SPHKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations);
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations, integration_method);
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1754,9 +1662,9 @@ void anisotropic_kernel_deposition_3d_cpp(
         float z_cell = z_pos / cellSize_z;
 
         // identify mother cell of particle
-        int i = static_cast<int>(x_cell);
-        int j = static_cast<int>(y_cell);
-        int k = static_cast<int>(z_cell);
+        //int i = static_cast<int>(x_cell);
+        //int j = static_cast<int>(y_cell);
+        //int k = static_cast<int>(z_cell);
 
         // estimate kernel support along each axis in cell units
         float support_x_cell = kernel_support * std::sqrt(
@@ -1818,7 +1726,7 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y + (*iz) * stride_z;
-                int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y + (*iz);
+                int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y + (*iz) * weight_stride_z;
                 accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
                 accumulate_weight(weights, weight_idx, integral, parallel);
             }

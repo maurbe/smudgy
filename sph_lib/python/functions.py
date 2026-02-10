@@ -2,7 +2,23 @@ import numpy as np
 
 
 def _wrap_or_mask_indices(indices: np.ndarray, gridnum: int, periodic_flag: bool):
-    """Wrap indices for periodic axes or mark validity for non-periodic axes."""
+    """Wrap indices for periodic axes or mark validity for non-periodic axes.
+
+    Parameters
+    ----------
+    indices
+        Index array to wrap or validate.
+    gridnum
+        Number of grid cells along the axis.
+    periodic_flag
+        Whether periodic wrapping is enabled for the axis.
+
+    Returns
+    -------
+    Tuple[numpy.ndarray, numpy.ndarray]
+        ``(indices, valid_mask)`` where ``indices`` may be wrapped and
+        ``valid_mask`` is ``True`` for in-domain entries.
+    """
     if periodic_flag:
         return np.mod(indices, gridnum), np.ones_like(indices, dtype=bool)
     valid = (indices >= 0) & (indices < gridnum)
@@ -10,7 +26,18 @@ def _wrap_or_mask_indices(indices: np.ndarray, gridnum: int, periodic_flag: bool
 
 
 def _as_float32(array):
-    """Return a float32 view of ``array`` without copying when possible."""
+    """Return a float32 view of ``array`` without copying when possible.
+
+    Parameters
+    ----------
+    array
+        Input array-like object.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``float32`` view or copy of ``array``.
+    """
     return np.asarray(array, dtype=np.float32)
 
 def ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
@@ -19,11 +46,11 @@ def ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
     Parameters
     ----------
     positions : ndarray, shape (N, 2)
-        Cartesian particle coordinates.
+        Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
-        Per-particle fields to accumulate (e.g. mass, temperature).
+        Per-particle fields to accumulate, with ``F`` fields per particle.
     boxsizes : array_like of length 2
-        Assumes ``[0, boxsize]`` in each dimension.
+        Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
         Number of grid cells for each axis.
     periodic : Sequence[bool]
@@ -75,11 +102,11 @@ def ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
     Parameters
     ----------
     positions : ndarray, shape (N, 3)
-        Cartesian particle coordinates.
+        Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
-        Per-particle fields to accumulate (e.g. mass, temperature).
+        Per-particle fields to accumulate, with ``F`` fields per particle.
     boxsizes : array_like of length 3
-        Assumes ``[0, boxsize]`` in each dimension.
+        Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
         Number of grid cells for each axis.
     periodic : Sequence[bool]
@@ -135,11 +162,11 @@ def cic_2d(positions, quantities, boxsizes, gridnums, periodic):
     Parameters
     ----------
     positions : ndarray, shape (N, 2)
-        Cartesian particle coordinates.
+        Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
-        Per-particle fields to accumulate.
+        Per-particle fields to accumulate, with ``F`` fields per particle.
     boxsizes : array_like of length 2
-        Assumes ``[0, boxsize]`` in each dimension.
+        Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
         Number of grid cells for each axis.
     periodic : Sequence[bool]
@@ -207,11 +234,11 @@ def cic_3d(positions, quantities, boxsizes, gridnums, periodic):
     Parameters
     ----------
     positions : ndarray, shape (N, 3)
-        Cartesian particle coordinates.
+        Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
-        Per-particle fields to accumulate.
+        Per-particle fields to accumulate, with ``F`` fields per particle.
     boxsizes : array_like of length 3
-        Assumes ``[0, boxsize]`` in each dimension.
+        Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
         Number of grid cells for each axis.
     periodic : Sequence[bool]
@@ -286,7 +313,18 @@ def cic_3d(positions, quantities, boxsizes, gridnums, periodic):
     return fields, weights
 
 def _weights_tsc(d):
-    """Return Triangular Shaped Cloud weights for displacement array ``d``."""
+    """Return Triangular Shaped Cloud weights for displacement array ``d``.
+
+    Parameters
+    ----------
+    d
+        Displacements in cell units.
+
+    Returns
+    -------
+    numpy.ndarray
+        Weights of shape ``(len(d), 3)`` for offsets ``[-1, 0, 1]``.
+    """
     w = np.empty((len(d), 3), dtype=np.float32)
     w[:, 0] = 0.5 * (1.5 - d)**2
     w[:, 1] = 0.75 - (d - 1)**2
@@ -299,11 +337,11 @@ def tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
     Parameters
     ----------
     positions : ndarray, shape (N, 2)
-        Cartesian particle coordinates.
+        Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
-        Per-particle fields to accumulate.
+        Per-particle fields to accumulate, with ``F`` fields per particle.
     boxsizes : array_like of length 2
-        Assumes ``[0, boxsize]`` in each dimension.
+        Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
         Number of grid cells for each axis.
     periodic : Sequence[bool]
@@ -374,11 +412,11 @@ def tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
     Parameters
     ----------
     positions : ndarray, shape (N, 3)
-        Cartesian particle coordinates.
+        Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
-        Per-particle fields to accumulate.
+        Per-particle fields to accumulate, with ``F`` fields per particle.
     boxsizes : array_like of length 3
-        Assumes ``[0, boxsize]`` in each dimension.
+        Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
         Number of grid cells for each axis.
     periodic : Sequence[bool]

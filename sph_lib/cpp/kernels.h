@@ -28,6 +28,9 @@ struct KernelSampleGrid {
 };
 
 KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kernel_evaluations);
+KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
+                                           int min_kernel_evaluations,
+                                           const std::string& method);
 
 std::shared_ptr<SPHKernel> create_kernel(const std::string& name, int dim);
 

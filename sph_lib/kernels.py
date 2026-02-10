@@ -6,7 +6,7 @@ import math
 
 class Kernel:
 	"""Base class for SPH kernels supporting isotropic and anisotropic smoothing.
-	
+
 	Implements evaluation of kernel functions and their gradients for various
 	SPH kernel types in 1D, 2D, and 3D.
 	"""
@@ -17,11 +17,14 @@ class Kernel:
 		dim: int
 	) -> None:
 		"""Initialize a kernel.
-		
-		Args:
-			kernel_name: Name of the kernel ('gaussian', 'cubic_spline', 'quintic_spline',
-				'wendland_c2', 'wendland_c4', 'wendland_c6', 'super_gaussian').
-			dim: Spatial dimension (1, 2, or 3).
+
+		Parameters
+		----------
+		kernel_name
+			Kernel name: ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
+			``"wendland_c2"``, ``"wendland_c4"``, ``"wendland_c6"``, or ``"super_gaussian"``.
+		dim
+			Spatial dimension (1, 2, or 3).
 		"""
 		self.kernel_name = kernel_name
 		self.dim = dim
@@ -33,23 +36,31 @@ class Kernel:
 		h: Optional[npt.NDArray[np.floating]] = None, 
 		H: Optional[npt.NDArray[np.floating]] = None
 	) -> npt.NDArray[np.floating]:
-		"""Evaluate the kernel function W at given distances.
-		
-		Supports both isotropic smoothing (scalar h) and anisotropic smoothing (tensor H).
+		"""Evaluate the kernel function $W$ at given distances.
 
-		Args:
-			r_ij: Distance matrix with shape:
-				- (M, K) for isotropic case (distances to nearest neighbors).
-				- (M, K, D) for anisotropic case (relative position vectors).
-			h: Smoothing lengths with shape (M, 1) or (M,). Only used for isotropic kernels.
-			H: Smoothing tensors with shape (M, D, D). Only used for anisotropic kernels.
+		Supports both isotropic smoothing (scalar ``h``) and anisotropic smoothing (tensor ``H``).
 
-		Returns:
-			Kernel values with shape (M, K), normalized by the normalization constant
+		Parameters
+		----------
+		r_ij
+			Distance array with shape ``(M, K)`` for isotropic case or ``(M, K, D)``
+			for anisotropic case (relative position vectors). ``M`` is the number of
+			query positions, ``K`` the number of neighbors, and ``D`` the dimension.
+		h
+			Smoothing lengths with shape ``(M, 1)`` or ``(M,)`` (isotropic only).
+		H
+			Smoothing tensors with shape ``(M, D, D)`` (anisotropic only).
+
+		Returns
+		-------
+		numpy.ndarray
+			Kernel values with shape ``(M, K)``, normalized by the kernel constant
 			and smoothing scale(s).
 
-		Raises:
-			ValueError: If neither h nor H is provided, or if shapes are incompatible.
+		Raises
+		------
+		ValueError
+			If neither ``h`` nor ``H`` is provided, or if shapes are incompatible.
 		"""
 
 		# isotropic case
@@ -83,22 +94,31 @@ class Kernel:
 		h: Optional[npt.NDArray[np.floating]] = None, 
 		H: Optional[npt.NDArray[np.floating]] = None
 	) -> npt.NDArray[np.floating]:
-		"""Evaluate the gradient of the kernel ∇W at given positions.
-		
+		"""Evaluate the kernel gradient $\\nabla W$ at given positions.
+
 		Supports both isotropic and anisotropic smoothing with proper chain rule handling.
 
-		Args:
-			r_ij_vec: Relative position vectors with shape:
-				- (M, K, D) for both isotropic and anisotropic cases.
-			h: Smoothing lengths with shape (M, 1) or (M,). Only used for isotropic kernels.
-			H: Smoothing tensors with shape (M, D, D). Only used for anisotropic kernels.
+		Parameters
+		----------
+		r_ij_vec
+			Relative position vectors with shape ``(M, K, D)`` where ``M`` is the
+			number of query positions, ``K`` the number of neighbors, and ``D`` the
+			dimension.
+		h
+			Smoothing lengths with shape ``(M, 1)`` or ``(M,)`` (isotropic only).
+		H
+			Smoothing tensors with shape ``(M, D, D)`` (anisotropic only).
 
-		Returns:
-			Kernel gradients with shape (M, K, D), representing ∂W/∂r normalized 
-			by the normalization constant and smoothing scale(s).
+		Returns
+		-------
+		numpy.ndarray
+			Kernel gradients with shape ``(M, K, D)``, normalized by the kernel
+			constant and smoothing scale(s).
 
-		Raises:
-			ValueError: If neither h nor H is provided, or if shapes are incompatible.
+		Raises
+		------
+		ValueError
+			If neither ``h`` nor ``H`` is provided, or if shapes are incompatible.
 		"""
 
 		# ======================
@@ -149,14 +169,16 @@ class Kernel:
 
 	def _kernel_sigma(self) -> float:
 		"""Compute the normalization constant for the kernel.
-		
-		The normalization ensures the kernel integrates to unity over D-dimensional space.
 
-		Returns:
-			Normalization constant σ depending on kernel type and dimension.
+		Returns
+		-------
+		float
+			Normalization constant depending on kernel type and dimension.
 
-		Raises:
-			ValueError: If kernel_name is not recognized.
+		Raises
+		------
+		ValueError
+			If ``kernel_name`` is not recognized.
 		"""
 
 		if self.kernel_name == 'gaussian':
@@ -212,13 +234,18 @@ class Kernel:
 
 
 	def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-		"""Evaluate the kernel support function based on normalized distance q = r/h.
-		
-		Args:
-			q: Normalized distances (dimensionless), typically in range [0, 3] depending on kernel support.
+		"""Evaluate the kernel support function for normalized distance $q = r/h$.
 
-		Returns:
-			Kernel values W(q) of the same shape as input, with compact support applied.
+		Parameters
+		----------
+		q
+			Normalized distances (dimensionless), typically in range ``[0, 3]``
+			depending on kernel support.
+
+		Returns
+		-------
+		numpy.ndarray
+			Kernel values $W(q)$ of the same shape as input with compact support applied.
 		"""
 		
 		if self.kernel_name == 'gaussian':
@@ -268,16 +295,17 @@ class Kernel:
 
 
 	def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-		"""Evaluate the gradient of the kernel support function dW/dq.
-		
-		Computes ∂W/∂q (normalized distance derivative) used for chain rule 
-		application in evaluate_gradient().
+		"""Evaluate the kernel support derivative $dW/dq$.
 
-		Args:
-			q: Normalized distances (dimensionless).
+		Parameters
+		----------
+		q
+			Normalized distances (dimensionless).
 
-		Returns:
-			Kernel gradient values dW/dq of the same shape as input.
+		Returns
+		-------
+		numpy.ndarray
+			Kernel gradient values $dW/dq$ of the same shape as input.
 		"""
 		
 		if self.kernel_name == 'gaussian':

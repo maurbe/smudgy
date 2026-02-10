@@ -1,29 +1,38 @@
 **TODO's**
 
-Interpolation
-[ ] port functionality to cpp where possible
-[ ] write test notebooks
+Setup
+[x] find solution for enabling installation without openMP
+[x] refactor the file structure of the project
 
-Deposition
-[ ] change integral estimation to fixed number of kernel evaluations at predefined locations:
+Docs
+[ ] bring docs to a common formatting that can be read by sphinx
+[ ] create + add example "notebooks", "scripts" and plots for interpolation / deposition walkthroughs
+
+Tests
+[ ] complete/add pytests
+[ ] is there a way to test the package for different Python versions (how is that normally done)
+[ ] check compatibility with older numpy / scipy.spatial versions
+
+Code
+[x] port interpolation functionality to cpp where possible -> no real gain!
+[x] change integral estimation to fixed number of kernel evaluations at predefined locations:
     then, in for loop for each kernel position, e.g. 32^dim, identify the parent cell and deposit 
     that fraction into cell
     1) case 1: is kernel is much smaller than cell width -> no problem
     2) case 2: kernel spans over many cells and the number of evaluation points is low -> problem,
        since it is possible that some cells don't have an eval point falling in them 
        -> 0 weight is deposited, i.e. very noisy
-    Solution: 
-
+[ ] revisit per axis periodicity -> we do not, since cKdTree does not support that.
 [ ] check primary selection of neighbors in anisotropic case;
     Anisotropic kNN (Marinho-pure)
 	  •	Neighbor search uses Mahalanobis distance:
       \delta = |H^{-1}(r_p - r_q)|
     •	Outer neighbor satisfies \delta = 1
-[ ] revisit per axis periodicity -> we do not, since cKdTree does not support that.
-
-Both
 [ ] test / debug openMP acceleration -> need to troubleshoot on Intel cluster
-[ ] add verbosity to the whole class
+
+Paper
+[ ] brainstorm and list which metrics to analyse
+[ ] produce relevant paper figures
 
 
 **Features** (so I don't forget)

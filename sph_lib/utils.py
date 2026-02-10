@@ -18,12 +18,18 @@ def build_kdtree(
 ) -> spatial.cKDTree:
 	"""Construct a cKDTree with optional per-dimension periodic box sizes.
 
-	Args:
-		points: Array of shape (N, D) with particle coordinates.
-		boxsize: Scalar or (D,) array defining periodic box lengths, or None.
+	Parameters
+	----------
+	points
+		Array of shape ``(N, D)`` with particle coordinates, where ``N`` is the
+		number of particles and ``D`` the dimension.
+	boxsize
+		Scalar or ``(D,)`` array defining periodic box lengths, or ``None``.
 
-	Returns:
-		scipy.spatial.cKDTree built from ``points``.
+	Returns
+	-------
+	scipy.spatial.cKDTree
+		Tree built from ``points``.
 	"""
 	return spatial.cKDTree(points, boxsize=boxsize)
 
@@ -35,12 +41,19 @@ def query_kdtree(
 ) -> Tuple[FloatArray, IntArray]:
 	"""Query a cKDTree for the k nearest neighbors of given points.
 
-	Args:
-		tree: cKDTree instance to query.
-		points: Array of shape (M, D) with query coordinates.
-		k: Number of nearest neighbors to return.
+	Parameters
+	----------
+	tree
+		cKDTree instance to query.
+	points
+		Array of shape ``(M, D)`` with query coordinates, where ``M`` is the
+		number of query positions.
+	k
+		Number of nearest neighbors to return.
 
-	Returns:
+	Returns
+	-------
+	Tuple[numpy.ndarray, numpy.ndarray]
 		Tuple of ``(distances, indices)`` from ``cKDTree.query``.
 	"""
 	return tree.query(points, k=k, workers=-1)
@@ -49,11 +62,15 @@ def query_kdtree(
 def shift_particle_positions(pos: npt.ArrayLike) -> FloatArray:
 	"""Shift particle positions so the minimum per-axis value is at zero.
 
-	Args:
-		pos: Array of shape (N, D) with particle coordinates.
+	Parameters
+	----------
+	pos
+		Array of shape ``(N, D)`` with particle coordinates.
 
-	Returns:
-		Array of shifted coordinates with the same shape as ``pos``.
+	Returns
+	-------
+	numpy.ndarray
+		Shifted coordinates with the same shape as ``pos``.
 	"""
 	pos_array = np.asarray(pos)
 	return pos_array - pos_array.min(axis=0)
@@ -66,13 +83,19 @@ def coordinate_difference_with_pbc(
 ) -> FloatArray:
 	"""Compute coordinate differences with periodic boundary conditions.
 
-	Args:
-		x: Array-like coordinates.
-		y: Array-like coordinates to subtract from ``x``.
-		boxsize: Scalar or (D,) array defining periodic box lengths.
+	Parameters
+	----------
+	x
+		Array-like coordinates.
+	y
+		Array-like coordinates to subtract from ``x``.
+	boxsize
+		Scalar or ``(D,)`` array defining periodic box lengths.
 
-	Returns:
-		Array of coordinate differences wrapped into the range
+	Returns
+	-------
+	numpy.ndarray
+		Coordinate differences wrapped into the range
 		$[-0.5 * boxsize, 0.5 * boxsize)$ per dimension.
 	"""
 	diff = np.asarray(x) - np.asarray(y)
@@ -100,17 +123,23 @@ def compute_pcellsize_half(
 	query_pos: npt.ArrayLike,
 	num_neighbors: int
 ) -> Tuple[FloatArray, IntArray]:
-	"""Estimate rectangular particle extent as half-distance to the Nth nearest neighbor.
+	"""Estimate rectangular particle extent as half-distance to the Nth neighbor.
 
-	Args:
-		tree: cKDTree built from particle positions.
-		query_pos: Array of shape (N, D) with particle coordinates.
-		num_neighbors: Number of neighbors used for the estimate.
+	Parameters
+	----------
+	tree
+		cKDTree built from particle positions.
+	query_pos
+		Array of shape ``(M, D)`` with query coordinates.
+	num_neighbors
+		Number of neighbors used for the estimate.
 
-	Returns:
-		Tuple of ``(h_cellsize, nn_inds)`` where ``h_cellsize`` has shape (N,)
-		and contains half the distance to the Nth neighbor, and ``nn_inds``
-		has shape (N, num_neighbors).
+	Returns
+	-------
+	Tuple[numpy.ndarray, numpy.ndarray]
+		Tuple of ``(h_cellsize, nn_inds)`` where ``h_cellsize`` has shape ``(M,)``
+		and contains half the distance to the Nth neighbor, and ``nn_inds`` has
+		shape ``(M, num_neighbors)``.
 	"""
 	# this follows the same "definition" of the smoothing length as 0.5 * distance to Nth nearest neighbor
 	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
@@ -123,17 +152,23 @@ def compute_hsm(
 	query_pos: npt.ArrayLike,
 	num_neighbors: int
 ) -> Tuple[FloatArray, IntArray, FloatArray]:
-	"""Estimate smoothing length as half the distance to the Nth nearest neighbor.
+	"""Estimate smoothing length as half the distance to the Nth neighbor.
 
-	Args:
-		tree: cKDTree built from particle positions.
-		query_pos: Array of shape (M, D) with positions where smoothing length is evaluated.
-		num_neighbors: Number of neighbors used for the estimate.
+	Parameters
+	----------
+	tree
+		cKDTree built from particle positions.
+	query_pos
+		Array of shape ``(M, D)`` with positions where smoothing length is evaluated.
+	num_neighbors
+		Number of neighbors used for the estimate.
 
-	Returns:
-		Tuple of ``(hsm, nn_inds, nn_dists)`` where ``hsm`` has shape (M,),
-		``nn_dists`` has shape (M, num_neighbors), and ``nn_inds`` has shape
-		(M, num_neighbors).
+	Returns
+	-------
+	Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+		Tuple of ``(hsm, nn_inds, nn_dists)`` where ``hsm`` has shape ``(M,)``,
+		``nn_dists`` has shape ``(M, num_neighbors)``, and ``nn_inds`` has shape
+		``(M, num_neighbors)``.
 	"""
 	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
 	hsm = nn_dists[:, -1] * 0.5
@@ -146,21 +181,30 @@ def compute_hsm_tensor(
 	num_neighbors: int,
 	query_pos: Optional[npt.ArrayLike] = None
 ) -> Tuple[FloatArray, FloatArray, FloatArray, IntArray, FloatArray]:
-	"""Compute anisotropic smoothing tensor using covariance-based method.
+	"""Compute anisotropic smoothing tensor using a covariance-based method.
 
 	Implements the method from Marinho (2021), generalized for 2D and 3D.
 
-	Args:
-		tree: cKDTree built from particle positions.
-		masses: Array of shape (N,) with particle masses.
-		num_neighbors: Number of neighbors used for covariance estimation.
-		query_pos: Array of shape (M, D) where smoothing tensor is evaluated.
-			If None, uses particle positions from the tree.
+	Parameters
+	----------
+	tree
+		cKDTree built from particle positions.
+	masses
+		Array of shape ``(N,)`` with particle masses.
+	num_neighbors
+		Number of neighbors used for covariance estimation.
+	query_pos
+		Array of shape ``(M, D)`` where the tensor is evaluated.
+		If ``None``, uses particle positions from the tree.
 
-	Returns:
-		Tuple of ``(H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords)`` where ``H`` has shape (M, D, D),
-		``eigvals`` has shape (M, D), ``eigvecs`` has shape (M, D, D),
-		``nn_inds`` has shape (M, num_neighbors) and ``nn_dists`` has shape (M, num_neighbors) and ``rel_coords`` has shape (M, num_neighbors, D).
+	Returns
+	-------
+	Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]
+		Tuple ``(H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords)`` where
+		``H`` has shape ``(M, D, D)``, ``eigvals`` has shape ``(M, D)``,
+		``eigvecs`` has shape ``(M, D, D)``, ``nn_inds`` has shape
+		``(M, num_neighbors)``, ``nn_dists`` has shape ``(M, num_neighbors)``,
+		and ``rel_coords`` has shape ``(M, num_neighbors, D)``.
 	"""
 	
 	# Get particle positions and boxsize from the tree object
@@ -207,17 +251,24 @@ def project_hsm_tensor_to_2d(
 ) -> Tuple[FloatArray, FloatArray, FloatArray]:
 	"""Project 3D smoothing tensors onto a 2D plane.
 
-	Args:
-		h_tensor: Array of shape (N, 3, 3) with 3D smoothing tensors.
-		plane: String specifying projection plane: 'xy', 'xz', or 'yz'.
-			Mutually exclusive with ``basis``.
-		basis: 2-tuple of basis vectors (e1, e2) spanning the projection plane.
-			Each vector should be array-like of length 3.
-			Mutually exclusive with ``plane``.
+	Parameters
+	----------
+	h_tensor
+		Array of shape ``(N, 3, 3)`` with 3D smoothing tensors.
+	plane
+		Projection plane: ``"xy"``, ``"xz"``, or ``"yz"``.
+		Mutually exclusive with ``basis``.
+	basis
+		2-tuple of basis vectors ``(e1, e2)`` spanning the projection plane.
+		Each vector should be array-like of length 3.
+		Mutually exclusive with ``plane``.
 
-	Returns:
-		Tuple of ``(h_tensor_2d, eigvals, eigvecs)`` where ``h_tensor_2d`` has shape (N, 2, 2),
-		``eigvals`` has shape (N, 2), and ``eigvecs`` has shape (N, 2, 2).
+	Returns
+	-------
+	Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+		Tuple ``(h_tensor_2d, eigvals, eigvecs)`` where ``h_tensor_2d`` has
+		shape ``(N, 2, 2)``, ``eigvals`` has shape ``(N, 2)``, and ``eigvecs``
+		has shape ``(N, 2, 2)``.
 	"""
 	# Validate inputs
 	if plane is None and basis is None:

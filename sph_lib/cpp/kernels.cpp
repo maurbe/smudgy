@@ -1,4 +1,6 @@
 #include "kernels.h"
+#include "integration.h"
+
 #include <algorithm>
 
 
@@ -231,6 +233,12 @@ inline void factor_counts_3d(int total, int& n_r, int& n_theta, int& n_phi) {
 } // namespace
 
 KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kernel_evaluations) {
+    return build_kernel_sample_grid(kernel, min_kernel_evaluations, "midpoint");
+}
+
+KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
+                                          int min_kernel_evaluations,
+                                          const std::string& method) {
     if (min_kernel_evaluations <= 0) {
         throw std::invalid_argument("min_kernel_evaluations must be > 0");
     }
@@ -253,14 +261,22 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kerne
         const float dtheta = 2.0f * pi / static_cast<float>(n_theta);
 
         for (int ir = 0; ir < n_r; ++ir) {
-            float r = (ir + 0.5f) * dr;
+            const float r0 = static_cast<float>(ir) * dr;
+            const float r_mid = (ir + 0.5f) * dr;
             for (int it = 0; it < n_theta; ++it) {
-                float theta = (it + 0.5f) * dtheta;
-                float x = r * std::cos(theta);
-                float y = r * std::sin(theta);
-                float q = r;
-                float value = kernel.evaluate(q);
-                float integral = value * r * dr * dtheta;
+                //const float theta0 = static_cast<float>(it) * dtheta;
+                const float theta_mid = (it + 0.5f) * dtheta;
+                const float x = r_mid * std::cos(theta_mid);
+                const float y = r_mid * std::sin(theta_mid);
+                const float q = r_mid;
+
+                auto eval = [&](float ox, float oy) {
+                    float r = r0 + ox * dr;
+                    //float theta = theta0 + oy * dtheta;
+                    float value = kernel.evaluate(r);
+                    return value * r * dr * dtheta;
+                };
+                float integral = integrate_cell_2d(method, eval);
 
                 grid.coords.push_back(x);
                 grid.coords.push_back(y);
@@ -280,19 +296,29 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel, int min_kerne
         const float dphi = pi / static_cast<float>(n_phi);
 
         for (int ir = 0; ir < n_r; ++ir) {
-            float r = (ir + 0.5f) * dr;
+            const float r0 = static_cast<float>(ir) * dr;
+            const float r_mid = (ir + 0.5f) * dr;
             for (int it = 0; it < n_theta; ++it) {
-                float theta = (it + 0.5f) * dtheta;
+                //const float theta0 = static_cast<float>(it) * dtheta;
+                const float theta_mid = (it + 0.5f) * dtheta;
                 for (int ip = 0; ip < n_phi; ++ip) {
-                    float phi = (ip + 0.5f) * dphi;
+                    const float phi0 = static_cast<float>(ip) * dphi;
+                    const float phi_mid = (ip + 0.5f) * dphi;
 
-                    float sin_phi = std::sin(phi);
-                    float x = r * sin_phi * std::cos(theta);
-                    float y = r * sin_phi * std::sin(theta);
-                    float z = r * std::cos(phi);
-                    float q = r;
-                    float value = kernel.evaluate(q);
-                    float integral = value * (r * r) * sin_phi * dr * dtheta * dphi;
+                    const float sin_phi_mid = std::sin(phi_mid);
+                    const float x = r_mid * sin_phi_mid * std::cos(theta_mid);
+                    const float y = r_mid * sin_phi_mid * std::sin(theta_mid);
+                    const float z = r_mid * std::cos(phi_mid);
+                    const float q = r_mid;
+
+                    auto eval = [&](float ox, float oy, float oz) {
+                        float r = r0 + ox * dr;
+                        //float theta = theta0 + oy * dtheta;
+                        float phi = phi0 + oz * dphi;
+                        float value = kernel.evaluate(r);
+                        return value * (r * r) * std::sin(phi) * dr * dtheta * dphi;
+                    };
+                    float integral = integrate_cell_3d(method, eval);
 
                     grid.coords.push_back(x);
                     grid.coords.push_back(y);
