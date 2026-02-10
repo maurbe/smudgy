@@ -40,7 +40,7 @@ def _as_float32(array):
     """
     return np.asarray(array, dtype=np.float32)
 
-def ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
+def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit particle quantities onto a 2D grid with Nearest-Grid-Point weighting.
 
     Parameters
@@ -96,7 +96,7 @@ def ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
     
     return fields, weights
 
-def ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
+def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit particle quantities onto a 3D grid via Nearest-Grid-Point weighting.
 
     Parameters
@@ -156,7 +156,7 @@ def ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
 
     return fields, weights
 
-def cic_2d(positions, quantities, boxsizes, gridnums, periodic):
+def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit 2D particle quantities using bilinear Cloud-In-Cell weights.
 
     Parameters
@@ -228,7 +228,7 @@ def cic_2d(positions, quantities, boxsizes, gridnums, periodic):
 
     return fields, weights
 
-def cic_3d(positions, quantities, boxsizes, gridnums, periodic):
+def _cic_3d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit 3D particle quantities using trilinear Cloud-In-Cell weights.
 
     Parameters
@@ -331,7 +331,7 @@ def _weights_tsc(d):
     w[:, 2] = 0.5 * (d - 0.5)**2
     return w
 
-def tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
+def _tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit 2D particle quantities using the Triangular Shaped Cloud kernel.
 
     Parameters
@@ -406,7 +406,7 @@ def tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
 
     return fields, weights
 
-def tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
+def _tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit 3D particle quantities using the Triangular Shaped Cloud kernel.
 
     Parameters

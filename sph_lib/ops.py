@@ -10,8 +10,7 @@ from .utils import (build_kdtree,
 					coordinate_difference_with_pbc
 					)
 from .kernels import Kernel
-from .python import functions as pyfunc
-from .cpp import functions as cppfunc
+from . import collection as backend
 
 
 class PointCloud:
@@ -576,13 +575,12 @@ class PointCloud:
 		dim = positions.shape[-1]
 
 		# select the deposition function based on the method, dim and use_python
-		namespace = pyfunc if use_python else cppfunc
 		if use_python and ("adaptive" in method or method in ["isotropic", "anisotropic"]):
 			raise NotImplementedError(
 				"Python backend does not implement adaptive or SPH deposition methods. "
 				"Set use_python=False to use the C++ backend."
 			)
-		func = getattr(namespace, f"{method}_{dim}d")
+		func = getattr(backend, f"{method}_{dim}d")
 		
 		if self.verbose:
 			print(f"Using deposition function: {func.__name__}")
@@ -633,11 +631,8 @@ class PointCloud:
 				periodic,
 			)
 
-		if use_python:
-			fields, weights = func(*args)
-		else:
-			threads_arg = 0 if omp_threads is None else int(omp_threads)
-			fields, weights = func(*args, use_openmp, threads_arg)
+		threads_arg = 0 if omp_threads is None else int(omp_threads)
+		fields, weights = func(*args, use_python=use_python, use_openmp=use_openmp, omp_threads=threads_arg)
 
 		# divide averaged fields by weight
 		for i in range(len(averaged)):

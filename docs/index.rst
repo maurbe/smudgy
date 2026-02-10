@@ -32,8 +32,7 @@ API reference
    :maxdepth: 2
 
    api
-   utils
+   collection
    kernels
    grid
-   python_functions
-   cpp_functions
+   utils

@@ -1,11 +1,10 @@
 **TODO's**
 
 Setup
-[x] find solution for enabling installation without openMP
+[ ] find solution for enabling installation without openMP
 [x] refactor the file structure of the project
 
 Docs
-[ ] bring docs to a common formatting that can be read by sphinx
 [ ] create + add example "notebooks", "scripts" and plots for interpolation / deposition walkthroughs
 
 Tests

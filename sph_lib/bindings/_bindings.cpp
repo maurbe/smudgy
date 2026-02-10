@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-#include "../cpp/functions.h"  // your backend declarations
+#include "../core/cpp/_functions.h"  // backend declarations
 
 namespace py = pybind11;
 
 // Example: wrapper for ngp_2d
-py::tuple ngp_2d_py(py::array_t<float> pos,
+py::tuple _ngp_2d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -50,7 +50,7 @@ py::tuple ngp_2d_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple ngp_3d_py(py::array_t<float> pos,
+py::tuple _ngp_3d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -92,7 +92,7 @@ py::tuple ngp_3d_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple cic_2d_py(py::array_t<float> pos,
+py::tuple _cic_2d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -134,7 +134,7 @@ py::tuple cic_2d_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple cic_3d_py(py::array_t<float> pos,
+py::tuple _cic_3d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -178,7 +178,7 @@ py::tuple cic_3d_py(py::array_t<float> pos,
 }
 
 
-py::tuple cic_2d_adaptive_py(py::array_t<float> pos,
+py::tuple _cic_2d_adaptive_cpp(py::array_t<float> pos,
                      py::array_t<float> quantities,
                      py::array_t<float> boxsizes,
                      py::array_t<int> gridnums,
@@ -223,7 +223,7 @@ py::tuple cic_2d_adaptive_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple cic_3d_adaptive_py(py::array_t<float> pos,
+py::tuple _cic_3d_adaptive_cpp(py::array_t<float> pos,
                      py::array_t<float> quantities,
                      py::array_t<float> boxsizes,
                      py::array_t<int> gridnums,
@@ -268,7 +268,7 @@ py::tuple cic_3d_adaptive_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple tsc_2d_py(py::array_t<float> pos,
+py::tuple _tsc_2d_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
@@ -309,7 +309,7 @@ py::tuple tsc_2d_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple tsc_3d_py(py::array_t<float> pos,
+py::tuple _tsc_3d_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
@@ -352,7 +352,7 @@ py::tuple tsc_3d_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple tsc_2d_adaptive_py(py::array_t<float> pos,
+py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
@@ -397,7 +397,7 @@ py::tuple tsc_2d_adaptive_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple tsc_3d_adaptive_py(py::array_t<float> pos,
+py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
@@ -443,7 +443,7 @@ py::tuple tsc_3d_adaptive_py(py::array_t<float> pos,
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple isotropic_2d_py(
+py::tuple _isotropic_2d_cpp(
     py::array_t<float> pos,
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
@@ -502,7 +502,7 @@ py::tuple isotropic_2d_py(
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple isotropic_3d_py(
+py::tuple _isotropic_3d_cpp(
     py::array_t<float> pos,
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
@@ -562,7 +562,7 @@ py::tuple isotropic_3d_py(
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple anisotropic_2d_py(
+py::tuple _anisotropic_2d_cpp(
     py::array_t<float> pos,
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
@@ -625,7 +625,7 @@ py::tuple anisotropic_2d_py(
     return py::make_tuple(fields_arr, weights_arr);
 }
 
-py::tuple anisotropic_3d_py(
+py::tuple _anisotropic_3d_cpp(
     py::array_t<float> pos,
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
@@ -691,7 +691,7 @@ py::tuple anisotropic_3d_py(
 
 
 // -------------------------------------------------
-PYBIND11_MODULE(functions, m) {
+PYBIND11_MODULE(_cpp_functions_ext, m) {
     m.doc() = "C++ deposition functions";
 
 #ifdef OPENMP_AVAILABLE
@@ -700,7 +700,7 @@ PYBIND11_MODULE(functions, m) {
     m.attr("has_openmp") = false;
 #endif
 
-    m.def("ngp_2d", &ngp_2d_py, 
+    m.def("_ngp_2d_cpp", &_ngp_2d_cpp, 
         R"doc(
 Deposit particle quantities onto a 2D grid using NGP (C++ backend).
 
@@ -736,7 +736,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("ngp_3d", &ngp_3d_py, 
+    m.def("_ngp_3d_cpp", &_ngp_3d_cpp, 
         R"doc(
 Deposit particle quantities onto a 3D grid using NGP (C++ backend).
 
@@ -772,7 +772,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("cic_2d", &cic_2d_py, 
+    m.def("_cic_2d_cpp", &_cic_2d_cpp, 
         R"doc(
 Deposit particle quantities onto a 2D grid using CIC (C++ backend).
 
@@ -808,7 +808,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("cic_3d", &cic_3d_py,     
+    m.def("_cic_3d_cpp", &_cic_3d_cpp,     
         R"doc(
 Deposit particle quantities onto a 3D grid using CIC (C++ backend).
 
@@ -844,7 +844,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("cic_2d_adaptive", &cic_2d_adaptive_py,     
+    m.def("_cic_2d_adaptive_cpp", &_cic_2d_adaptive_cpp,     
         R"doc(
 Deposit particle quantities onto a 2D grid using adaptive CIC (C++ backend).
 
@@ -883,7 +883,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("cic_3d_adaptive", &cic_3d_adaptive_py,     
+    m.def("_cic_3d_adaptive_cpp", &_cic_3d_adaptive_cpp,     
         R"doc(
 Deposit particle quantities onto a 3D grid using adaptive CIC (C++ backend).
 
@@ -922,7 +922,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("tsc_2d", &tsc_2d_py,     
+    m.def("_tsc_2d_cpp", &_tsc_2d_cpp,     
         R"doc(
 Deposit particle quantities onto a 2D grid using TSC (C++ backend).
 
@@ -958,7 +958,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("tsc_3d", &tsc_3d_py,     
+    m.def("_tsc_3d_cpp", &_tsc_3d_cpp,     
         R"doc(
 Deposit particle quantities onto a 3D grid using TSC (C++ backend).
 
@@ -994,7 +994,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("tsc_2d_adaptive", &tsc_2d_adaptive_py,     
+    m.def("_tsc_2d_adaptive_cpp", &_tsc_2d_adaptive_cpp,     
         R"doc(
 Deposit particle quantities onto a 2D grid using adaptive TSC (C++ backend).
 
@@ -1033,7 +1033,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("tsc_3d_adaptive", &tsc_3d_adaptive_py,     
+    m.def("_tsc_3d_adaptive_cpp", &_tsc_3d_adaptive_cpp,     
         R"doc(
 Deposit particle quantities onto a 3D grid using adaptive TSC (C++ backend).
 
@@ -1072,7 +1072,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("isotropic_2d", &isotropic_2d_py,
+    m.def("_isotropic_2d_cpp", &_isotropic_2d_cpp,
         R"doc(
 Deposit particle quantities onto a 2D grid using an isotropic SPH kernel (C++ backend).
 
@@ -1120,7 +1120,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("isotropic_3d", &isotropic_3d_py,
+    m.def("_isotropic_3d_cpp", &_isotropic_3d_cpp,
         R"doc(
 Deposit particle quantities onto a 3D grid using an isotropic SPH kernel (C++ backend).
 
@@ -1168,7 +1168,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("anisotropic_2d", &anisotropic_2d_py,
+    m.def("_anisotropic_2d_cpp", &_anisotropic_2d_cpp,
         R"doc(
 Deposit particle quantities onto a 2D grid using an anisotropic SPH kernel (C++ backend).
 
@@ -1219,7 +1219,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("anisotropic_3d", &anisotropic_3d_py,
+    m.def("_anisotropic_3d_cpp", &_anisotropic_3d_cpp,
         R"doc(
 Deposit particle quantities onto a 3D grid using an anisotropic SPH kernel (C++ backend).
 

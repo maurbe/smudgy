@@ -14,8 +14,9 @@ dependencies = ["numpy"]
 [project.optional-dependencies]
 test = ["pytest"]
 
-[tool.setuptools]
-packages = ["sph_lib"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sph_lib*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

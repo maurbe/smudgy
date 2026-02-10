@@ -56,14 +56,14 @@ else:
 
 ext_modules = [
     Pybind11Extension(
-        name="sph_lib.cpp.functions",
+        name="sph_lib.core._cpp_functions_ext",
         sources=[
-            "sph_lib/bindings/bindings.cpp",
-            "sph_lib/cpp/functions.cpp",
-            "sph_lib/cpp/kernels.cpp",
-            "sph_lib/cpp/integration.cpp",
+            "sph_lib/bindings/_bindings.cpp",
+            "sph_lib/core/cpp/_functions.cpp",
+            "sph_lib/core/cpp/_kernels.cpp",
+            "sph_lib/core/cpp/_integration.cpp",
         ],
-        include_dirs=["sph_lib/cpp", np.get_include()],
+        include_dirs=["sph_lib/core/cpp", np.get_include()],
         extra_compile_args=extra_compile_args,
         extra_link_args=extra_link_args,
         define_macros=[("OPENMP_AVAILABLE", "1")] if has_openmp else [],

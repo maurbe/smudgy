@@ -7,12 +7,20 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from sph_lib import PointCloud
+from sph_lib import PointCloud, check_openmp
+
 
 
 DATASETS = ["random", "cosmo"]
 METHODS = ["ngp", "cic", "tsc"]
 GRIDNUM = 64
+
+# --- Module-level OpenMP check ---
+openmp_available = check_openmp()
+pytestmark = pytest.mark.skipif(
+    not openmp_available,
+    reason="OpenMP not available; skipping OpenMP consistency tests."
+)
 
 
 def _load_dataset(dataset: str, dim: int):
@@ -27,7 +35,7 @@ def _load_dataset(dataset: str, dim: int):
 
 def _get_openmp_max_threads():
     try:
-        import sph_lib.cpp.functions as cppfunc
+        from sph_lib.core import _cpp_functions_ext as cppfunc
     except Exception:
         return None
 

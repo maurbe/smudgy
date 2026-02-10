@@ -9,9 +9,9 @@
 #if defined(_OPENMP)
 #include <omp.h>
 #endif
-#include "kernels.h"
-#include "integration.h"
-#include "functions.h"
+#include "_kernels.h"
+#include "_integration.h"
+#include "_functions.h"
 
 // =============================================================================
 // Utilities

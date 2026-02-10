@@ -1,5 +1,5 @@
-#include "kernels.h"
-#include "integration.h"
+#include "_kernels.h"
+#include "_integration.h"
 
 #include <algorithm>
 
