@@ -395,6 +395,8 @@ class PointCloud:
 
 		# check and typecast the 'fields' parameter
 		fields = np.asarray(fields, dtype=np.float32)
+		if fields.ndim == 1:
+			fields = fields[:, np.newaxis]  # convert to (N, 1) if given as (N,)
 		if fields.shape[0] != self.pos.shape[0]:
 			raise ValueError(
 				f"'fields' array length ({fields.shape[0]}) must match number of particles ({self.pos.shape[0]})"
