@@ -21,25 +21,35 @@ class PointCloud:
 				 boxsize: Optional[Union[float, Sequence[float]]] = None,
 				 verbose: bool = True
 				 ):
-		
+		"""
+		Parameters
+		----------
+		positions : np.ndarray
+			Particle positions, shape (N, D).
+		masses : np.ndarray
+			Particle masses, shape (N,).
+		boxsize : float or array-like, optional
+			If provided, all axes are periodic with the given boxsize(s). If None, no periodicity is used.
+		verbose : bool
+			Verbosity flag.
+		"""
 		self.dim = positions.shape[-1]
-		assert self.dim==2 or self.dim==3, f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
-		
+		assert self.dim == 2 or self.dim == 3, f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
 		self.pos = positions
 		self.mass = masses
 		self.verbose = verbose
 
 		if boxsize is None:
 			self.periodic = False
+			self.boxsize = None
 		else:
 			self.periodic = True
-
-		# construct boxsize array
-		self.boxsize = boxsize
-		if np.ndim(boxsize) == 0:
-			self.boxsize = np.repeat(boxsize, self.dim)
-		else:
-			self.boxsize = np.asarray(boxsize)
+			boxsize_arr = np.asarray(boxsize)
+			if boxsize_arr.ndim == 0:
+				self.boxsize = np.repeat(boxsize_arr, self.dim)
+			else:
+				assert boxsize_arr.shape == (self.dim,), f"boxsize must be a scalar or have shape ({self.dim},), got {boxsize_arr.shape}"
+				self.boxsize = boxsize_arr
 
 
 	def set_sph_parameters(self, 
@@ -160,6 +170,12 @@ class PointCloud:
 		else:
 			raise AssertionError(f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {self.mode}")
 
+		# Safeguard: check for invalid neighbor indices
+		if hasattr(self, 'nn_inds'):
+			max_idx = np.max(self.nn_inds)
+			if max_idx >= self.pos.shape[0]:
+				raise IndexError(f"Neighbor index {max_idx} is out of bounds for {self.pos.shape[0]} particles. This indicates a bug in the neighbor search or input setup.")
+
 
 	def _check_smoothing_computed(self):
 		if self.mode in ['adaptive', 'isotropic'] and not hasattr(self, 'hsm'):
@@ -200,6 +216,7 @@ class PointCloud:
 
 		# Kernel evaluation and density computation
 		w = self.kernel.evaluate_kernel(**kwargs)
+		print(1, w.shape, self.mass.shape)
 		self.density = np.sum(self.mass[self.nn_inds] * w, axis=1)
 
 
@@ -320,7 +337,7 @@ class PointCloud:
 			hsm, nn_inds, nn_dists = compute_hsm(
 				tree, 
 				num_neighbors=num_neighbors,
-				query_positions=query_positions,
+				query_pos=query_positions,
 			)
 			if compute_gradients:
 				# For gradients, need relative coordinate vectors
@@ -339,7 +356,7 @@ class PointCloud:
 				tree,
 				masses=masses,
 				num_neighbors=num_neighbors,
-				query_positions=query_positions,
+				query_pos=query_positions,
 			)
 			kernel_key = 'r_ij_vec' if compute_gradients else 'r_ij'
 			kernel_kwargs = {kernel_key: rel_coords, 'H': h_tensor}

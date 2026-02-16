@@ -87,6 +87,7 @@ class Kernel:
 			h = h[:, np.newaxis] if len(h.shape) == 1 else h
 			q = r_ij / h
 			norm = h ** self.dim
+			W = self._kernel_sigma() / norm * self._kernel_values(q)
 		else:
 			assert H is not None, "Anisotropic kernel evaluation requires 'H'"
 			assert isinstance(H, np.ndarray), "H must be a numpy array if provided"
@@ -98,7 +99,7 @@ class Kernel:
 			xi = np.einsum('mij,mkj->mki', H_inv, r_ij)
 			q = np.linalg.norm(xi, axis=-1)  # (N, M)
 			norm = det_H  # (N,)
-		W = self._kernel_sigma() / norm * self._kernel_values(q)
+			W = self._kernel_sigma() / norm[..., np.newaxis] * self._kernel_values(q)
 		return W
 
 
@@ -148,8 +149,10 @@ class Kernel:
 			q = r_ij_mag / h                                  # (N, M)
 			dW_dq = self._kernel_gradient_values(q)
 			dW_dr = dW_dq / h                                 # (N, M)
-			er = r_ij_vec / r_ij_mag[..., np.newaxis]         # (N, M, d)
-			grad_W = self._kernel_sigma() / h**self.dim * dW_dr[..., np.newaxis] * er  # (N, M, d)
+			# Safe normalization: if r_ij_mag == 0, set er = 0
+			er = np.zeros_like(r_ij_vec)
+			np.divide(r_ij_vec, r_ij_mag[..., np.newaxis], out=er, where=r_ij_mag[..., np.newaxis] != 0)
+			grad_W = self._kernel_sigma() / h[..., np.newaxis]**self.dim * dW_dr[..., np.newaxis] * er  # (N, M, d)
 			return grad_W
 		else:
 			assert H is not None, "Anisotropic kernel gradient requires 'H'"

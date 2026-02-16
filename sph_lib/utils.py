@@ -99,8 +99,12 @@ def coordinate_difference_with_pbc(
 		$[-0.5 * boxsize, 0.5 * boxsize)$ per dimension.
 	"""
 	diff = np.asarray(x) - np.asarray(y)
+	
+	# early exit if boxsize is None (non-periodic case)
+	if boxsize is None:
+		return diff
+	
 	box_arr = np.asarray(boxsize)
-
 	if box_arr.ndim == 0:
 		half_box = 0.5 * box_arr
 		return (diff + half_box) % box_arr - half_box

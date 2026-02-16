@@ -694,7 +694,8 @@ py::tuple _anisotropic_3d_cpp(
 PYBIND11_MODULE(_cpp_functions_ext, m) {
     m.doc() = "C++ deposition functions";
 
-#ifdef OPENMP_AVAILABLE
+
+#ifdef _OPENMP
     m.attr("has_openmp") = true;
 #else
     m.attr("has_openmp") = false;

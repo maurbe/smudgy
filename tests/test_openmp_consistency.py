@@ -10,10 +10,10 @@ import pytest
 from sph_lib import PointCloud, check_openmp
 
 
-
 DATASETS = ["random", "cosmo"]
 METHODS = ["ngp", "cic", "tsc"]
 GRIDNUM = 64
+
 
 # --- Module-level OpenMP check ---
 openmp_available = check_openmp()
@@ -23,9 +23,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+datapath = '~/Desktop/sph_lib_analysis/data/'
 def _load_dataset(dataset: str, dim: int):
-    data_dir = Path(__file__).resolve().parents[2] / "data"
-    dataset_path = data_dir / f"dataset_{dataset}_{dim}d.pkl"
+    # Expand user path and select dataset based on parameters
+    dataset_path = Path(datapath).expanduser()
+    dataset_path /= f"dataset_{dataset}_{dim}d.pkl"
     if not dataset_path.exists():
         pytest.skip(f"Dataset not found: {dataset_path}")
     with dataset_path.open("rb") as f:
@@ -79,7 +81,6 @@ def test_openmp_toggle_consistency(dim, method, dataset):
         averaged=[False] * fields.shape[1],
         gridnums=GRIDNUM,
         method=method,
-        use_python=False,
         use_openmp=False,
     )
 
@@ -88,7 +89,6 @@ def test_openmp_toggle_consistency(dim, method, dataset):
         averaged=[False] * fields.shape[1],
         gridnums=GRIDNUM,
         method=method,
-        use_python=False,
         use_openmp=True,
         omp_threads=min(2, max_threads),
     )
@@ -124,7 +124,6 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
         averaged=[False] * fields.shape[1],
         gridnums=GRIDNUM,
         method=method,
-        use_python=False,
         use_openmp=True,
         omp_threads=thread_counts[0],
     )
@@ -135,7 +134,6 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
             averaged=[False] * fields.shape[1],
             gridnums=GRIDNUM,
             method=method,
-            use_python=False,
             use_openmp=True,
             omp_threads=threads,
         )

@@ -10,12 +10,14 @@ from sph_lib import PointCloud
 
 
 DATASETS = ["random", "cosmo"]
+datapath = '~/Desktop/sph_lib_analysis/data/'
 GRIDNUM = 64
 
 
 def _load_dataset(dataset: str, dim: int):
-    data_dir = Path(__file__).resolve().parents[2] / "data"
-    dataset_path = data_dir / f"dataset_{dataset}_{dim}d.pkl"
+    # Expand user path and select dataset based on parameters
+    dataset_path = Path(datapath).expanduser()
+    dataset_path /= f"dataset_{dataset}_{dim}d.pkl"
     if not dataset_path.exists():
         pytest.skip(f"Dataset not found: {dataset_path}")
     with dataset_path.open("rb") as f:
