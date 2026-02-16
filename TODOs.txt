@@ -2,6 +2,7 @@
 
 Setup
 [ ] find solution for enabling installation without openMP
+[ ] test / debug openMP acceleration -> need to troubleshoot on Intel cluster
 [x] refactor the file structure of the project
 
 Docs
@@ -27,11 +28,6 @@ Code
 	  •	Neighbor search uses Mahalanobis distance:
       \delta = |H^{-1}(r_p - r_q)|
     •	Outer neighbor satisfies \delta = 1
-[ ] test / debug openMP acceleration -> need to troubleshoot on Intel cluster
-
-Paper
-[ ] brainstorm and list which metrics to analyse
-[ ] produce relevant paper figures
 
 
 **Features** (so I don't forget)
