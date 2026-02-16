@@ -1,8 +1,8 @@
 import numpy as np
 import numpy.typing as npt
-from typing import Optional, Literal
 import math
 
+from typing import Optional, Literal
 
 
 class Kernel:
@@ -109,7 +109,7 @@ class Kernel:
 		H: Optional[npt.NDArray[np.floating]] = None
 	) -> npt.NDArray[np.floating]:
 		"""
-		Evaluate the kernel gradient $\nabla W$ at given positions.
+		Evaluate the kernel gradient nabla W at given positions.
 
 		Supports both isotropic and anisotropic smoothing with proper chain rule handling.
 

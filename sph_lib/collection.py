@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .core import _python_functions as _py_backend
+from .core import _py_functions as _py_backend
 from .core import _cpp_functions as _cpp_backend
 
 

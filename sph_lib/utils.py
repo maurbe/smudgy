@@ -120,8 +120,8 @@ def coordinate_difference_with_pbc(
 
 def compute_pcellsize_half(
 	tree: spatial.cKDTree,
-	query_pos: npt.ArrayLike,
-	num_neighbors: int
+	num_neighbors: int,
+	query_pos: Optional[npt.ArrayLike] = None,
 ) -> Tuple[FloatArray, IntArray]:
 	"""Estimate rectangular particle extent as half-distance to the Nth neighbor.
 
@@ -129,10 +129,11 @@ def compute_pcellsize_half(
 	----------
 	tree
 		cKDTree built from particle positions.
-	query_pos
-		Array of shape ``(M, D)`` with query coordinates.
 	num_neighbors
 		Number of neighbors used for the estimate.
+	query_pos
+		Array of shape ``(M, D)`` with query coordinates.
+		If ``None``, uses particle positions from the tree.
 
 	Returns
 	-------
@@ -141,6 +142,9 @@ def compute_pcellsize_half(
 		and contains half the distance to the Nth neighbor, and ``nn_inds`` has
 		shape ``(M, num_neighbors)``.
 	"""
+	if query_pos is None:
+		query_pos = tree.data
+		
 	# this follows the same "definition" of the smoothing length as 0.5 * distance to Nth nearest neighbor
 	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
 	h_cellsize = nn_dists[:, -1] * 0.5
@@ -149,8 +153,8 @@ def compute_pcellsize_half(
 
 def compute_hsm(
 	tree: spatial.cKDTree,
-	query_pos: npt.ArrayLike,
-	num_neighbors: int
+	num_neighbors: int,
+	query_pos: Optional[npt.ArrayLike] = None,
 ) -> Tuple[FloatArray, IntArray, FloatArray]:
 	"""Estimate smoothing length as half the distance to the Nth neighbor.
 
@@ -158,10 +162,11 @@ def compute_hsm(
 	----------
 	tree
 		cKDTree built from particle positions.
-	query_pos
-		Array of shape ``(M, D)`` with positions where smoothing length is evaluated.
 	num_neighbors
 		Number of neighbors used for the estimate.
+	query_pos
+		Array of shape ``(M, D)`` with positions where smoothing length is evaluated.
+		If ``None``, uses particle positions from the tree.
 
 	Returns
 	-------
@@ -170,6 +175,9 @@ def compute_hsm(
 		``nn_dists`` has shape ``(M, num_neighbors)``, and ``nn_inds`` has shape
 		``(M, num_neighbors)``.
 	"""
+	if query_pos is None:
+		query_pos = tree.data
+
 	nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
 	hsm = nn_dists[:, -1] * 0.5
 	return hsm, nn_inds, nn_dists
