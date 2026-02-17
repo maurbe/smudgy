@@ -3,7 +3,6 @@
 Setup
 [ ] find solution for enabling installation without openMP
 [ ] test / debug openMP acceleration -> need to troubleshoot on Intel cluster
-[x] refactor the file structure of the project
 
 Docs
 [ ] create + add example "notebooks", "scripts" and plots for interpolation / deposition walkthroughs

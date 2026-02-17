@@ -10,6 +10,7 @@ authors = [
     { name = "Mauro Bernardini", email = "mauro.bernardini1313@gmail.com" }
     ]
 dependencies = ["numpy"]
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 test = ["pytest"]
@@ -20,3 +21,14 @@ include = ["sph_lib*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "D", "UP"]
+ignore = ["E501", "D203", "D213"]

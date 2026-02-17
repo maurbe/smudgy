@@ -1,11 +1,14 @@
+"""Test interpolation functionality for different modes and quantities."""
+
 import numpy as np
 import pytest
-from sph_lib import kernels, utils
+
 
 @pytest.mark.parametrize("pbc", [False, True])
 @pytest.mark.parametrize("mode", ["isotropic", "anisotropic"])
 @pytest.mark.parametrize("quantity", ["field", "gradient"])
 def test_interpolation_modes(pbc, mode, quantity):
+    """Test interpolation for different PBC, modes, and quantities."""
     np.random.seed(42)
     N = 1000
     D = 3
@@ -15,11 +18,9 @@ def test_interpolation_modes(pbc, mode, quantity):
     masses = np.ones(N)
 
     from sph_lib.ops import PointCloud
+
     pc = PointCloud(positions, masses, boxsize=boxsize, verbose=False)
-    pc.set_sph_parameters(kernel_name="cubic_spline", 
-                          mode=mode, 
-                          num_neighbors=32
-                          )
+    pc.set_sph_parameters(kernel_name="cubic_spline", mode=mode, num_neighbors=32)
     pc.compute_smoothing_lengths()
     pc.compute_density()
 

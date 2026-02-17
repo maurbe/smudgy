@@ -9,7 +9,6 @@ import pytest
 
 from sph_lib import PointCloud, check_openmp
 
-
 DATASETS = ["random", "cosmo"]
 METHODS = ["ngp", "cic", "tsc"]
 GRIDNUM = 64
@@ -19,12 +18,15 @@ GRIDNUM = 64
 openmp_available = check_openmp()
 pytestmark = pytest.mark.skipif(
     not openmp_available,
-    reason="OpenMP not available; skipping OpenMP consistency tests."
+    reason="OpenMP not available; skipping OpenMP consistency tests.",
 )
 
 
-datapath = '~/Desktop/sph_lib_analysis/data/'
+datapath = "~/Desktop/sph_lib_analysis/data/"
+
+
 def _load_dataset(dataset: str, dim: int):
+    """Load test dataset for OpenMP consistency tests."""
     # Expand user path and select dataset based on parameters
     dataset_path = Path(datapath).expanduser()
     dataset_path /= f"dataset_{dataset}_{dim}d.pkl"
@@ -36,6 +38,7 @@ def _load_dataset(dataset: str, dim: int):
 
 
 def _get_openmp_max_threads():
+    """Get the maximum number of OpenMP threads available."""
     try:
         from sph_lib.core import _cpp_functions_ext as cppfunc
     except Exception:
@@ -51,6 +54,7 @@ def _get_openmp_max_threads():
 
 
 def _require_openmp():
+    """Require at least two OpenMP threads for test, else skip."""
     max_threads = _get_openmp_max_threads()
     if not max_threads or max_threads < 2:
         pytest.skip("OpenMP not available or only one thread")
@@ -61,6 +65,7 @@ def _require_openmp():
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_openmp_toggle_consistency(dim, method, dataset):
+    """Test OpenMP toggle consistency for deposition results."""
     max_threads = _require_openmp()
 
     data = _load_dataset(dataset, dim)
@@ -101,6 +106,7 @@ def test_openmp_toggle_consistency(dim, method, dataset):
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_openmp_thread_counts_consistency(dim, method, dataset):
+    """Test consistency of deposition with different OpenMP thread counts."""
     max_threads = _require_openmp()
     thread_counts = [t for t in (2, 4, 8) if t <= max_threads]
     if len(thread_counts) < 2:

@@ -1,14 +1,15 @@
+"""Setup script for building the library with C++ extensions and OpenMP support."""
+
 import os
 import platform
 import tempfile
 import textwrap
-from setuptools import setup, find_packages
 from distutils.ccompiler import new_compiler
 from distutils.sysconfig import customize_compiler
 
 import numpy as np
 from pybind11.setup_helpers import Pybind11Extension, build_ext
-
+from setuptools import find_packages, setup
 
 system = platform.system()
 has_openmp = False
@@ -17,12 +18,10 @@ extra_link_args = []
 
 
 def _supports_openmp(compile_args, link_args) -> bool:
-    test_code = textwrap.dedent(
-        """
+    test_code = textwrap.dedent("""
         #include <omp.h>
         int main() { return 0; }
-        """
-    )
+        """)
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "omp_test.cpp")
         with open(src, "w", encoding="utf-8") as handle:
@@ -31,10 +30,13 @@ def _supports_openmp(compile_args, link_args) -> bool:
         customize_compiler(compiler)
         try:
             obj_files = compiler.compile([src], extra_postargs=compile_args)
-            compiler.link_executable(obj_files, os.path.join(tmp, "a.out"), extra_postargs=link_args)
+            compiler.link_executable(
+                obj_files, os.path.join(tmp, "a.out"), extra_postargs=link_args
+            )
             return True
         except Exception:
             return False
+
 
 if system == "Darwin":  # macOS
     extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
@@ -47,7 +49,9 @@ else:
     extra_link_args = []
 
 if not _supports_openmp(extra_compile_args, extra_link_args):
-    extra_compile_args = ["-std=c++17", "-O3"] if system != "Windows" else ["/std:c++17", "/O2"]
+    extra_compile_args = (
+        ["-std=c++17", "-O3"] if system != "Windows" else ["/std:c++17", "/O2"]
+    )
     extra_link_args = []
     has_openmp = False
 else:

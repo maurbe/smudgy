@@ -8,13 +8,13 @@ import pytest
 
 from sph_lib import PointCloud
 
-
 DATASETS = ["random", "cosmo"]
-datapath = '~/Desktop/sph_lib_analysis/data/'
+datapath = "~/Desktop/sph_lib_analysis/data/"
 GRIDNUM = 64
 
 
 def _load_dataset(dataset: str, dim: int):
+    """Load test dataset for backend consistency tests."""
     # Expand user path and select dataset based on parameters
     dataset_path = Path(datapath).expanduser()
     dataset_path /= f"dataset_{dataset}_{dim}d.pkl"
@@ -29,6 +29,7 @@ def _load_dataset(dataset: str, dim: int):
 @pytest.mark.parametrize("method", ["ngp", "cic", "tsc"])
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_python_cpp_backend_consistency(dim, method, dataset):
+    """Test consistency between Python and C++ backends for deposition."""
     data = _load_dataset(dataset, dim)
 
     positions = np.asarray(data["pos"], dtype=np.float32)
