@@ -41,7 +41,8 @@ cd sph_lib
 pip install .
 ```
 
-If you want to enable OpenMP parallelization, see the [OpenMP Support](#openmp-support-parallelization) section before running pip install .
+
+
 
 
 ### OpenMP Support (Parallelization)
@@ -164,5 +165,28 @@ No special environment variables are usually needed on Windows if the compiler s
 You should see a message indicating whether OpenMP is available and how many threads are detected.
 
 ---
+
+
+## Running the Test Suite (Recommended)
+
+After installation, it is highly recommended to run the test suite to verify your installation and check OpenMP support. **Note:**
+
+- If you installed `sph_lib` via pip from PyPI or a wheel, the test suite is not included by default. To run the full tests, clone the repository:
+
+    ```sh
+    git clone https://github.com/youruser/sph_lib.git
+    cd sph_lib
+    pytest
+    ```
+
+- If you installed from source (from a git clone), simply run:
+
+    ```sh
+    pytest
+    ```
+
+The tests will automatically check for OpenMP availability and skip parallelization tests if OpenMP is not enabled or detected. If you see tests being skipped due to missing OpenMP, revisit the [OpenMP Support](#openmp-support-parallelization) section to ensure your environment is set up correctly and the package was compiled with OpenMP support.
+
+Running the tests is the best way to confirm that your installation is working as expected and that you are getting the performance benefits of parallelization if desired.
 
 If you have any issues, please consult the documentation or open an issue on GitHub.
