@@ -9,12 +9,11 @@ Docs
 [ ] create + add example "notebooks", "scripts" and plots for interpolation / deposition walkthroughs
 
 Tests
-[ ] complete/add pytests
+[x] complete/add pytests
 [ ] is there a way to test the package for different Python versions (how is that normally done)
 [ ] check compatibility with older numpy / scipy.spatial versions
 
 Code
-[x] port interpolation functionality to cpp where possible -> no real gain!
 [x] change integral estimation to fixed number of kernel evaluations at predefined locations:
     then, in for loop for each kernel position, e.g. 32^dim, identify the parent cell and deposit 
     that fraction into cell
@@ -22,12 +21,7 @@ Code
     2) case 2: kernel spans over many cells and the number of evaluation points is low -> problem,
        since it is possible that some cells don't have an eval point falling in them 
        -> 0 weight is deposited, i.e. very noisy
-[ ] revisit per axis periodicity -> we do not, since cKdTree does not support that.
-[ ] check primary selection of neighbors in anisotropic case;
-    Anisotropic kNN (Marinho-pure)
-	  •	Neighbor search uses Mahalanobis distance:
-      \delta = |H^{-1}(r_p - r_q)|
-    •	Outer neighbor satisfies \delta = 1
+[x] revisit per axis periodicity -> we do not, since cKdTree does not support that.
 
 
 **Features** (so I don't forget)
@@ -40,3 +34,11 @@ Deposition
 + many kernels possible
 + per axis periodic boundary conditions settings possible: but only for functions that do not use the cKdTree...
 + non-uniform grids: varying pixel / voxel sizes for each axis possible
+
+
+**Feature for future releases**
+[ ] check primary selection of neighbors in anisotropic case;
+    Anisotropic kNN (Marinho-pure)
+	  •	Neighbor search uses Mahalanobis distance:
+      \delta = |H^{-1}(r_p - r_q)|
+      •	Outer neighbor satisfies \delta = 1
