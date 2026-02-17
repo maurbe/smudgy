@@ -137,7 +137,7 @@ void ngp_2d_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,
     bool use_openmp,            
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, num_fields)
@@ -187,7 +187,7 @@ void ngp_3d_cpp(
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
-    const bool* periodic,       // (3,)
+    bool periodic,
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -242,7 +242,7 @@ void cic_2d_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, num_fields)
@@ -257,10 +257,6 @@ void cic_2d_cpp(
     const int gridnum_y = gridnums[1];
     const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
 
     // prepare output arrays
     const int field_stride_x = gridnum_y * num_fields;
@@ -298,8 +294,8 @@ void cic_2d_cpp(
             int jj = j;
 
             // wrap indices if periodic
-            ii = apply_pbc(ii, gridnum_x, periodic_x);
-            jj = apply_pbc(jj, gridnum_y, periodic_y);
+            ii = apply_pbc(ii, gridnum_x, periodic);
+            jj = apply_pbc(jj, gridnum_y, periodic);
 
             // early-out if cell lies outside the grid domain (only relevant for non-periodic case)
             if (is_outside_domain(ii, gridnum_x)) return;
@@ -328,7 +324,7 @@ void cic_3d_cpp(
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
-    const bool* periodic,
+    bool periodic,
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -345,11 +341,6 @@ void cic_3d_cpp(
     const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
-
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-    const bool periodic_z = periodic[2];
 
     // prepare output arrays
     const int field_stride_x = gridnum_y * gridnum_z * num_fields;
@@ -398,9 +389,9 @@ void cic_3d_cpp(
             int kk = k;
 
             // wrap indices if periodic
-            ii = apply_pbc(ii, gridnum_x, periodic_x);
-            jj = apply_pbc(jj, gridnum_y, periodic_y);
-            kk = apply_pbc(kk, gridnum_z, periodic_z);
+            ii = apply_pbc(ii, gridnum_x, periodic);
+            jj = apply_pbc(jj, gridnum_y, periodic);
+            kk = apply_pbc(kk, gridnum_z, periodic);
 
             // early-out if particle lies outside the grid domain (only relevant for non-periodic case)
             if (is_outside_domain(ii, gridnum_x)) return;
@@ -434,7 +425,7 @@ void cic_2d_adaptive_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,              // (2,)
     const float* pcellsizesHalf,// (N)
     bool use_openmp,
     int omp_threads,
@@ -450,10 +441,6 @@ void cic_2d_adaptive_cpp(
     const int gridnum_y = gridnums[1];
     const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
 
     // prepare output arrays
     const int stride_x = gridnum_y * num_fields;
@@ -488,7 +475,7 @@ void cic_2d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            ii = apply_pbc(ii, gridnum_x, periodic);
             if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute cell edge coordinates for current grid cell
@@ -499,7 +486,7 @@ void cic_2d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                jj = apply_pbc(jj, gridnum_y, periodic);
                 if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute cell edge coordinates for current grid cell
@@ -531,7 +518,7 @@ void cic_3d_adaptive_cpp(
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
-    const bool* periodic,
+    bool periodic,
     const float* pcellsizesHalf, // (N)
     bool use_openmp,
     int omp_threads,
@@ -550,11 +537,6 @@ void cic_3d_adaptive_cpp(
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
     
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-    const bool periodic_z = periodic[2];
-
     // prepare output arrays
     const int stride_x = gridnum_y * gridnum_z * num_fields;
     const int stride_y = gridnum_z * num_fields;
@@ -596,7 +578,7 @@ void cic_3d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            ii = apply_pbc(ii, gridnum_x, periodic);
             if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute cell edge coordinates for current grid cell
@@ -607,7 +589,7 @@ void cic_3d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                jj = apply_pbc(jj, gridnum_y, periodic);
                 if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute cell edge coordinates for current grid cell
@@ -618,7 +600,7 @@ void cic_3d_adaptive_cpp(
                     int kk = k;
 
                     // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                    kk = apply_pbc(kk, gridnum_z, periodic_z);
+                    kk = apply_pbc(kk, gridnum_z, periodic);
                     if (is_outside_domain(kk, gridnum_z)) continue;
 
                     // compute cell edge coordinates for current grid cell
@@ -664,7 +646,7 @@ void tsc_2d_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, num_fields)
@@ -680,10 +662,6 @@ void tsc_2d_cpp(
     const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-
     // prepare output arrays
     const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
@@ -714,14 +692,14 @@ void tsc_2d_cpp(
             int ix = i_base + offsets[i];
 
             // check periodicity and apply PBC if needed, early-out if outside domain
-            ix = apply_pbc(ix, gridnum_x, periodic_x);
+            ix = apply_pbc(ix, gridnum_x, periodic);
             if (is_outside_domain(ix, gridnum_x)) continue;
             
             for (int j = 0; j < 3; ++j) {
                 int iy = j_base + offsets[j];
 
                 // check periodicity and apply PBC if needed, early-out if outside domain
-                iy = apply_pbc(iy, gridnum_y, periodic_y);
+                iy = apply_pbc(iy, gridnum_y, periodic);
                 if (is_outside_domain(iy, gridnum_y)) continue;
 
                 // compute combined weight for this neighbor cell
@@ -747,7 +725,7 @@ void tsc_3d_cpp(
     int num_fields,
     const float* boxsizes,      // (3,) 
     const int* gridnums,        // (3,)
-    const bool* periodic,       // (3,)
+    bool periodic,
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -760,9 +738,6 @@ void tsc_3d_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-    const bool periodic_z = periodic[2];
     const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
@@ -807,21 +782,21 @@ void tsc_3d_cpp(
             int ix = i_base + offsets[i];
 
             // check periodicity and apply PBC if needed, early-out if outside domain
-            ix = apply_pbc(ix, gridnum_x, periodic_x);
+            ix = apply_pbc(ix, gridnum_x, periodic);
             if (is_outside_domain(ix, gridnum_x)) continue;
             
             for (int j = 0; j < 3; ++j) {
                 int iy = j_base + offsets[j];
 
                 // check periodicity and apply PBC if needed, early-out if outside domain
-                iy = apply_pbc(iy, gridnum_y, periodic_y);
+                iy = apply_pbc(iy, gridnum_y, periodic);
                 if (is_outside_domain(iy, gridnum_y)) continue;
                 
                 for (int k = 0; k < 3; ++k) {
                     int iz = k_base + offsets[k];
 
                     // check periodicity and apply PBC if needed, early-out if outside domain
-                    iz = apply_pbc(iz, gridnum_z, periodic_z);
+                    iz = apply_pbc(iz, gridnum_z, periodic);
                     if (is_outside_domain(iz, gridnum_z)) continue;
 
                     // compute combined weight for this neighbor cell
@@ -870,7 +845,7 @@ void tsc_2d_adaptive_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,              
     const float* pcellsizesHalf,// (N)
     bool use_openmp,
     int omp_threads,
@@ -886,10 +861,6 @@ void tsc_2d_adaptive_cpp(
     const int gridnum_y = gridnums[1];
     const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
 
     // prepare output arrays
     const int stride_x = gridnum_y * num_fields;
@@ -922,7 +893,7 @@ void tsc_2d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            ii = apply_pbc(ii, gridnum_x, periodic);
             if (is_outside_domain(ii, gridnum_x)) continue;
 
             // compute integrated weight for this cell in x direction
@@ -934,7 +905,7 @@ void tsc_2d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                jj = apply_pbc(jj, gridnum_y, periodic);
                 if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute integrated weight for this cell in y direction
@@ -961,7 +932,7 @@ void tsc_3d_adaptive_cpp(
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
-    const bool* periodic,       // (3,)
+    bool periodic,
     const float* pcellsizesHalf,// (N)
     bool use_openmp,
     int omp_threads,
@@ -980,11 +951,6 @@ void tsc_3d_adaptive_cpp(
     const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
     const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
     
-    // extract periodicity flags
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-    const bool periodic_z = periodic[2];
-
     // prepare output arrays
     const int stride_x = gridnum_y * gridnum_z * num_fields;
     const int stride_y = gridnum_z * num_fields;
@@ -1023,7 +989,7 @@ void tsc_3d_adaptive_cpp(
             int ii = i;
 
             // check periodicity and apply PBC if needed, early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic_x);
+            ii = apply_pbc(ii, gridnum_x, periodic);
             if (is_outside_domain(ii, gridnum_x)) continue;
             
             // compute integrated weight for this cell in x direction
@@ -1035,7 +1001,7 @@ void tsc_3d_adaptive_cpp(
                 int jj = j;
 
                 // check periodicity and apply PBC if needed, early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic_y);
+                jj = apply_pbc(jj, gridnum_y, periodic);
                 if (is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute integrated weight for this cell in y direction
@@ -1047,7 +1013,7 @@ void tsc_3d_adaptive_cpp(
                     int kk = k;
 
                     // check periodicity and apply PBC if needed, early-out if outside domain
-                    kk = apply_pbc(kk, gridnum_z, periodic_z);
+                    kk = apply_pbc(kk, gridnum_z, periodic);
                     if (is_outside_domain(kk, gridnum_z)) continue;
 
                     // compute integrated weight for this cell in z direction
@@ -1081,7 +1047,7 @@ void isotropic_kernel_deposition_2d_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
@@ -1107,10 +1073,6 @@ void isotropic_kernel_deposition_2d_cpp(
     // extract grid parameters
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-
-    // determine periodicity for each axis
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
 
     // compute cell sizes and related parameters
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
@@ -1169,8 +1131,8 @@ void isotropic_kernel_deposition_2d_cpp(
                 float y_phys = y_pos + kernel_samples.coords[2 * s + 1] * hsm_current;
                 
                 // given the geometry, determine the cell into which sample falls
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic_x);
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic_y);
+                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
+                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
                 if (!ix) continue;
                 if (!iy) continue;
 
@@ -1189,12 +1151,12 @@ void isotropic_kernel_deposition_2d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                an = apply_pbc(an, gridnum_x, periodic_x);
+                an = apply_pbc(an, gridnum_x, periodic);
                 if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    bn = apply_pbc(bn, gridnum_y, periodic);
                     if (is_outside_domain(bn, gridnum_y)) continue;
 
                     // set up helper function for integral evaluation using method
@@ -1203,8 +1165,8 @@ void isotropic_kernel_deposition_2d_cpp(
                         float dy = (y_cell - (b + oy)) * cellSize_y;
 
                         // optionally apply PBC wrapping
-                        dx = wrap_distance_if_periodic(dx, boxsize_x, periodic_x);
-                        dy = wrap_distance_if_periodic(dy, boxsize_y, periodic_y);
+                        dx = wrap_distance_if_periodic(dx, boxsize_x, periodic);
+                        dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
 
                         float r = std::sqrt(dx * dx + dy * dy);
                         float q = r / hsm_current;
@@ -1240,7 +1202,7 @@ void isotropic_kernel_deposition_3d_cpp(
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
-    const bool* periodic,       // (3,)
+    bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
@@ -1268,11 +1230,6 @@ void isotropic_kernel_deposition_3d_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-
-    // determine periodicity for each axis
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-    const bool periodic_z = periodic[2];
 
     // compute cell sizes and related parameters
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
@@ -1340,11 +1297,11 @@ void isotropic_kernel_deposition_3d_cpp(
                 float y_phys = y_pos + kernel_samples.coords[3 * s + 1] * hsm_current;
                 float z_phys = z_pos + kernel_samples.coords[3 * s + 2] * hsm_current;
 
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic_x);
+                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
                 if (!ix) continue;
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic_y);
+                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
                 if (!iy) continue;
-                auto iz = cell_index_from_pos(z_phys, boxsize_z, gridnum_z, periodic_z);
+                auto iz = cell_index_from_pos(z_phys, boxsize_z, gridnum_z, periodic);
                 if (!iz) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1362,17 +1319,17 @@ void isotropic_kernel_deposition_3d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                an = apply_pbc(an, gridnum_x, periodic_x);
+                an = apply_pbc(an, gridnum_x, periodic);
                 if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    bn = apply_pbc(bn, gridnum_y, periodic);
                     if (is_outside_domain(bn, gridnum_y)) continue;
 
                     for (int c = k_min; c <= k_max; ++c) {
                         int cn = c;
-                        cn = apply_pbc(cn, gridnum_z, periodic_z);
+                        cn = apply_pbc(cn, gridnum_z, periodic);
                         if (is_outside_domain(cn, gridnum_z)) continue;
 
                         // set up helper function for integral evaluation using method
@@ -1382,9 +1339,9 @@ void isotropic_kernel_deposition_3d_cpp(
                             float dz = (z_cell - (c + oz)) * cellSize_z;
 
                             // optionally apply PBC wrapping
-                            dx = wrap_distance_if_periodic(dx, boxsize_x, periodic_x);
-                            dy = wrap_distance_if_periodic(dy, boxsize_y, periodic_y);
-                            dz = wrap_distance_if_periodic(dz, boxsize_z, periodic_z);
+                            dx = wrap_distance_if_periodic(dx, boxsize_x, periodic);
+                            dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
+                            dz = wrap_distance_if_periodic(dz, boxsize_z, periodic);
 
                             float r = std::sqrt(dx * dx + dy * dy + dz * dz);
                             float q = r / hsm_current;
@@ -1422,7 +1379,7 @@ void anisotropic_kernel_deposition_2d_cpp(
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
-    const bool* periodic,       // (2,)
+    bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
@@ -1448,10 +1405,6 @@ void anisotropic_kernel_deposition_2d_cpp(
     // extract grid parameters
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
-
-    // determine periodicity for each axis
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
 
     // compute cell sizes and related parameters
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
@@ -1519,9 +1472,9 @@ void anisotropic_kernel_deposition_2d_cpp(
                 float y_phys = y_pos + vecs[1] * (vals[0] * kernel_samples.coords[2 * s + 0])
                                       + vecs[3] * (vals[1] * kernel_samples.coords[2 * s + 1]);
 
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic_x);
+                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
                 if (!ix) continue;
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic_y);
+                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
                 if (!iy) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1539,12 +1492,12 @@ void anisotropic_kernel_deposition_2d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                an = apply_pbc(an, gridnum_x, periodic_x);
+                an = apply_pbc(an, gridnum_x, periodic);
                 if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    bn = apply_pbc(bn, gridnum_y, periodic);
                     if (is_outside_domain(bn, gridnum_y)) continue;
 
                     // set up helper function for integral evaluation using method
@@ -1553,8 +1506,8 @@ void anisotropic_kernel_deposition_2d_cpp(
                         float dy = (y_cell - (b + oy)) * cellSize_y;
 
                         // optionally apply PBC wrapping
-                        dx = wrap_distance_if_periodic(dx, boxsize_x, periodic_x);
-                        dy = wrap_distance_if_periodic(dy, boxsize_y, periodic_y);
+                        dx = wrap_distance_if_periodic(dx, boxsize_x, periodic);
+                        dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
 
                         // compute q in transformed space and evaluate kernel
                         float xi1 = (vecs[0] * dx + vecs[1] * dy) / vals[0];
@@ -1593,7 +1546,7 @@ void anisotropic_kernel_deposition_3d_cpp(
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
-    const bool* periodic,       // (3,)
+    bool periodic,              // (3,)
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
@@ -1621,11 +1574,6 @@ void anisotropic_kernel_deposition_3d_cpp(
     const int gridnum_x = gridnums[0];
     const int gridnum_y = gridnums[1];
     const int gridnum_z = gridnums[2];
-
-    // determine periodicity for each axis
-    const bool periodic_x = periodic[0];
-    const bool periodic_y = periodic[1];
-    const bool periodic_z = periodic[2];
 
     // compute cell sizes and related parameters
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
@@ -1713,11 +1661,11 @@ void anisotropic_kernel_deposition_3d_cpp(
                                       + vecs[5] * (vals[1] * kernel_samples.coords[3 * s + 1])
                                       + vecs[8] * (vals[2] * kernel_samples.coords[3 * s + 2]);
 
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic_x);
+                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
                 if (!ix) continue;
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic_y);
+                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
                 if (!iy) continue;
-                auto iz = cell_index_from_pos(z_phys, boxsize_z, gridnum_z, periodic_z);
+                auto iz = cell_index_from_pos(z_phys, boxsize_z, gridnum_z, periodic);
                 if (!iz) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1735,17 +1683,17 @@ void anisotropic_kernel_deposition_3d_cpp(
         else {
             for (int a = i_min; a <= i_max; ++a) {
                 int an = a;
-                an = apply_pbc(an, gridnum_x, periodic_x);
+                an = apply_pbc(an, gridnum_x, periodic);
                 if (is_outside_domain(an, gridnum_x)) continue;
 
                 for (int b = j_min; b <= j_max; ++b) {
                     int bn = b;
-                    bn = apply_pbc(bn, gridnum_y, periodic_y);
+                    bn = apply_pbc(bn, gridnum_y, periodic);
                     if (is_outside_domain(bn, gridnum_y)) continue;
 
                     for (int c = k_min; c <= k_max; ++c) {
                         int cn = c;
-                        cn = apply_pbc(cn, gridnum_z, periodic_z);
+                        cn = apply_pbc(cn, gridnum_z, periodic);
                         if (is_outside_domain(cn, gridnum_z)) continue;
 
                         // set up helper function for integral evaluation using method
@@ -1755,9 +1703,9 @@ void anisotropic_kernel_deposition_3d_cpp(
                             float dz = (z_cell - (c + oz)) * cellSize_z;
 
                             // optionally apply PBC wrapping
-                            dx = wrap_distance_if_periodic(dx, boxsize_x, periodic_x);
-                            dy = wrap_distance_if_periodic(dy, boxsize_y, periodic_y);
-                            dz = wrap_distance_if_periodic(dz, boxsize_z, periodic_z);
+                            dx = wrap_distance_if_periodic(dx, boxsize_x, periodic);
+                            dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
+                            dz = wrap_distance_if_periodic(dz, boxsize_z, periodic);
 
                             // compute q in transformed space and evaluate kernel
                             float xi1 = (vecs[0] * dx + vecs[1] * dy + vecs[2] * dz) / vals[0];

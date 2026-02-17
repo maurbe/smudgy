@@ -53,8 +53,8 @@ def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
         Number of grid cells for each axis.
-    periodic : Sequence[bool]
-        Whether to wrap particles that leave the domain.
+    periodic : bool
+        Whether to wrap particles that leave the domain (applies to all axes).
 
     Returns
     -------
@@ -93,7 +93,6 @@ def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
     for f in range(quantities.shape[1]):
         np.add.at(fields[:, :, f], (x_idx, y_idx), quantities[:, f])
     np.add.at(weights, (x_idx, y_idx), 1)
-    
     return fields, weights
 
 def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
@@ -109,8 +108,8 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
         Number of grid cells for each axis.
-    periodic : Sequence[bool]
-        Whether to wrap particles that leave the domain.
+    periodic : bool
+        Whether to wrap particles that leave the domain (applies to all axes).
 
     Returns
     -------
@@ -153,7 +152,6 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
     for f in range(quantities.shape[1]):
         np.add.at(fields[:, :, :, f], (x_idx, y_idx, z_idx), quantities[:, f])
     np.add.at(weights, (x_idx, y_idx, z_idx), 1)
-
     return fields, weights
 
 def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
@@ -169,8 +167,8 @@ def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
         Number of grid cells for each axis.
-    periodic : Sequence[bool]
-        Whether to wrap particles that leave the domain.
+    periodic : bool
+        Whether to wrap particles that leave the domain (applies to all axes).
 
     Returns
     -------
@@ -185,7 +183,6 @@ def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
     boxsizes = _as_float32(boxsizes)
 
     gridnum_x, gridnum_y = gridnums
-    periodic_x, periodic_y = periodic
     inv_dx = np.array([gridnum_x, gridnum_y], dtype=np.float32) / boxsizes
 
     grid_pos = positions * inv_dx
@@ -197,10 +194,10 @@ def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
     x1 = x0 + 1
     y1 = y0 + 1
 
-    x0_idx, x0_valid = _wrap_or_mask_indices(x0, gridnum_x, periodic_x)
-    x1_idx, x1_valid = _wrap_or_mask_indices(x1, gridnum_x, periodic_x)
-    y0_idx, y0_valid = _wrap_or_mask_indices(y0, gridnum_y, periodic_y)
-    y1_idx, y1_valid = _wrap_or_mask_indices(y1, gridnum_y, periodic_y)
+    x0_idx, x0_valid = _wrap_or_mask_indices(x0, gridnum_x, periodic)
+    x1_idx, x1_valid = _wrap_or_mask_indices(x1, gridnum_x, periodic)
+    y0_idx, y0_valid = _wrap_or_mask_indices(y0, gridnum_y, periodic)
+    y1_idx, y1_valid = _wrap_or_mask_indices(y1, gridnum_y, periodic)
 
     w00 = (1 - dx) * (1 - dy)
     w10 = dx * (1 - dy)
@@ -241,8 +238,8 @@ def _cic_3d(positions, quantities, boxsizes, gridnums, periodic):
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
         Number of grid cells for each axis.
-    periodic : Sequence[bool]
-        Whether to wrap particles that leave the domain.
+    periodic : bool
+        Whether to wrap particles that leave the domain (applies to all axes).
 
     Returns
     -------
@@ -257,7 +254,6 @@ def _cic_3d(positions, quantities, boxsizes, gridnums, periodic):
     boxsizes = _as_float32(boxsizes)
 
     gridnum_x, gridnum_y, gridnum_z = gridnums
-    periodic_x, periodic_y, periodic_z = periodic
     inv_dx = np.array([gridnum_x, gridnum_y, gridnum_z], dtype=np.float32) / boxsizes
 
     grid_pos = positions * inv_dx
@@ -270,12 +266,12 @@ def _cic_3d(positions, quantities, boxsizes, gridnums, periodic):
     y1 = y0 + 1
     z1 = z0 + 1
 
-    x0_idx, x0_valid = _wrap_or_mask_indices(x0, gridnum_x, periodic_x)
-    x1_idx, x1_valid = _wrap_or_mask_indices(x1, gridnum_x, periodic_x)
-    y0_idx, y0_valid = _wrap_or_mask_indices(y0, gridnum_y, periodic_y)
-    y1_idx, y1_valid = _wrap_or_mask_indices(y1, gridnum_y, periodic_y)
-    z0_idx, z0_valid = _wrap_or_mask_indices(z0, gridnum_z, periodic_z)
-    z1_idx, z1_valid = _wrap_or_mask_indices(z1, gridnum_z, periodic_z)
+    x0_idx, x0_valid = _wrap_or_mask_indices(x0, gridnum_x, periodic)
+    x1_idx, x1_valid = _wrap_or_mask_indices(x1, gridnum_x, periodic)
+    y0_idx, y0_valid = _wrap_or_mask_indices(y0, gridnum_y, periodic)
+    y1_idx, y1_valid = _wrap_or_mask_indices(y1, gridnum_y, periodic)
+    z0_idx, z0_valid = _wrap_or_mask_indices(z0, gridnum_z, periodic)
+    z1_idx, z1_valid = _wrap_or_mask_indices(z1, gridnum_z, periodic)
 
     # Compute weights for 8 surrounding grid points
     w000 = (1 - dx) * (1 - dy) * (1 - dz)
@@ -344,8 +340,8 @@ def _tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
         Number of grid cells for each axis.
-    periodic : Sequence[bool]
-        Whether to wrap particles that leave the domain.
+    periodic : bool
+        Whether to wrap particles that leave the domain (applies to all axes).
 
     Returns
     -------
@@ -377,7 +373,6 @@ def _tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
     wx = _weights_tsc(frac[:, 0])
     wy = _weights_tsc(frac[:, 1])
 
-    periodic_x, periodic_y = periodic
 
     for dx_i, dx in enumerate(offsets):
         for dy_i, dy in enumerate(offsets):
@@ -385,13 +380,11 @@ def _tsc_2d(positions, quantities, boxsizes, gridnums, periodic):
             iy = base_idx[:, 1] + dy
 
             valid = np.ones(ix.shape[0], dtype=bool)
-            if periodic_x:
+            if periodic:
                 ix = np.mod(ix, gridnum_x)
-            else:
-                valid &= (ix >= 0) & (ix < gridnum_x)
-            if periodic_y:
                 iy = np.mod(iy, gridnum_y)
             else:
+                valid &= (ix >= 0) & (ix < gridnum_x)
                 valid &= (iy >= 0) & (iy < gridnum_y)
 
             if not np.any(valid):
@@ -419,8 +412,8 @@ def _tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
         Number of grid cells for each axis.
-    periodic : Sequence[bool]
-        Whether to wrap particles that leave the domain.
+    periodic : bool
+        Whether to wrap particles that leave the domain (applies to all axes).
 
     Returns
     -------
@@ -457,7 +450,6 @@ def _tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
     wz = _weights_tsc(frac[:, 2])
 
     # Loop over each neighbor offset in 3D (27 neighbors)
-    periodic_x, periodic_y, periodic_z = periodic
 
     for dx_i, dx in enumerate(offsets):
         for dy_i, dy in enumerate(offsets):
@@ -467,17 +459,13 @@ def _tsc_3d(positions, quantities, boxsizes, gridnums, periodic):
                 iz = base_idx[:, 2] + dz
 
                 valid = np.ones(ix.shape[0], dtype=bool)
-                if periodic_x:
+                if periodic:
                     ix = np.mod(ix, gridnum_x)
-                else:
-                    valid &= (ix >= 0) & (ix < gridnum_x)
-                if periodic_y:
                     iy = np.mod(iy, gridnum_y)
-                else:
-                    valid &= (iy >= 0) & (iy < gridnum_y)
-                if periodic_z:
                     iz = np.mod(iz, gridnum_z)
                 else:
+                    valid &= (ix >= 0) & (ix < gridnum_x)
+                    valid &= (iy >= 0) & (iy < gridnum_y)
                     valid &= (iz >= 0) & (iz < gridnum_z)
 
                 if not np.any(valid):

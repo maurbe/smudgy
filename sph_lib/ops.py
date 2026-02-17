@@ -456,6 +456,7 @@ class PointCloud:
 		else:
 			omp_threads_value = 0
 
+
 		# deposition grid dimension is coordinate dimension unless projecting to 2D plane
 		deposition_dim = self.pos.shape[1] if plane_projection is None else 2
 
@@ -475,13 +476,11 @@ class PointCloud:
 		# check that either smoothing lengths or tensors have been computed if necessary
 		if method in ['isotropic', 'anisotropic'] and not hasattr(self, 'hsm') and not hasattr(self, 'h_tensor'):
 			raise AttributeError("You must first compute smoothing lengths or tensors using the 'compute_smoothing_lengths' method before depositing to grid")
-		
 
 		# check and typecast the 'averaged' parameter
 		averaged = list(averaged) if isinstance(averaged, (list, tuple)) else [averaged]
 
-
-		# check and typecast the 'gridnums' parameter
+		# check and typecast the 'periodic' parameter
 		if extent is None: # assume periodic box and deposit over [0, boxsize]
 			if self.boxsize is None:
 				raise ValueError("Either 'boxsize' must be set on the class or 'extent' must be provided")
@@ -492,7 +491,7 @@ class PointCloud:
 				raise ValueError(f"Boxsize must define {deposition_dim} extents, received {boxsize_array.size}")
 			domain_min = np.zeros(deposition_dim, dtype=np.float32)
 			domain_max = boxsize_array.astype(np.float32)
-			periodic_temp = np.full(deposition_dim, bool(self.periodic), dtype=bool)
+			periodic_flag = bool(self.periodic)
 		else:
 			extent_array = np.asarray(extent, dtype=np.float32)
 			if extent_array.ndim != 2 or extent_array.shape[0] != deposition_dim or extent_array.shape[1] != 2:
@@ -503,25 +502,7 @@ class PointCloud:
 			domain_max = extent_array[:, 1]
 			if np.any(domain_max <= domain_min):
 				raise ValueError("Each extent axis must have max > min")
-			periodic_temp = np.zeros(deposition_dim, dtype=bool)
-			if self.periodic and self.boxsize is not None:
-				boxsize_array = np.asarray(self.boxsize, dtype=np.float32)
-				if boxsize_array.ndim == 0:
-					boxsize_array = np.repeat(boxsize_array, deposition_dim)
-				if boxsize_array.size != deposition_dim:
-					raise ValueError(f"Boxsize must define {deposition_dim} extents, received {boxsize_array.size}")
-				span = domain_max - domain_min
-				periodic_temp = np.isclose(span, boxsize_array, rtol=1e-6, atol=1e-6) & bool(self.periodic)
-
-
-		# check and typecast the 'periodic' parameter
-		periodic_temp = np.asarray(periodic_temp, dtype=bool)
-		if periodic_temp.ndim == 0:
-			periodic_temp = np.repeat(periodic_temp, deposition_dim)
-		if periodic_temp.size != deposition_dim:
-			raise ValueError(f"Expected {deposition_dim} periodic flags, received {periodic_temp.size}")
-		periodic_temp = np.ascontiguousarray(periodic_temp, dtype=np.bool_)
-
+			periodic_flag = False
 
 		# check and typecast the 'gridnums' parameter
 		gridnums_array = np.asarray(gridnums, dtype=np.int32)
@@ -530,7 +511,6 @@ class PointCloud:
 		if gridnums_array.size != deposition_dim:
 			raise ValueError(f"Expected {deposition_dim} gridnum numbers, received {gridnums_array.size}")
 		gridnums_array = np.ascontiguousarray(gridnums_array, dtype=np.int32)
-
 
 		# shift the particle positions to be within [0, boxsize_i] for each axis i
 		positions = self.pos
@@ -576,7 +556,7 @@ class PointCloud:
 					averaged=averaged,
 					gridnums=gridnums_array,
 					boxsizes=domain_lengths,
-					periodic=periodic_temp,
+					periodic=periodic_flag,
 					hsm=hsm_temp,
 					hmat_eigvecs=h_eigvecs_temp,
 					hmat_eigvals=h_eigvals_temp,
@@ -599,7 +579,7 @@ class PointCloud:
 		averaged: Sequence[bool],
 		gridnums: npt.NDArray[np.int32],
 		boxsizes: npt.NDArray[np.floating],
-		periodic: npt.NDArray[np.bool_],
+		periodic: bool,
 		*,
 		method: str,
 		hsm: Optional[npt.NDArray[np.floating]],
@@ -653,7 +633,7 @@ class PointCloud:
 				"Set use_python=False to use the C++ backend."
 			)
 		func = getattr(backend, f"{method}_{dim}d")
-		
+
 		if self.verbose:
 			print(f"Using deposition function: {func.__name__}")
 

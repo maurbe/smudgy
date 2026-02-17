@@ -13,18 +13,18 @@ py::tuple _ngp_2d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
-                    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp, int omp_threads)
+                    bool periodic, 
+                    bool use_openmp, 
+                    int omp_threads
+                )
 {
     // Request buffer info
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
-
+    
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
     int gridnum_x = grid_ptr[0];
@@ -44,7 +44,7 @@ py::tuple _ngp_2d_cpp(py::array_t<float> pos,
 
     // Call backend function (direct loop)
     ngp_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr,
-               periodic_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
+               periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
     return py::make_tuple(fields_arr, weights_arr);
@@ -54,17 +54,17 @@ py::tuple _ngp_3d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
-                    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp, int omp_threads)
+                    bool periodic,
+                    bool use_openmp, 
+                    int omp_threads
+                )
 {
     // Request buffer info
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -86,7 +86,7 @@ py::tuple _ngp_3d_cpp(py::array_t<float> pos,
 
     // Call backend function (direct loop)
     ngp_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr,
-               periodic_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
+               periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
     return py::make_tuple(fields_arr, weights_arr);
@@ -96,17 +96,17 @@ py::tuple _cic_2d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
-                    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp, int omp_threads)
+                    bool periodic,
+                    bool use_openmp, 
+                    int omp_threads
+                )
 {
     // Request buffer info
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -127,8 +127,8 @@ py::tuple _cic_2d_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    cic_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
-               use_openmp, omp_threads, fields_ptr, weights_ptr);
+    cic_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, 
+        periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
     return py::make_tuple(fields_arr, weights_arr);
@@ -138,17 +138,17 @@ py::tuple _cic_3d_cpp(py::array_t<float> pos,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
-                    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
-                    bool use_openmp, int omp_threads)
+                    bool periodic,
+                    bool use_openmp, 
+                    int omp_threads
+                )
 {
     // Request buffer info
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -170,8 +170,8 @@ py::tuple _cic_3d_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    cic_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
-               use_openmp, omp_threads, fields_ptr, weights_ptr);
+    cic_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, 
+        periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
     return py::make_tuple(fields_arr, weights_arr);
@@ -182,9 +182,11 @@ py::tuple _cic_2d_adaptive_cpp(py::array_t<float> pos,
                      py::array_t<float> quantities,
                      py::array_t<float> boxsizes,
                      py::array_t<int> gridnums,
-                     py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+                     bool periodic,
                      py::array_t<float> pcellsizesHalf,
-                     bool use_openmp, int omp_threads)
+                     bool use_openmp, 
+                     int omp_threads
+                    )
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -192,10 +194,7 @@ py::tuple _cic_2d_adaptive_cpp(py::array_t<float> pos,
     auto box_buf = boxsizes.request();
     auto pcs_buf = pcellsizesHalf.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
-
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -216,7 +215,7 @@ py::tuple _cic_2d_adaptive_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    cic_2d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
+    cic_2d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
                         pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
@@ -227,9 +226,11 @@ py::tuple _cic_3d_adaptive_cpp(py::array_t<float> pos,
                      py::array_t<float> quantities,
                      py::array_t<float> boxsizes,
                      py::array_t<int> gridnums,
-                     py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+                     bool periodic,
                      py::array_t<float> pcellsizesHalf,
-                     bool use_openmp, int omp_threads)
+                     bool use_openmp, 
+                     int omp_threads
+                    )
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -237,9 +238,7 @@ py::tuple _cic_3d_adaptive_cpp(py::array_t<float> pos,
     auto box_buf = boxsizes.request();
     auto pcs_buf = pcellsizesHalf.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -261,7 +260,7 @@ py::tuple _cic_3d_adaptive_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    cic_3d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
+    cic_3d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
                         pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
@@ -272,7 +271,7 @@ py::tuple _tsc_2d_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
-             py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+             bool periodic,
             bool use_openmp, int omp_threads)
 {
     // Request buffer info
@@ -280,9 +279,7 @@ py::tuple _tsc_2d_cpp(py::array_t<float> pos,
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -302,7 +299,7 @@ py::tuple _tsc_2d_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    tsc_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
+    tsc_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
                use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
@@ -313,7 +310,7 @@ py::tuple _tsc_3d_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
-             py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+             bool periodic,
             bool use_openmp, int omp_threads)
 {
     // Request buffer info
@@ -321,9 +318,7 @@ py::tuple _tsc_3d_cpp(py::array_t<float> pos,
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -345,7 +340,7 @@ py::tuple _tsc_3d_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    tsc_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
+    tsc_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
                use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
@@ -356,7 +351,7 @@ py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
-             py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+             bool periodic,
              py::array_t<float> pcellsizesHalf,
             bool use_openmp, int omp_threads)
 {
@@ -366,9 +361,7 @@ py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> pos,
     auto box_buf = boxsizes.request();
     auto pcs_buf = pcellsizesHalf.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -390,7 +383,7 @@ py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    tsc_2d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
+    tsc_2d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
                         pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
@@ -401,9 +394,11 @@ py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> pos,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
-             py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+             bool periodic,
              py::array_t<float> pcellsizesHalf,
-            bool use_openmp, int omp_threads)
+             bool use_openmp, 
+             int omp_threads
+            )
 {
     // Request buffer info
     auto pos_buf = pos.request();
@@ -411,9 +406,7 @@ py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> pos,
     auto box_buf = boxsizes.request();
     auto pcs_buf = pcellsizesHalf.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -436,7 +429,7 @@ py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> pos,
 
 
     // Call backend function (direct loop)
-    tsc_3d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic_ptr,
+    tsc_3d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
                         pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
 
     // Return numpy arrays
@@ -448,21 +441,21 @@ py::tuple _isotropic_2d_cpp(
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
-    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+    bool periodic,
     py::array_t<float> hsm,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
-    bool use_openmp, int omp_threads)
+    bool use_openmp, 
+    int omp_threads
+)
 {
     auto pos_buf = pos.request();
     auto q_buf = quantities.request();
     auto box_buf = boxsizes.request();
     auto hsm_buf = hsm.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -489,7 +482,7 @@ py::tuple _isotropic_2d_cpp(
         num_fields,
         boxsizes_ptr,
         grid_ptr,
-        periodic_ptr,
+        periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -507,7 +500,7 @@ py::tuple _isotropic_3d_cpp(
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
-    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+    bool periodic,
     py::array_t<float> hsm,
     const std::string& kernel_name,
     const std::string& integration_method,
@@ -519,14 +512,12 @@ py::tuple _isotropic_3d_cpp(
     auto box_buf = boxsizes.request();
     auto hsm_buf = hsm.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     
     float* pos_ptr = static_cast<float*>(pos_buf.ptr);
     float* q_ptr   = static_cast<float*>(q_buf.ptr);
     float* hsm_ptr = static_cast<float*>(hsm_buf.ptr);
     float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -549,7 +540,7 @@ py::tuple _isotropic_3d_cpp(
         num_fields,
         boxsizes_ptr,
         grid_ptr,
-        periodic_ptr,
+        periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -567,7 +558,7 @@ py::tuple _anisotropic_2d_cpp(
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
-    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+    bool periodic,
     py::array_t<float> hmat_eigvecs,
     py::array_t<float> hmat_eigvals,
     const std::string& kernel_name,
@@ -581,7 +572,6 @@ py::tuple _anisotropic_2d_cpp(
     auto vec_buf = hmat_eigvecs.request();
     auto val_buf = hmat_eigvals.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     
     float* pos_ptr = static_cast<float*>(pos_buf.ptr);
     float* q_ptr   = static_cast<float*>(q_buf.ptr);
@@ -589,7 +579,6 @@ py::tuple _anisotropic_2d_cpp(
     float* val_ptr = static_cast<float*>(val_buf.ptr);
     float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -612,7 +601,7 @@ py::tuple _anisotropic_2d_cpp(
         num_fields,
         boxsizes_ptr,
         grid_ptr,
-        periodic_ptr,
+        periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -630,7 +619,7 @@ py::tuple _anisotropic_3d_cpp(
     py::array_t<float> quantities,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
-    py::array_t<bool, py::array::c_style | py::array::forcecast> periodic,
+    bool periodic,
     py::array_t<float> hmat_eigvecs,
     py::array_t<float> hmat_eigvals,
     const std::string& kernel_name,
@@ -644,7 +633,6 @@ py::tuple _anisotropic_3d_cpp(
     auto vec_buf = hmat_eigvecs.request();
     auto val_buf = hmat_eigvals.request();
     auto grid_buf = gridnums.request();
-    auto periodic_buf = periodic.request();
     
     float* pos_ptr = static_cast<float*>(pos_buf.ptr);
     float* q_ptr   = static_cast<float*>(q_buf.ptr);
@@ -652,7 +640,6 @@ py::tuple _anisotropic_3d_cpp(
     float* val_ptr = static_cast<float*>(val_buf.ptr);
     float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
     const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    const bool* periodic_ptr = static_cast<bool*>(periodic_buf.ptr);
 
     int N = pos_buf.shape[0];
     int num_fields = q_buf.shape[1];
@@ -676,7 +663,7 @@ py::tuple _anisotropic_3d_cpp(
         num_fields,
         boxsizes_ptr,
         grid_ptr,
-        periodic_ptr,
+        periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -715,8 +702,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -751,8 +738,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -787,8 +774,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -823,8 +810,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -859,8 +846,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 pcellsizesHalf : numpy.ndarray, shape (N, 2)
     Half cell sizes per particle (adaptive support).
 use_openmp : bool
@@ -898,8 +885,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 pcellsizesHalf : numpy.ndarray, shape (N, 3)
     Half cell sizes per particle (adaptive support).
 use_openmp : bool
@@ -937,8 +924,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -973,8 +960,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1009,8 +996,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 pcellsizesHalf : numpy.ndarray, shape (N, 2)
     Half cell sizes per particle (adaptive support).
 use_openmp : bool
@@ -1048,8 +1035,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 pcellsizesHalf : numpy.ndarray, shape (N, 3)
     Half cell sizes per particle (adaptive support).
 use_openmp : bool
@@ -1087,8 +1074,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 hsm : numpy.ndarray, shape (N,)
     Smoothing lengths per particle.
 kernel_name : str
@@ -1135,8 +1122,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 hsm : numpy.ndarray, shape (N,)
     Smoothing lengths per particle.
 kernel_name : str
@@ -1183,8 +1170,8 @@ boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (2,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 hmat_eigvecs : numpy.ndarray, shape (N, 2, 2)
     Eigenvectors of the smoothing tensor per particle.
 hmat_eigvals : numpy.ndarray, shape (N, 2)
@@ -1234,8 +1221,8 @@ boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
-periodic : array_like of bool, shape (3,)
-    Periodic boundaries per axis.
+periodic : bool
+    Periodic boundaries.
 hmat_eigvecs : numpy.ndarray, shape (N, 3, 3)
     Eigenvectors of the smoothing tensor per particle.
 hmat_eigvals : numpy.ndarray, shape (N, 3)
