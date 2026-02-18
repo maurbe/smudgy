@@ -1,6 +1,5 @@
 """Tests cross-backend consistency between Python and C++ deposition."""
 
-
 import numpy as np
 import pytest
 

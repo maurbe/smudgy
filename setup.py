@@ -46,7 +46,9 @@ if system == "Darwin":
         os.environ["CC"] = gcc_path
         os.environ["CXX"] = gxx_path
     else:
-        raise EnvironmentError("GCC and G++ paths could not be determined. Ensure GCC is installed via Homebrew.")
+        raise OSError(
+            "GCC and G++ paths could not be determined. Ensure GCC is installed via Homebrew."
+        )
 
     extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
     extra_link_args = ["-lomp"]
@@ -59,7 +61,9 @@ elif system == "Linux":
         os.environ["CC"] = gcc_path
         os.environ["CXX"] = gxx_path
     else:
-        raise EnvironmentError("GCC and G++ compilers are not installed or not in PATH.")
+        raise OSError(
+            "GCC and G++ compilers are not installed or not in PATH."
+        )
 
     extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
     extra_link_args = ["-fopenmp"]
