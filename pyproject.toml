@@ -9,7 +9,7 @@ description = "SPH mesh package"
 authors = [
     { name = "Mauro Bernardini", email = "mauro.bernardini1313@gmail.com" }
     ]
-dependencies = ["numpy"]
+dependencies = ["numpy", "scipy", "pybind11"]
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
