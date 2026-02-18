@@ -30,9 +30,11 @@ jobs:
           echo "CC=$(brew --prefix)/bin/gcc-$GCC_VERSION" >> $GITHUB_ENV
           echo "CXX=$(brew --prefix)/bin/g++-$GCC_VERSION" >> $GITHUB_ENV
 
+      - name: Upgrade pip, setuptools, wheel
+        run: python -m pip install --upgrade pip setuptools wheel
+
       - name: Install package
         run: |
-          python -m pip install --upgrade pip
           pip install --no-build-isolation --force-reinstall .[test]
 
       - name: Run tests
