@@ -16,6 +16,9 @@ has_openmp = False
 extra_compile_args = []
 extra_link_args = []
 
+os.environ.setdefault("CC", os.environ.get("CC", "gcc"))
+os.environ.setdefault("CXX", os.environ.get("CXX", "g++"))
+
 
 def _supports_openmp(compile_args, link_args) -> bool:
     test_code = textwrap.dedent("""
@@ -37,7 +40,16 @@ def _supports_openmp(compile_args, link_args) -> bool:
         except Exception:
             return False
 
-
+if system == "Darwin":
+    extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
+    extra_link_args = ["-fopenmp"]
+elif system == "Linux":
+    extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
+    extra_link_args = ["-fopenmp"]
+else:
+    extra_compile_args = ["/std:c++17", "/O2", "/openmp"]
+    extra_link_args = []
+"""
 if system == "Darwin":  # macOS
     extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
     extra_link_args = ["-lomp"]
@@ -47,7 +59,7 @@ elif system == "Linux":
 else:
     extra_compile_args = ["/std:c++17", "/O2", "/openmp"]
     extra_link_args = []
-
+"""
 if not _supports_openmp(extra_compile_args, extra_link_args):
     extra_compile_args = (
         ["-std=c++17", "-O3"] if system != "Windows" else ["/std:c++17", "/O2"]
