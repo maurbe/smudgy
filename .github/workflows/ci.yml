@@ -24,11 +24,10 @@ jobs:
       - name: Install OpenMP (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install libomp
-          export OMP_PREFIX="$(brew --prefix libomp)"
-          export CPPFLAGS="-Xclang -fopenmp -I${OMP_PREFIX}/include ${CPPFLAGS}"
-          export LDFLAGS="-L${OMP_PREFIX}/lib -lomp ${LDFLAGS}"
-          export DYLD_LIBRARY_PATH="${OMP_PREFIX}/lib:${DYLD_LIBRARY_PATH}"
+          brew install gcc libomp
+          GCC_VERSION=$(brew list gcc | grep -Eo 'gcc-[0-9]+' | head -1 | grep -Eo '[0-9]+')
+          echo "CC=$(brew --prefix)/bin/gcc-$GCC_VERSION" >> $GITHUB_ENV
+          echo "CXX=$(brew --prefix)/bin/g++-$GCC_VERSION" >> $GITHUB_ENV
       
       - name: Install dependencies
         run: |
