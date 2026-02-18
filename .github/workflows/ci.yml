@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python ${{ matrix.python-version }}
@@ -21,7 +21,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install OpenMP (macOS)
         if: runner.os == 'macOS'
-        run: brew install gcc
+        run: |
+          brew update
+          brew install gcc libomp
+          OMP_PREFIX=$(brew --prefix libomp)
+          echo "OMP_PREFIX=${OMP_PREFIX}" >> $GITHUB_ENV
+          echo "CPPFLAGS=-Xclang -fopenmp -I${OMP_PREFIX}/include ${CPPFLAGS}" >> $GITHUB_ENV
+          echo "LDFLAGS=-L${OMP_PREFIX}/lib -lomp ${LDFLAGS}" >> $GITHUB_ENV
+          echo "DYLD_LIBRARY_PATH=${OMP_PREFIX}/lib:${DYLD_LIBRARY_PATH}" >> $GITHUB_ENV
 
       - name: Set CC/CXX to Homebrew gcc (macOS)
         if: runner.os == 'macOS'
@@ -30,12 +37,21 @@ jobs:
           echo "CC=$(brew --prefix)/bin/gcc-$GCC_VERSION" >> $GITHUB_ENV
           echo "CXX=$(brew --prefix)/bin/g++-$GCC_VERSION" >> $GITHUB_ENV
 
+      - name: Install OpenMP (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgomp1 libomp-dev
+          echo "OMP_PREFIX=/usr" >> $GITHUB_ENV
+          echo "CPPFLAGS=-fopenmp ${CPPFLAGS}" >> $GITHUB_ENV
+          echo "LDFLAGS=-fopenmp ${LDFLAGS}" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
       - name: Upgrade pip, setuptools, wheel
         run: python -m pip install --upgrade pip setuptools wheel
 
       - name: Install package
-        run: |
-          pip install --no-build-isolation --force-reinstall .[test]
+        run: pip install .[test]
 
       - name: Run tests
         run: pytest tests/
