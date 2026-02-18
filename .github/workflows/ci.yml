@@ -21,7 +21,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       
       # On Ubuntu, OpenMP is available by default with gcc/g++
-      - name: Install OpenMP (macOS)
+      - name: Install OpenMP
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libomp5 libomp-dev2
+          
+      - name: Install OpenMP
         if: runner.os == 'macOS'
         run: |
           brew install gcc libomp
