@@ -34,6 +34,8 @@ jobs:
           GCC_VERSION=$(brew list gcc | grep -Eo 'gcc-[0-9]+' | head -1 | grep -Eo '[0-9]+')
           echo "CC=$(brew --prefix)/bin/gcc-$GCC_VERSION" >> $GITHUB_ENV
           echo "CXX=$(brew --prefix)/bin/g++-$GCC_VERSION" >> $GITHUB_ENV
+          echo "LDFLAGS=-L/opt/homebrew/opt/libomp/lib" >> $GITHUB_ENV
+          echo "CPPFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
       
       - name: Install dependencies
         run: |
