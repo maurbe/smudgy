@@ -1,15 +1,13 @@
 """Tests OpenMP consistency across enable/disable and thread counts."""
 
 import ctypes
-import pickle
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from sph_lib import PointCloud, check_openmp
 
-DATASETS = ["random", "cosmo"]
+DATASETS = ["random"]
 METHODS = ["ngp", "cic", "tsc"]
 GRIDNUM = 64
 
@@ -22,19 +20,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-datapath = "~/Desktop/sph_lib_analysis/data/"
-
-
-def _load_dataset(dataset: str, dim: int):
-    """Load test dataset for OpenMP consistency tests."""
-    # Expand user path and select dataset based on parameters
-    dataset_path = Path(datapath).expanduser()
-    dataset_path /= f"dataset_{dataset}_{dim}d.pkl"
-    if not dataset_path.exists():
-        pytest.skip(f"Dataset not found: {dataset_path}")
-    with dataset_path.open("rb") as f:
-        data = pickle.load(f)
-    return data
+def _generate_dataset(dim: int):
+    """Generate a random dataset for testing."""
+    np.random.seed(42)
+    N = 1000
+    positions = np.random.uniform(0, 1, size=(N, dim))
+    masses = np.ones(N, dtype=np.float32)
+    boxsize = np.ones(dim, dtype=np.float32)
+    return {"pos": positions, "mass": masses, "boxsize": boxsize}
 
 
 def _get_openmp_max_threads():
@@ -68,7 +61,7 @@ def test_openmp_toggle_consistency(dim, method, dataset):
     """Test OpenMP toggle consistency for deposition results."""
     max_threads = _require_openmp()
 
-    data = _load_dataset(dataset, dim)
+    data = _generate_dataset(dim)
     positions = np.asarray(data["pos"], dtype=np.float32)
     masses = np.asarray(data["mass"], dtype=np.float32)
     boxsize = np.asarray(data["boxsize"], dtype=np.float32)
@@ -112,7 +105,7 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
     if len(thread_counts) < 2:
         pytest.skip("Not enough OpenMP threads available for comparison")
 
-    data = _load_dataset(dataset, dim)
+    data = _generate_dataset(dim)
     positions = np.asarray(data["pos"], dtype=np.float32)
     masses = np.asarray(data["mass"], dtype=np.float32)
     boxsize = np.asarray(data["boxsize"], dtype=np.float32)

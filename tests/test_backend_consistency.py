@@ -1,28 +1,23 @@
 """Tests cross-backend consistency between Python and C++ deposition."""
 
-import pickle
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from sph_lib import PointCloud
 
-DATASETS = ["random", "cosmo"]
-datapath = "~/Desktop/sph_lib_analysis/data/"
 GRIDNUM = 64
+DATASETS = ["random"]
 
 
-def _load_dataset(dataset: str, dim: int):
-    """Load test dataset for backend consistency tests."""
-    # Expand user path and select dataset based on parameters
-    dataset_path = Path(datapath).expanduser()
-    dataset_path /= f"dataset_{dataset}_{dim}d.pkl"
-    if not dataset_path.exists():
-        pytest.skip(f"Dataset not found: {dataset_path}")
-    with dataset_path.open("rb") as f:
-        data = pickle.load(f)
-    return data
+def _generate_dataset(dim: int):
+    """Generate a random dataset for testing."""
+    np.random.seed(42)
+    N = 1000
+    positions = np.random.uniform(0, 1, size=(N, dim))
+    masses = np.ones(N, dtype=np.float32)
+    boxsize = np.ones(dim, dtype=np.float32)
+    return {"pos": positions, "mass": masses, "boxsize": boxsize}
 
 
 @pytest.mark.parametrize("dim", [2, 3])
@@ -30,7 +25,7 @@ def _load_dataset(dataset: str, dim: int):
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_python_cpp_backend_consistency(dim, method, dataset):
     """Test consistency between Python and C++ backends for deposition."""
-    data = _load_dataset(dataset, dim)
+    data = _generate_dataset(dim)
 
     positions = np.asarray(data["pos"], dtype=np.float32)
     masses = np.asarray(data["mass"], dtype=np.float32)
