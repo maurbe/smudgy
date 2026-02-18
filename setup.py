@@ -16,9 +16,6 @@ has_openmp = False
 extra_compile_args = []
 extra_link_args = []
 
-os.environ.setdefault("CC", os.environ.get("CC", "gcc"))
-os.environ.setdefault("CXX", os.environ.get("CXX", "g++"))
-
 
 def _supports_openmp(compile_args, link_args) -> bool:
     test_code = textwrap.dedent("""
@@ -39,6 +36,7 @@ def _supports_openmp(compile_args, link_args) -> bool:
             return True
         except Exception:
             return False
+
 
 if system == "Darwin":
     extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
