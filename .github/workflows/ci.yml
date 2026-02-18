@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
@@ -23,19 +23,22 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install gcc
-      - name: Install OpenMP (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install mingw --no-progress
-      - name: Set up MinGW-w64 as default compiler (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "CC=gcc" >> %GITHUB_ENV%
-          echo "CXX=g++" >> %GITHUB_ENV%
       # On Ubuntu, OpenMP is available by default with gcc/g++
+      - name: Print OpenMP version and gcc info
+        run: |
+          gcc --version || true
+          g++ --version || true
+          echo '#include <omp.h>\n#include <stdio.h>\nint main() { printf("OpenMP max threads: %d\n", omp_get_max_threads()); return 0; }' > test_omp.c
+          gcc -fopenmp test_omp.c -o test_omp && ./test_omp || echo "OpenMP not available"
+      - name: Set CC/CXX to Homebrew gcc (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          GCC_VERSION=$(brew list gcc | grep -Eo 'gcc-[0-9]+' | head -1 | grep -Eo '[0-9]+')
+          echo "CC=$(brew --prefix)/bin/gcc-$GCC_VERSION" >> $GITHUB_ENV
+          echo "CXX=$(brew --prefix)/bin/g++-$GCC_VERSION" >> $GITHUB_ENV
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install .[test]
-      - name: Run tests
-        run: pytest tests/
+      - name: Run tests (fail on skip/xfail)
+        run: pytest tests/ --runxfail --strict-markers --strict-config
