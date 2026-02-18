@@ -27,6 +27,11 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install mingw --no-progress
+      - name: Set up MinGW-w64 as default compiler (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "CC=gcc" >> %GITHUB_ENV%
+          echo "CXX=g++" >> %GITHUB_ENV%
       # On Ubuntu, OpenMP is available by default with gcc/g++
       - name: Install dependencies
         run: |
