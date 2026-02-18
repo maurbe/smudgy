@@ -43,4 +43,4 @@ jobs:
           pip install .[test]
 
       - name: Run tests
-        run: pytest tests/
+        run: pytest -rs tests/ 
