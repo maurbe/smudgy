@@ -1,4 +1,3 @@
-
 # sph_lib Installation Guide
 
 
@@ -52,37 +51,54 @@ To enable OpenMP parallelization, you must have OpenMP installed on your system 
 
 #### Linux
 
-Most Linux distributions provide OpenMP support out of the box with GCC. To ensure you have it:
+Most Linux distributions provide OpenMP support out of the box with GCC. To ensure you have it, install the required packages:
 
-```sh
-sudo apt-get update  # Debian/Ubuntu
-sudo apt-get install build-essential libgomp1
-```
-GCC automatically links OpenMP when you build the package. No extra flags are usually needed.
+1. **Install OpenMP dependencies:**
+   ```sh
+   sudo apt-get update
+   sudo apt-get install -y libomp5 libomp-dev
+   ```
+
+2. **Install the package:**
+   ```sh
+   pip install .
+   ```
+
+These steps ensure that OpenMP is available and correctly configured for building and running the package.
 
 
 #### macOS
 
-Apple's Clang does not support OpenMP by default. Install OpenMP via Homebrew:
+Apple's Clang does not support OpenMP by default. To enable OpenMP parallelization, follow these steps:
 
-```sh
-brew update
-brew install libomp
-```
+1. **Install GCC and libomp via Homebrew:**
+   ```sh
+   brew update
+   brew install gcc libomp
+   ```
 
-Then, export the following flags so your compiler and linker can find OpenMP (libomp):
+2. **Export the necessary environment variables:**
+   ```sh
+   export OMP_PREFIX="$(brew --prefix libomp)"
+   export CC=$(brew list gcc | grep '/bin/gcc-' | head -1)
+   export CXX=$(brew list gcc | grep '/bin/g++-' | head -1)
+   export CPPFLAGS="-I${OMP_PREFIX}/include ${CPPFLAGS}"
+   export LDFLAGS="-L${OMP_PREFIX}/lib ${LDFLAGS}"
+   export DYLD_LIBRARY_PATH="${OMP_PREFIX}/lib:${DYLD_LIBRARY_PATH}"
+   ```
+   This sets the correct paths for `gcc` and `g++` with the version you installed via Homebrew.
 
-```sh
-export OMP_PREFIX="$(brew --prefix libomp)"
-export CPPFLAGS="-Xclang -fopenmp -I${OMP_PREFIX}/include ${CPPFLAGS}"
-export LDFLAGS="-L${OMP_PREFIX}/lib -lomp ${LDFLAGS}"
-export DYLD_LIBRARY_PATH="${OMP_PREFIX}/lib:${DYLD_LIBRARY_PATH}"
-```
+3. **Install the package:**
+   ```sh
+   pip install .
+   ```
 
-Now install the package as above. You can reuse these flags for any OpenMP C++ compilation (see below).
+These steps ensure that the GCC compiler and OpenMP library are correctly configured for building and running the package.
 
 
 #### Windows
+
+**Note:** Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems.
 
 On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC) and MinGW compilers. If you use MSVC (the default for most Python distributions):
 
@@ -135,10 +151,13 @@ g++ -fopenmp omp_test.cpp -o omp_test
 
 ### macOS
 
-Apple Clang does not support OpenMP by default. Use Homebrew's libomp and set the flags as described in the [macOS OpenMP Support](#macos) section above. Then compile and run:
+Apple Clang does not support OpenMP by default. Use Homebrew's libomp and dynamically fetch the GCC paths as described in the [macOS OpenMP Support](#macos) section above. Then compile and run:
 
 ```sh
-clang -Xclang -fopenmp omp_test.cpp -L${OMP_PREFIX}/lib -lomp -I${OMP_PREFIX}/include -o omp_test
+$(brew list gcc | grep '/bin/gcc-' | head -1) \
+    -Xclang -fopenmp omp_test.cpp \
+    -L${OMP_PREFIX}/lib -lomp \
+    -I${OMP_PREFIX}/include -o omp_test
 ./omp_test
 ```
 
@@ -176,13 +195,13 @@ After installation, it is highly recommended to run the test suite to verify you
     ```sh
     git clone https://github.com/youruser/sph_lib.git
     cd sph_lib
-    pytest
+    pytest -rs
     ```
 
-- If you installed from source (from a git clone), simply run:
+- If you installed from source (from a git clone), inside the package folder simply run:
 
     ```sh
-    pytest
+    pytest -rs
     ```
 
 The tests will automatically check for OpenMP availability and skip parallelization tests if OpenMP is not enabled or detected. If you see tests being skipped due to missing OpenMP, revisit the [OpenMP Support](#openmp-support-parallelization) section to ensure your environment is set up correctly and the package was compiled with OpenMP support.

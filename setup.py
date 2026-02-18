@@ -39,11 +39,31 @@ def _supports_openmp(compile_args, link_args) -> bool:
 
 
 if system == "Darwin":
-    extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
-    extra_link_args = ["-fopenmp"]
+    # Dynamically set CC and CXX for macOS using Homebrew
+    gcc_path = os.popen("brew list gcc | grep '/bin/gcc-' | head -1").read().strip()
+    gxx_path = os.popen("brew list gcc | grep '/bin/g++-' | head -1").read().strip()
+    if gcc_path and gxx_path:
+        os.environ["CC"] = gcc_path
+        os.environ["CXX"] = gxx_path
+    else:
+        raise EnvironmentError("GCC and G++ paths could not be determined. Ensure GCC is installed via Homebrew.")
+
+    extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
+    extra_link_args = ["-lomp"]
+
 elif system == "Linux":
+    # Validate GCC and G++ paths for Linux
+    gcc_path = os.popen("which gcc").read().strip()
+    gxx_path = os.popen("which g++").read().strip()
+    if gcc_path and gxx_path:
+        os.environ["CC"] = gcc_path
+        os.environ["CXX"] = gxx_path
+    else:
+        raise EnvironmentError("GCC and G++ compilers are not installed or not in PATH.")
+
     extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
     extra_link_args = ["-fopenmp"]
+
 else:
     extra_compile_args = ["/std:c++17", "/O2", "/openmp"]
     extra_link_args = []
