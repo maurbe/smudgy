@@ -1,0 +1,23 @@
+name: OpenMP C compiling and testing
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Compile OpenMP test code and run it
+      working-directory: ./
+      env:
+        OMP_NUM_THREADS: 16
+      run: |
+        sudo apt-get update; sudo apt-get install -y libomp5 libomp-dev
+        echo OMP_NUM_THREADS:$OMP_NUM_THREADS
+        echo OMP_SCHEDULE:$OMP_SCHEDULE
+        echo OMP_DYNAMIC:$OMP_DYNAMIC
+        echo OMP_NESTED:$OMP_NESTED
+        gcc omp_hello.c -fopenmp -o omp_hello
+        ldd omp_hello
+        ./omp_hello
