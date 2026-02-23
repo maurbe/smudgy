@@ -70,7 +70,7 @@ class PointCloud:
         mode: Literal["adaptive", "isotropic", "anisotropic"] = "isotropic",
         num_neighbors: int = 32,
     ) -> None:
-        """Set all SPH-related properties in one call..
+        """Set all SPH-related properties in one call.
 
         Parameters
         ----------

@@ -5,14 +5,23 @@ import sys
 
 sys.path.insert(0, os.path.abspath(".."))
 
-project = "sph_lib"
-author = "Mauro Bernardini"
-release = "0.1.0"
+
+# Fetch project metadata from pyproject.toml
+import tomllib
+
+with open(os.path.join(os.path.dirname(__file__), "..", "pyproject.toml"), "rb") as f:
+    pyproject = tomllib.load(f)
+
+project_info = pyproject["project"]
+project = project_info["name"]
+author = project_info["authors"][0]["name"]
+release = project_info["version"]
 
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
+    "sphinx_copybutton",
 ]
 
 napoleon_google_docstring = False

@@ -1,10 +1,7 @@
-API Reference
+Point Cloud API
 =============
 
-PointCloud
-----------
-
-.. autoclass:: sph_lib.ops.PointCloud
+.. automodule:: sph_lib.ops
    :members:
    :undoc-members:
    :show-inheritance:

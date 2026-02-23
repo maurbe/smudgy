@@ -1,5 +1,5 @@
 Functions
-===================
+=========
 
 .. automodule:: sph_lib.collection
    :members:
