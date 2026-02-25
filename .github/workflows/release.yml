@@ -22,16 +22,28 @@ jobs:
       - name: Install GCC (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install gcc libomp
+          brew install gcc
           GCC_VERSION=$(brew list gcc | grep -Eo 'gcc-[0-9]+' | head -1 | grep -Eo '[0-9]+')
           echo "CC=$(brew --prefix)/bin/gcc-$GCC_VERSION" >> $GITHUB_ENV
           echo "CXX=$(brew --prefix)/bin/g++-$GCC_VERSION" >> $GITHUB_ENV
-          echo "LDFLAGS=-L/opt/homebrew/opt/libomp/lib" >> $GITHUB_ENV
-          echo "CPPFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
+      - name: Build libomp from source (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          git clone https://github.com/llvm/llvm-project.git --depth=1
+          cd llvm-project
+          mkdir build-libomp && cd build-libomp
+          cmake ../openmp -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/libomp-universal
+          make -j$(sysctl -n hw.logicalcpu)
+          make install
+          echo "LDFLAGS=-L$HOME/libomp-universal/lib" >> $GITHUB_ENV
+          echo "CPPFLAGS=-I$HOME/libomp-universal/include" >> $GITHUB_ENV
+          echo "REPAIR_LIBRARY_PATH=$HOME/libomp-universal/lib" >> $GITHUB_ENV
       - name: Set cibuildwheel archs (macOS)
         if: runner.os == 'macOS'
         run: echo "CIBW_ARCHS_MACOS=universal2" >> $GITHUB_ENV
-
+      - name: Set cibuildwheel repair command (macOS)
+        if: runner.os == 'macOS'
+        run: echo "CIBW_REPAIR_WHEEL_COMMAND_MACOS=DYLD_LIBRARY_PATH=$REPAIR_LIBRARY_PATH delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -45,32 +57,30 @@ jobs:
 
       - name: Build wheels with cibuildwheel
         run: |
-          cibuildwheel --output-dir temp
+          cibuildwheel --output-dir wheelhouse
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: temp-${{ matrix.os }}
-          path: temp/*
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
 
   publish-to-pypi:
     name: Publish Wheels to PyPI
     needs: build-wheels
-    runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
+
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: temp/
-      - name: Prepare dist directory
+          path: dist
+      - name: Gather wheels
         run: |
-          mkdir -p dist
-          find temp/ -type f -name "*.whl" -exec mv {} dist/ \;
-          find temp/ -type f -name "*.tar.gz" -exec mv {} dist/ \;
+          find dist/ -type f -name "*.whl" -exec mv {} dist/ \;
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
