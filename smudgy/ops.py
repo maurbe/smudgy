@@ -24,7 +24,7 @@ class PointCloud:
     def __init__(
         self,
         positions: np.ndarray,
-        masses: np.ndarray,
+        weights: np.ndarray,
         boxsize: float | Sequence[float] | None = None,
         verbose: bool = True,
     ):
@@ -34,8 +34,8 @@ class PointCloud:
         ----------
         positions : np.ndarray
                 Particle positions, shape (N, D).
-        masses : np.ndarray
-                Particle masses, shape (N,).
+        weights : np.ndarray
+                Particle weights (e.g. masses), shape (N,).
         boxsize : float or array-like, optional
                 If provided, all axes are periodic with the given boxsize(s). If None, no periodicity is used.
         verbose : bool
@@ -47,7 +47,7 @@ class PointCloud:
             self.dim == 2 or self.dim == 3
         ), f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
         self.pos = positions
-        self.mass = masses
+        self.weight = weights
         self.verbose = verbose
 
         if boxsize is None:
@@ -195,7 +195,7 @@ class PointCloud:
                 self.nn_inds,
                 self.nn_dists,
                 self.rel_coords,
-            ) = compute_hsm_tensor(**kwargs, masses=self.mass)
+            ) = compute_hsm_tensor(**kwargs, weights=self.weight)
 
         else:
             raise AssertionError(
@@ -259,8 +259,8 @@ class PointCloud:
 
         # Kernel evaluation and density computation
         w = self.kernel.evaluate_kernel(**kwargs)
-        print(1, w.shape, self.mass.shape)
-        self.density = np.sum(self.mass[self.nn_inds] * w, axis=1)
+        print(1, w.shape, self.weight.shape)
+        self.density = np.sum(self.weight[self.nn_inds] * w, axis=1)
 
     def interpolate_fields(
         self,
@@ -312,7 +312,7 @@ class PointCloud:
         return self._interpolate_fields(
             self.tree,
             self.pos,
-            self.mass,
+            self.weight,
             self.density,
             fields,
             self.kernel,
@@ -343,7 +343,7 @@ class PointCloud:
         self,
         tree: Any,
         positions: npt.NDArray[np.floating],
-        masses: npt.NDArray[np.floating],
+        weights: npt.NDArray[np.floating],
         density: npt.NDArray[np.floating],
         fields: npt.NDArray[np.floating],
         kernel: Any,
@@ -360,7 +360,7 @@ class PointCloud:
         Args:
                 tree: Spatial index structure (cKDTree) for nearest neighbor queries.
                 positions: Particle positions with shape (N, D).
-                masses: Particle masses with shape (N,).
+                weights: Particle weights (e.g. masses) with shape (N,).
                 density: Particle densities with shape (N,). Used for SPH weighting.
                 fields: Particle field values with shape (N, num_fields).
                 kernel: Kernel instance with evaluate_kernel() and evaluate_gradient() methods.
@@ -398,7 +398,7 @@ class PointCloud:
             # Compute smoothing tensors at query positions
             h_tensor, _, _, nn_inds, _, rel_coords = compute_hsm_tensor(
                 tree,
-                masses=masses,
+                weights=weights,
                 num_neighbors=num_neighbors,
                 query_pos=query_positions,
             )
@@ -409,7 +409,7 @@ class PointCloud:
             raise ValueError(f"Unsupported interpolation mode '{mode}'")
 
         # Unified weight computation and kernel evaluation
-        weights = masses[nn_inds] / (density[nn_inds] + 1e-8)
+        weights = weights[nn_inds] / (density[nn_inds] + 1e-8)
         fields_ = fields[nn_inds]
 
         if compute_gradients:

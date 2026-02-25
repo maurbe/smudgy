@@ -25,9 +25,9 @@ def _generate_dataset(dim: int):
     np.random.seed(42)
     N = 1000
     positions = np.random.uniform(0, 1, size=(N, dim))
-    masses = np.ones(N, dtype=np.float32)
+    weights = np.ones(N, dtype=np.float32)
     boxsize = np.ones(dim, dtype=np.float32)
-    return {"pos": positions, "mass": masses, "boxsize": boxsize}
+    return {"pos": positions, "weigh": weights, "boxsize": boxsize}
 
 
 def _get_openmp_max_threads():
@@ -63,13 +63,13 @@ def test_openmp_toggle_consistency(dim, method, dataset):
 
     data = _generate_dataset(dim)
     positions = np.asarray(data["pos"], dtype=np.float32)
-    masses = np.asarray(data["mass"], dtype=np.float32)
+    weights = np.asarray(data["weigh"], dtype=np.float32)
     boxsize = np.asarray(data["boxsize"], dtype=np.float32)
-    fields = masses[:, np.newaxis]
+    fields = weights[:, np.newaxis]
 
     sim = PointCloud(
         positions=positions,
-        masses=masses,
+        weights=weights,
         boxsize=boxsize,
         verbose=False,
     )
@@ -107,13 +107,13 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
 
     data = _generate_dataset(dim)
     positions = np.asarray(data["pos"], dtype=np.float32)
-    masses = np.asarray(data["mass"], dtype=np.float32)
+    weights = np.asarray(data["weigh"], dtype=np.float32)
     boxsize = np.asarray(data["boxsize"], dtype=np.float32)
-    fields = masses[:, np.newaxis]
+    fields = weights[:, np.newaxis]
 
     sim = PointCloud(
         positions=positions,
-        masses=masses,
+        weights=weights,
         boxsize=boxsize,
         verbose=False,
     )

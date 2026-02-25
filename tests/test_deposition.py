@@ -14,11 +14,11 @@ def test_deposition_grid_adaptive(mode):
     D = 3
     positions = np.random.uniform(0, 1, size=(N, D))
     values = np.random.uniform(-1, 1, size=(N, 1))
-    masses = np.ones(N)
+    weights = np.ones(N)
     boxsize = np.ones(D)
     gridnums = np.array([16, 16, 16])
 
-    pc = PointCloud(positions, masses, boxsize=boxsize, verbose=False)
+    pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
     pc.set_sph_parameters(mode=mode)
     pc.compute_smoothing_lengths()
 

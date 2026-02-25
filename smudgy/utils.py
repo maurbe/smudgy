@@ -191,7 +191,7 @@ def compute_hsm(
 
 def compute_hsm_tensor(
     tree: spatial.cKDTree,
-    masses: npt.ArrayLike,
+    weights: npt.ArrayLike,
     num_neighbors: int,
     query_pos: npt.ArrayLike | None = None,
 ) -> tuple[FloatArray, FloatArray, FloatArray, IntArray, FloatArray]:
@@ -203,8 +203,8 @@ def compute_hsm_tensor(
     ----------
     tree
             cKDTree built from particle positions.
-    masses
-            Array of shape ``(N,)`` with particle masses.
+    weights
+            Array of shape ``(N,)`` with particle weights.
     num_neighbors
             Number of neighbors used for covariance estimation.
     query_pos
@@ -235,13 +235,13 @@ def compute_hsm_tensor(
     if query_pos is None:
         query_pos = pos
 
-    # Ensure masses is 1D
-    masses = masses.flatten() if masses.ndim > 1 else masses
+    # Ensure weights is 1D
+    weights = weights.flatten() if weights.ndim > 1 else weights
 
     # Find nearest neighbors
     nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
     neighbor_coords = pos[nn_inds]
-    neighbor_masses = masses[nn_inds]
+    neighbor_weights = weights[nn_inds]
 
     # Account for periodic boundary conditions
     rel_coords = coordinate_difference_with_pbc(
@@ -250,10 +250,10 @@ def compute_hsm_tensor(
 
     # Compute mass-weighted covariance matrix
     outer = np.einsum("...i, ...j -> ...ij", rel_coords, rel_coords)
-    outer = outer * neighbor_masses[..., np.newaxis, np.newaxis]
+    outer = outer * neighbor_weights[..., np.newaxis, np.newaxis]
     Sigma = (
         np.sum(outer, axis=1)
-        / np.sum(neighbor_masses, axis=1)[..., np.newaxis, np.newaxis]
+        / np.sum(neighbor_weights, axis=1)[..., np.newaxis, np.newaxis]
     )
 
     # Compute eigendecomposition and construct smoothing tensor H = VΛV^T

@@ -17,9 +17,9 @@ def test_interpolation_modes(pbc, mode, quantity):
     positions = np.random.uniform(0, 1, size=(N, D))
     values = np.random.uniform(-1, 1, size=N)
     boxsize = 1.0 if pbc else None
-    masses = np.ones(N)
+    weights = np.ones(N)
 
-    pc = PointCloud(positions, masses, boxsize=boxsize, verbose=False)
+    pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
     pc.set_sph_parameters(kernel_name="cubic_spline", mode=mode, num_neighbors=32)
     pc.compute_smoothing_lengths()
     pc.compute_density()
