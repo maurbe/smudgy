@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     steps:
       - name: Install GCC and OpenMP (Ubuntu)
         if: runner.os == 'Linux'
@@ -62,7 +62,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-linux
           path: ./wheelhouse/*.whl
 
   publish-to-pypi:
