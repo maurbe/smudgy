@@ -5,12 +5,14 @@ on:
     types: [created]
 
 jobs:
-  build-and-publish:
-    name: Build and Publish Wheels
+  build-and-pypi-publish:
+    name: Build and Publish Wheels to PyPI
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+    # Specifying a GitHub environment is optional, but strongly encouraged
+    environment: pypi
     permissions:
       id-token: write
     steps:
