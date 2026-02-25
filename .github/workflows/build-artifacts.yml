@@ -1,20 +1,16 @@
-name: Upload Python Package to PyPI when a Release is Created
+name: Build Wheels
 
 on:
   release:
     types: [created]
 
 jobs:
-  build-and-pypi-publish:
-    name: Build and Publish Wheels to PyPI
+  build-wheels:
+    name: Build Wheels
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-    # Specifying a GitHub environment is optional, but strongly encouraged
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
       - name: Install GCC and OpenMP (Ubuntu)
         if: runner.os == 'Linux'
@@ -46,7 +42,10 @@ jobs:
 
       - name: Build package
         run: |
-          python setup.py sdist bdist_wheel  # Could also be python -m build
+          python setup.py sdist bdist_wheel
 
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist/*
