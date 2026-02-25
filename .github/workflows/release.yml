@@ -5,6 +5,7 @@ on:
     types: [created]
 
 jobs:
+
   build-wheels:
     name: Build Wheels
     runs-on: ${{ matrix.os }}
@@ -42,10 +43,38 @@ jobs:
 
       - name: Build package
         run: |
+          mkdir -p temp
           python setup.py sdist bdist_wheel
+          mv dist/* temp/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}
-          path: dist/*
+          name: temp-${{ matrix.os }}
+          path: temp/*
+
+  publish-to-pypi:
+    name: Publish Wheels to PyPI
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: temp/
+      - name: Prepare dist directory
+        run: |
+          mkdir -p dist
+          find temp/ -type f -name "*.whl" -exec mv {} dist/ \;
+          find temp/ -type f -name "*.tar.gz" -exec mv {} dist/ \;
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
