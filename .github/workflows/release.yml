@@ -38,14 +38,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel
-          pip install numpy pybind11 scipy
+          pip install cibuildwheel numpy pybind11 scipy
 
-      - name: Build package
+      - name: Build wheels with cibuildwheel
         run: |
-          mkdir -p temp
-          python setup.py sdist bdist_wheel
-          mv dist/* temp/
+          cibuildwheel --output-dir temp
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
