@@ -30,7 +30,7 @@ jobs:
           echo "CPPFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
       - name: Set cibuildwheel archs (macOS)
         if: runner.os == 'macOS'
-        run: echo "CIBW_ARCHS_MACOS=arm64" >> $GITHUB_ENV
+        run: echo "CIBW_ARCHS_MACOS=universal2" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
       - name: Set up Python
