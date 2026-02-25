@@ -1,7 +1,7 @@
 Utils
 =====
 
-.. automodule:: sph_lib.utils
+.. automodule:: smudgy.utils
    :members:
    :undoc-members:
    :show-inheritance:

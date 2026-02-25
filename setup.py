@@ -92,14 +92,14 @@ else:
 
 ext_modules = [
     Pybind11Extension(
-        name="sph_lib.core._cpp_functions_ext",
+        name="smudgy.core._cpp_functions_ext",
         sources=[
-            "sph_lib/bindings/_bindings.cpp",
-            "sph_lib/core/cpp/_functions.cpp",
-            "sph_lib/core/cpp/_kernels.cpp",
-            "sph_lib/core/cpp/_integration.cpp",
+            "smudgy/bindings/_bindings.cpp",
+            "smudgy/core/cpp/_functions.cpp",
+            "smudgy/core/cpp/_kernels.cpp",
+            "smudgy/core/cpp/_integration.cpp",
         ],
-        include_dirs=["sph_lib/core/cpp", np.get_include()],
+        include_dirs=["smudgy/core/cpp", np.get_include()],
         extra_compile_args=extra_compile_args,
         extra_link_args=extra_link_args,
         define_macros=[("OPENMP_AVAILABLE", "1")] if has_openmp else [],
@@ -109,7 +109,7 @@ ext_modules = [
 
 
 setup(
-    name="sph_lib",
+    name="smudgy",
     version="0.1.0",
     packages=find_packages(),
     ext_modules=ext_modules,

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from sph_lib.ops import PointCloud
+from smudgy import PointCloud
 
 
 @pytest.mark.parametrize("mode", ["isotropic", "anisotropic"])

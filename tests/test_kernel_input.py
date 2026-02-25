@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from sph_lib.kernels import Kernel
+from smudgy.kernels import Kernel
 
 
 def test_invalid_kernel_name():

@@ -1,7 +1,7 @@
 Kernels
 =======
 
-.. automodule:: sph_lib.kernels
+.. automodule:: smudgy.kernels
    :members:
    :undoc-members:
    :show-inheritance:

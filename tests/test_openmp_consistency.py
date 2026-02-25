@@ -5,7 +5,7 @@ import ctypes
 import numpy as np
 import pytest
 
-from sph_lib import PointCloud, check_openmp
+from smudgy import PointCloud, check_openmp
 
 DATASETS = ["random"]
 METHODS = ["ngp", "cic", "tsc"]
@@ -33,7 +33,7 @@ def _generate_dataset(dim: int):
 def _get_openmp_max_threads():
     """Get the maximum number of OpenMP threads available."""
     try:
-        from sph_lib.core import _cpp_functions_ext as cppfunc
+        from smudgy.core import _cpp_functions_ext as cppfunc
     except Exception:
         return None
 

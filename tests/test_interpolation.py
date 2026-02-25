@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+from smudgy import PointCloud
+
 
 @pytest.mark.parametrize("pbc", [False, True])
 @pytest.mark.parametrize("mode", ["isotropic", "anisotropic"])
@@ -16,8 +18,6 @@ def test_interpolation_modes(pbc, mode, quantity):
     values = np.random.uniform(-1, 1, size=N)
     boxsize = 1.0 if pbc else None
     masses = np.ones(N)
-
-    from sph_lib.ops import PointCloud
 
     pc = PointCloud(positions, masses, boxsize=boxsize, verbose=False)
     pc.set_sph_parameters(kernel_name="cubic_spline", mode=mode, num_neighbors=32)

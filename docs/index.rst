@@ -2,7 +2,7 @@
    :caption: Getting Started
    :maxdepth: 1
 
-   introduction
+   quickstart
    install
    usage
 

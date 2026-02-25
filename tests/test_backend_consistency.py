@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from sph_lib import PointCloud
+from smudgy import PointCloud
 
 GRIDNUM = 64
 DATASETS = ["random"]

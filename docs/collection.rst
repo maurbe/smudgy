@@ -1,7 +1,7 @@
 Functions
 =========
 
-.. automodule:: sph_lib.collection
+.. automodule:: smudgy.collection
    :members:
    :undoc-members:
    :show-inheritance:

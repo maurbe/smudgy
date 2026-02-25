@@ -1,7 +1,7 @@
-# sph_lib Installation Guide
+# smudgy Installation Guide
 
 
-You can install `sph_lib` in several ways. OpenMP support is optional but recommended for parallel performance. See below for details on installation and enabling OpenMP.
+You can install `smudgy` in several ways. OpenMP support is optional but recommended for parallel performance. See below for details on installation and enabling OpenMP.
 
 
 ## 1. Install from PyPI (recommended)
@@ -9,7 +9,7 @@ You can install `sph_lib` in several ways. OpenMP support is optional but recomm
 Once released on PyPI, simply run:
 
 ```sh
-pip install sph_lib
+pip install smudgy
 ```
 
 If a pre-built wheel is available for your platform, no compiler or OpenMP setup is needed. Otherwise, see the [OpenMP Support](#openmp-support-parallelization) section if you want parallelization.
@@ -20,13 +20,13 @@ If a pre-built wheel is available for your platform, no compiler or OpenMP setup
 If you have a wheel file (e.g., from GitHub Releases):
 
 ```sh
-pip install path/to/sph_lib-<version>-<platform>.whl
+pip install path/to/smudgy-<version>-<platform>.whl
 ```
 
 Or directly from a URL:
 
 ```sh
-pip install https://github.com/youruser/yourrepo/releases/download/vX.Y/sph_lib-<version>-<platform>.whl
+pip install https://github.com/youruser/yourrepo/releases/download/vX.Y/smudgy-<version>-<platform>.whl
 ```
 
 
@@ -35,8 +35,8 @@ pip install https://github.com/youruser/yourrepo/releases/download/vX.Y/sph_lib-
 Clone the repository and install:
 
 ```sh
-git clone https://github.com/youruser/sph_lib.git
-cd sph_lib
+git clone https://github.com/youruser/smudgy.git
+cd smudgy
 pip install .
 ```
 
@@ -190,11 +190,11 @@ You should see a message indicating whether OpenMP is available and how many thr
 
 After installation, it is highly recommended to run the test suite to verify your installation and check OpenMP support. **Note:**
 
-- If you installed `sph_lib` via pip from PyPI or a wheel, the test suite is not included by default. To run the full tests, clone the repository:
+- If you installed `smudgy` via pip from PyPI or a wheel, the test suite is not included by default. To run the full tests, clone the repository:
 
     ```sh
-    git clone https://github.com/youruser/sph_lib.git
-    cd sph_lib
+    git clone https://github.com/youruser/smudgy.git
+    cd smudgy
     pytest -rs
     ```
 

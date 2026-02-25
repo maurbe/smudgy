@@ -1,7 +1,7 @@
 Grid
 ====
 
-.. automodule:: sph_lib.grid
+.. automodule:: smudgy.grid
    :members:
    :undoc-members:
    :show-inheritance:

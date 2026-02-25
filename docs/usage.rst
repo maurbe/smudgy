@@ -1,7 +1,7 @@
 Usage
 =====
 
-This page provides an overview of the basic workflows for using sph_lib.
+This page provides an overview of the basic workflows for using smudgy.
 
 .. note::
    A streamlined usage figure will be added here soon to visually summarize the main steps and options.
