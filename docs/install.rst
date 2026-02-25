@@ -2,7 +2,7 @@
 Installation
 ============
 
-You can install sph_lib in several ways. OpenMP support is optional but recommended for parallel performance. See below for details on installation and enabling OpenMP.
+You can install smudgy in several ways. OpenMP support is optional but recommended for parallel performance. See below for details on installation and enabling OpenMP.
 
 Install from PyPI (recommended)
 -------------------------------
@@ -10,7 +10,7 @@ Once released on PyPI, simply run:
 
 .. code-block:: bash
 
-   pip install sph_lib
+   pip install smudgy
 
 If a pre-built wheel is available for your platform, no compiler or OpenMP setup is needed. Otherwise, see the OpenMP Support section if you want parallelization.
 
@@ -20,13 +20,13 @@ If you have a wheel file (e.g., from GitHub Releases):
 
 .. code-block:: bash
 
-   pip install path/to/sph_lib-<version>-<platform>.whl
+   pip install path/to/smudgy-<version>-<platform>.whl
 
 Or directly from a URL:
 
 .. code-block:: bash
 
-   pip install https://github.com/youruser/yourrepo/releases/download/vX.Y/sph_lib-<version>-<platform>.whl
+   pip install https://github.com/youruser/yourrepo/releases/download/vX.Y/smudgy-<version>-<platform>.whl
 
 Build from Source
 -----------------
@@ -34,8 +34,8 @@ Clone the repository and install:
 
 .. code-block:: bash
 
-   git clone https://github.com/youruser/sph_lib.git
-   cd sph_lib
+   git clone https://github.com/youruser/smudgy.git
+   cd smudgy
    pip install .
 
 OpenMP Support (Parallelization)
@@ -175,12 +175,12 @@ Running the Test Suite (Recommended)
 After installation, it is highly recommended to run the test suite to verify your installation and check OpenMP support.
 
 
-- If you installed sph_lib via pip from PyPI or a wheel, the test suite is not included by default. To run the full tests, clone the repository:
+- If you installed smudgy via pip from PyPI or a wheel, the test suite is not included by default. To run the full tests, clone the repository:
 
 .. code-block:: bash
 
-    git clone https://github.com/youruser/sph_lib.git
-    cd sph_lib
+    git clone https://github.com/youruser/smudgy.git
+    cd smudgy
     pytest -rs
 
 - If you installed from source (from a git clone), inside the package folder simply run:

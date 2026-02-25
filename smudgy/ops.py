@@ -618,9 +618,9 @@ class PointCloud:
                     if omp_threads_value == 0
                     else str(omp_threads_value)
                 )
-                print(f"[sph_lib] OpenMP threads: {thread_desc}")
+                print(f"[smudgy] OpenMP threads: {thread_desc}")
             else:
-                print("[sph_lib] OpenMP disabled for this deposition call")
+                print("[smudgy] OpenMP disabled for this deposition call")
 
         res = self._deposit_to_grid(
             positions=pos_temp,

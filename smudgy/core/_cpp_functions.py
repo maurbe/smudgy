@@ -2,7 +2,7 @@
 
 from importlib import import_module
 
-_ext = import_module("sph_lib.core._cpp_functions_ext")
+_ext = import_module("smudgy.core._cpp_functions_ext")
 
 globals().update(_ext.__dict__)
 

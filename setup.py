@@ -50,8 +50,8 @@ if system == "Darwin":
             "GCC and G++ paths could not be determined. Ensure GCC is installed via Homebrew."
         )
 
-    extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
-    extra_link_args = ["-lomp"]
+    extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
+    extra_link_args = ["-fopenmp"]
 
 elif system == "Linux":
     # Validate GCC and G++ paths for Linux
@@ -72,7 +72,7 @@ else:
 """
 if system == "Darwin":  # macOS
     extra_compile_args = ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"]
-    extra_link_args = ["-lomp"]
+    extra_link_args = ["-fopenmp"]
 elif system == "Linux":
     extra_compile_args = ["-std=c++17", "-O3", "-fopenmp"]
     extra_link_args = ["-fopenmp"]
