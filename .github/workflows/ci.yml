@@ -25,7 +25,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libomp5 libomp-dev
+          sudo apt-get install -y libomp-dev
 
       - name: Install OpenMP
         if: runner.os == 'macOS'
