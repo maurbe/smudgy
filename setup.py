@@ -114,4 +114,6 @@ setup(
     packages=find_packages(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
 )

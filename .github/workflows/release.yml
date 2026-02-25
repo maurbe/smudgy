@@ -77,10 +77,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          path: dist
+          path: temp
       - name: Gather wheels
         run: |
-          find dist/ -type f -name "*.whl" -exec mv {} dist/ \;
+          mkdir -p dist
+          find temp/ -type f -name "*.whl" -exec mv {} dist/ \;
+      - name: List dist contents before upload
+        run: |
+          echo "Contents of dist/:"
+          ls -l dist/
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
