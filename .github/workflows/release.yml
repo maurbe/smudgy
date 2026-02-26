@@ -37,7 +37,7 @@ jobs:
       # Build wheels via cibuildwheel
       # ------------------------------------------------------
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2
+        uses: pypa/cibuildwheel@v3.3.1
         env:
           # Build for CPython only
           CIBW_BUILD: "cp3*-*"
