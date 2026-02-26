@@ -44,7 +44,7 @@ jobs:
 
           # macOS universal2
           CIBW_ARCHS_MACOS: "x86_64 arm64"
-          MACOSX_DEPLOYMENT_TARGET: "10.15"
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
 
           # Skip musllinux unless explicitly needed
           CIBW_SKIP: "*-musllinux_*"
