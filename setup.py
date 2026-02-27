@@ -71,7 +71,7 @@ ext_modules = [
 
 setup(
     name="smudgy",
-    version="0.1.3",
+    version="0.1.2",
     packages=find_packages(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
