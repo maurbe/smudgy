@@ -1,5 +1,10 @@
+<br />
+<p align="center">
+  <img src="src/banner.png" alt="Smudgy Banner" width="100%">
+</p>
+
 Welcome to the `smudgy` GitHub page. 
-`smudgy` is a python package with a C++ and (optionally) OpenMP backend for point cloud smoothing and interpolation using SPH operations. Please refer to the official [docs](https://smudgy.readthedocs.io/en/latest/) for guides and tutorials.
+`smudgy` is a python package with a C++ and (optionally) OpenMP backend for point cloud smoothing and interpolation using SPH operations – lightning fast, scalable and memory-efficient. Please refer to the official [docs](https://smudgy.readthedocs.io/en/latest/) for guides and tutorials.
 
 You can install `smudgy` in several ways. OpenMP support is optional but recommended for parallel performance. See the [OpenMP Support](#openmp-support) section for details on how to setup OpenMP **before** installation.
 
@@ -22,7 +27,7 @@ pip install .
 ### OpenMP Support
 
 To enable parallelization, you must have OpenMP installed on your system **before** building the package. See instructions for your operating system below. If OpenMP is not found, `smudgy` will still work, but parallelization will be disabled.
-The following OS-dependent steps ensure that OpenMP is installed and configured for subsequent `smudgy` installation. If you are unsure whether OpenMP is installed correctly, download the `omp_test.cpp` file and test the OpenMP installation as described below.
+The following OS-dependent instructions ensure that OpenMP is installed and configured for subsequent `smudgy` installation. If you are unsure whether OpenMP is installed correctly, download the `src/omp_test.cpp` file and test the OpenMP installation as described below.
 
 #### Linux
 
@@ -41,7 +46,7 @@ g++ -fopenmp omp_test.cpp -o omp_test
 
 Apple's Clang does not support OpenMP by default. To enable OpenMP parallelization, follow these steps:
 
-First, install libomp via Homebrew:
+First, install ``libomp`` via Homebrew:
 ```sh
 brew update
 brew install libomp
@@ -82,7 +87,7 @@ g++ -fopenmp omp_test.cpp -o omp_test.exe
 omp_test.exe
 ```
 
-### Running the Test Suite (Recommended)
+### Running the Test Suite
 
 After installation, it is highly recommended to run the test suite to verify your installation and check OpenMP support.
 
@@ -90,7 +95,6 @@ After installation, it is highly recommended to run the test suite to verify you
 ```sh
 git clone https://github.com/youruser/smudgy.git
 cd smudgy
-pytest -rs
 ```
 
 Afterwards, run the tests:

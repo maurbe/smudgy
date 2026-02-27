@@ -103,7 +103,7 @@ def create_grid_2d(n_cells: CountInput, boxsize: BoxInput) -> Float32Array:
     Returns
     -------
     numpy.ndarray
-        Float32 array of shape ``(nx * ny, 2)`` containing cell centers.
+        Float32 array of shape ``(n_cells[0] * n_cells[1], 2)`` containing cell centers.
 
     """
     counts = _normalize_counts(n_cells, 2)
@@ -132,7 +132,7 @@ def create_grid_3d(n_cells: CountInput, boxsize: BoxInput) -> Float32Array:
     Returns
     -------
     numpy.ndarray
-        Float32 array of shape ``(nx * ny * nz, 3)`` containing cell centers.
+        Float32 array of shape ``(n_cells[0] * n_cells[1] * n_cells[2], 3)`` containing cell centers.
 
     """
     counts = _normalize_counts(n_cells, 3)

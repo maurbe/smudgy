@@ -4,12 +4,12 @@
 
    quickstart
    install
-   usage
 
 .. toctree::
    :caption: Tutorials
    :maxdepth: 1
 
+   usage
    tutorials_basic
    tutorials_advanced
 
