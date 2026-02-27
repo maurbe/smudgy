@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smudgy"
-version = "0.1.1"
+version = "0.1.3"
 description = "Point Cloud smoothing and interpolation package."
 authors = [
     { name = "Mauro Bernardini", email = "mauro.bernardini1313@gmail.com" }
