@@ -6,27 +6,14 @@ You can install smudgy in several ways. OpenMP support is optional but recommend
 
 Install from PyPI (recommended)
 -------------------------------
-Once released on PyPI, simply run:
+Simply run:
 
 .. code-block:: bash
 
    pip install smudgy
 
-If a pre-built wheel is available for your platform, no compiler or OpenMP setup is needed. Otherwise, see the OpenMP Support section if you want parallelization.
+See the OpenMP Support section if you want parallelization.
 
-Install from a Pre-built Wheel
-------------------------------
-If you have a wheel file (e.g., from GitHub Releases):
-
-.. code-block:: bash
-
-   pip install path/to/smudgy-<version>-<platform>.whl
-
-Or directly from a URL:
-
-.. code-block:: bash
-
-   pip install https://github.com/youruser/yourrepo/releases/download/vX.Y/smudgy-<version>-<platform>.whl
 
 Build from Source
 -----------------
@@ -34,67 +21,58 @@ Clone the repository and install:
 
 .. code-block:: bash
 
-   git clone https://github.com/youruser/smudgy.git
+   git clone https://github.com/maurbe/smudgy.git
    cd smudgy
    pip install .
 
 OpenMP Support (Parallelization)
 --------------------------------
-To enable OpenMP parallelization, you must have OpenMP installed on your system **before** building the package. See instructions for your operating system below. If OpenMP is not found, the package will still work, but parallelization will be disabled.
-
-Linux
-~~~~~
-Most Linux distributions provide OpenMP support out of the box with GCC. To ensure you have it, install the required packages:
-
-.. code-block:: bash
-
-   sudo apt-get update
-   sudo apt-get install -y libomp5 libomp-dev
-   pip install .
-
-These steps ensure that OpenMP is available and correctly configured for building and running the package.
-
-macOS
-~~~~~
-Apple's Clang does not support OpenMP by default. To enable OpenMP parallelization, follow these steps:
-
-1. Install GCC and libomp via Homebrew:
-
-.. code-block:: bash
-
-    brew update
-    brew install gcc libomp
-
-2. Export the necessary environment variables:
-This sets the correct paths for GCC and G++ with the version you installed via Homebrew.
-
-.. code-block:: bash
-
-   export OMP_PREFIX="$(brew --prefix libomp)"
-   export CC=$(brew list gcc | grep '/bin/gcc-' | head -1)
-   export CXX=$(brew list gcc | grep '/bin/g++-' | head -1)
-   export CPPFLAGS="-I${OMP_PREFIX}/include ${CPPFLAGS}"
-   export LDFLAGS="-L${OMP_PREFIX}/lib ${LDFLAGS}"
-   export DYLD_LIBRARY_PATH="${OMP_PREFIX}/lib:${DYLD_LIBRARY_PATH}"
-
-3. Install the package:
-
-.. code-block:: bash
-
-   pip install .
+To enable OpenMP parallelization, you must have OpenMP installed on your system **before** installing smudgy. See instructions for your operating system below. If OpenMP is not found, the package will still work, but parallelization will be disabled.
 
 
-Windows
-~~~~~~~
-.. note::
-    Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems.
+.. tab-set::
+    .. tab-item:: Linux
 
-On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC) and MinGW compilers. If you use MSVC (the default for most Python distributions):
+        Most Linux distributions provide OpenMP support out of the box with GCC. To ensure you have it, install the required packages:
 
-- No extra installation is needed; OpenMP is included with MSVC.
-- The build system will automatically enable OpenMP if available.
+        .. code-block:: bash
 
-If you use MinGW, ensure you have a recent version with OpenMP support. You may need to add `-fopenmp` to your compiler flags if building manually.
+            sudo apt-get update
+            sudo apt-get install -y libomp-dev
+
+    .. tab-item:: MacOS
+        
+        Apple's Clang does not support OpenMP by default. To enable OpenMP parallelization, install libomp via homebrew:
+
+        1. Install GCC and libomp via Homebrew:
+
+        .. code-block:: bash
+
+            brew update
+            brew install libomp
+
+        2. Export the necessary environment variables:
+        This sets the correct paths for GCC and G++ with the version you installed via Homebrew.
+
+        .. code-block:: bash
+
+            export OMP_PREFIX="$(brew --prefix libomp)"
+            export CPPFLAGS="-I${OMP_PREFIX}/include"
+            export LDFLAGS="-L${OMP_PREFIX}/lib"
+            export CFLAGS="-Xpreprocessor -fopenmp ${CPPFLAGS}"
+            export CXXFLAGS="-Xpreprocessor -fopenmp ${CPPFLAGS}"
+
+    .. tab-item:: Windows
+
+        .. note::
+            Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems.
+
+        On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC) and MinGW compilers. If you use MSVC (the default for most Python distributions):
+
+        - No extra installation is needed; OpenMP is included with MSVC.
+        - The build system will automatically enable OpenMP if available.
+
+        If you use MinGW, ensure you have a recent version with OpenMP support. You may need to add `-fopenmp` to your compiler flags if building manually.
 
 Pre-installation: Test OpenMP Availability
 ------------------------------------------
@@ -143,11 +121,12 @@ Apple Clang does not support OpenMP by default. Use Homebrew's libomp and dynami
 
 .. code-block:: bash
 
-   $(brew list gcc | grep '/bin/gcc-' | head -1) \
-       -Xclang -fopenmp omp_test.cpp \
-       -L${OMP_PREFIX}/lib -lomp \
-       -I${OMP_PREFIX}/include -o omp_test
-   ./omp_test
+   clang++ -Xpreprocessor -fopenmp omp_test.cpp \
+        -I${OMP_PREFIX}/include \
+        -L${OMP_PREFIX}/lib -lomp \
+        -o omp_test
+
+    ./omp_test
 
 Windows
 ~~~~~~~
@@ -175,21 +154,19 @@ Running the Test Suite (Recommended)
 After installation, it is highly recommended to run the test suite to verify your installation and check OpenMP support.
 
 
-- If you installed smudgy via pip from PyPI or a wheel, the test suite is not included by default. To run the full tests, clone the repository:
+- If you installed smudgy via pip, the test suite is not included by default. To run the full tests, clone the repository:
 
 .. code-block:: bash
 
     git clone https://github.com/youruser/smudgy.git
-    cd smudgy
-    pytest -rs
 
-- If you installed from source (from a git clone), inside the package folder simply run:
+- Then run the tests with (this also applies to installations from source):
 
 .. code-block:: bash
 
     pytest -rs
 
 The tests will automatically check for OpenMP availability and skip parallelization tests if OpenMP is not enabled or detected. If you see tests being skipped due to missing OpenMP, revisit the OpenMP Support section to ensure your environment is set up correctly and the package was compiled with OpenMP support.
-Running the tests is the best way to confirm that your installation is working as expected and that you are getting the performance benefits of parallelization if desired.
+Running the tests is the best way to confirm that your installation is working as expected and that you are getting the performance benefits of parallelization.
 
 If you have any issues, please consult the documentation or open an issue on GitHub.

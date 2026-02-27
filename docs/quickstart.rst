@@ -1,5 +1,5 @@
 Quick Start
-============
+===========
 
 Welcome to the smudgy documentation!
 
