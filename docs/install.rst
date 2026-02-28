@@ -25,9 +25,9 @@ Clone the repository and install:
 
 OpenMP Support
 --------------
-To enable parallelization, you must have OpenMP installed on your system **before** building the package. 
+To enable parallelization, you must have OpenMP installed on your system **before** installing ``smudgy``. 
 If OpenMP is not found, ``smudgy`` will still work, but parallelization will be disabled.
-The following OS-dependent instructions ensure that OpenMP is installed and configured for subsequent ``smudgy`` installation.
+To install OpenMP, see instructions for your operating system below.
 If you are unsure whether OpenMP is installed correctly, download the ``src/omp_test.cpp`` file and test the OpenMP installation as described below.
 
 .. tab-set::
@@ -40,7 +40,7 @@ If you are unsure whether OpenMP is installed correctly, download the ``src/omp_
             sudo apt-get update
             sudo apt-get install -y libomp-dev
 
-        Test the installation:
+        Test it:
 
         .. code-block:: bash
 
@@ -68,7 +68,7 @@ If you are unsure whether OpenMP is installed correctly, download the ``src/omp_
             export CFLAGS="-Xpreprocessor -fopenmp ${CPPFLAGS}"
             export CXXFLAGS="-Xpreprocessor -fopenmp ${CPPFLAGS}"
 
-        Test the installation:
+        Test it:
 
         .. code-block:: bash
 
@@ -83,14 +83,14 @@ If you are unsure whether OpenMP is installed correctly, download the ``src/omp_
         .. note::
             Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems. On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC) and MinGW compilers.
 
-        **MSVC**: no extra installation is needed; OpenMP is included with MSVC. The build system will automatically enable OpenMP if available. Compile and test the installation:
+        **MSVC**: no extra installation is needed; OpenMP is included with MSVC. The build system will automatically enable OpenMP if available. Compile and test it:
 
         .. code-block:: bash
 
             cl /openmp omp_test.cpp
             omp_test.exe
         
-        **MinGW**: ensure you have a recent version with OpenMP support. You may need to add ``-fopenmp`` to your compiler flags if building manually. Compile and test the installation:
+        **MinGW**: ensure you have a recent version with OpenMP support. You may need to add ``-fopenmp`` to your compiler flags if building manually. Compile and test it:
 
         .. code-block:: bash
 
@@ -107,16 +107,16 @@ After installation, it is highly recommended to run the test suite to verify you
 .. code-block:: bash
 
     git clone https://github.com/maurbe/smudgy.git
-    cd smudgy
 
-Afterwards, run the tests:
+Then, run the tests:
 
 .. code-block:: bash
 
+    cd smudgy
     pytest -rs
 
 The tests will automatically check for OpenMP availability and skip parallelization tests if OpenMP is not enabled or detected. 
 If you see tests being skipped due to missing OpenMP, revisit the :ref:`openmp-support` section to ensure your environment 
-is set up correctly and the package was compiled with OpenMP support.
+is set up correctly.
 
 If you have any issues, please consult the documentation or open an issue on `GitHub <https://github.com/maurbe/smudgy/issues>`_.

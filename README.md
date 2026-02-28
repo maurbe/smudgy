@@ -4,8 +4,9 @@
 </p>
 
 Welcome to the `smudgy` GitHub page. 
-`smudgy` is a python package with a C++ and (optionally) OpenMP backend for point cloud smoothing and interpolation using SPH operations – lightning fast, scalable and memory-efficient. Please refer to the official [docs](https://smudgy.readthedocs.io/en/latest/) for guides and tutorials.
+`smudgy` is a python package with a C++ and (optionally) OpenMP backend support for point cloud smoothing and interpolation using SPH operations – lightning fast, scalable and memory-efficient. Please refer to the official [docs](https://smudgy.readthedocs.io/en/latest/) for guides and tutorials.
 
+### How to install 
 You can install `smudgy` in several ways. OpenMP support is optional but recommended for parallel performance. See the [OpenMP Support](#openmp-support) section for details on how to setup OpenMP **before** installation.
 
 #### 1. Install from PyPI (recommended)
@@ -24,10 +25,10 @@ cd smudgy
 pip install .
 ```
 
-### OpenMP Support
+### OpenMP Support ⚡️
 
-To enable parallelization, you must have OpenMP installed on your system **before** building the package. See instructions for your operating system below. If OpenMP is not found, `smudgy` will still work, but parallelization will be disabled.
-The following OS-dependent instructions ensure that OpenMP is installed and configured for subsequent `smudgy` installation. If you are unsure whether OpenMP is installed correctly, download the `src/omp_test.cpp` file and test the OpenMP installation as described below.
+To enable parallelization, you must have OpenMP installed on your system **before** installing ``smudgy``. If OpenMP is not found, `smudgy` will still work, but parallelization will be disabled.
+To install OpenMP, see instructions for your operating system below. If you are unsure whether OpenMP is installed correctly, download the `src/omp_test.cpp` file and test the OpenMP installation as described below.
 
 #### Linux
 
@@ -36,7 +37,7 @@ Most Linux distributions provide OpenMP support out of the box with GCC. To ensu
 sudo apt-get update
 sudo apt-get install -y libomp5 libomp-dev
 ```
-Test the installation:
+Test it:
 ```sh
 g++ -fopenmp omp_test.cpp -o omp_test
 ./omp_test
@@ -60,7 +61,7 @@ export LDFLAGS="-L${OMP_PREFIX}/lib"
 export CFLAGS="-Xpreprocessor -fopenmp ${CPPFLAGS}"
 export CXXFLAGS="-Xpreprocessor -fopenmp ${CPPFLAGS}"
 ```
-Test the installation:
+Test it:
 ```sh
 clang++ -Xpreprocessor -fopenmp omp_test.cpp \
         -I${OMP_PREFIX}/include \
@@ -74,14 +75,14 @@ clang++ -Xpreprocessor -fopenmp omp_test.cpp \
 **Note:** Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems. On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC) and MinGW compilers. 
 
 **MSVC**: no extra installation is needed; OpenMP is included with MSVC. The build system will automatically enable OpenMP if available.
-Compile and test the installation:
+Compile and test it:
 ```sh
 cl /openmp omp_test.cpp
 omp_test.exe
 ```
 
 **MinGW**: ensure you have a recent version with OpenMP support. You may need to add `-fopenmp` to your compiler flags if building manually. 
-Compile and test the installation:
+Compile and test it:
 ```sh
 g++ -fopenmp omp_test.cpp -o omp_test.exe
 omp_test.exe
@@ -94,14 +95,14 @@ After installation, it is highly recommended to run the test suite to verify you
 **Note**: If you installed `smudgy` via pip, the test suite is not included by default. In this case, clone the repository first:
 ```sh
 git clone https://github.com/youruser/smudgy.git
-cd smudgy
 ```
 
-Afterwards, run the tests:
+Then, run the tests:
 ```sh
+cd smudgy
 pytest -rs
 ```
 
-The tests will automatically check for OpenMP availability and skip parallelization tests if OpenMP is not enabled or detected. If you see tests being skipped due to missing OpenMP, revisit the [OpenMP Support](#openmp-support) section to ensure your environment is set up correctly and the package was compiled with OpenMP support.
+The tests will automatically check for OpenMP availability and skip parallelization tests if OpenMP is not enabled or detected. If you see tests being skipped due to missing OpenMP, revisit the [OpenMP Support](#openmp-support) section to ensure your environment is set up correctly.
 
 If you have any issues, please consult the documentation or open an issue on GitHub.
