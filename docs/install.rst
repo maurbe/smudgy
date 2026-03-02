@@ -2,7 +2,7 @@
 Installation
 ============
 
-You can install ``smudgy`` in several ways. OpenMP support is optional but recommended for parallel performance. See the OpenMP Support section for details on how to setup OpenMP **before** installation.
+You can install ``smudgy`` in several ways. OpenMP support is optional but recommended for parallel performance. See the :ref:`openmp-support` section for details on how to setup OpenMP **before** installation.
 
 1. Install from PyPI (recommended)
 
@@ -102,13 +102,14 @@ Running the Test Suite
 ----------------------
 After installation, it is highly recommended to run the test suite to verify your installation and check OpenMP support.
 
-**Note**: If you installed ``smudgy`` via pip, the test suite is not included by default. In this case, clone the repository first:
+.. note::
+    **Note**: If you installed ``smudgy`` via pip, the test suite is not included by default. In this case, clone the repository first:
+    
+    .. code-block:: bash
 
-.. code-block:: bash
+        git clone https://github.com/maurbe/smudgy.git
 
-    git clone https://github.com/maurbe/smudgy.git
-
-Then, run the tests:
+Run the tests:
 
 .. code-block:: bash
 
