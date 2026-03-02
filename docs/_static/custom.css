@@ -1,0 +1,5 @@
+/* Control logo size in sidebar */
+.sidebar-brand img {
+    max-width: 140px;   /* change this */
+    height: auto;
+}
