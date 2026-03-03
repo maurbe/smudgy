@@ -6,6 +6,10 @@
 
 #include "../core/cpp/_functions.h"  // backend declarations
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace py = pybind11;
 
 // Example: wrapper for ngp_2d
@@ -682,11 +686,20 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
     m.doc() = "C++ deposition functions";
 
 
-#ifdef _OPENMP
-    m.attr("has_openmp") = true;
-#else
-    m.attr("has_openmp") = false;
-#endif
+    #ifdef _OPENMP
+        m.attr("has_openmp") = true;
+    #else
+        m.attr("has_openmp") = false;
+    #endif
+
+    
+    m.def("openmp_thread_count", []() {
+    #ifdef _OPENMP
+        return omp_get_max_threads();
+    #else
+        return 1;
+    #endif
+    });
 
     m.def("_ngp_2d_cpp", &_ngp_2d_cpp, 
         R"doc(

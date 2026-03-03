@@ -90,13 +90,6 @@ If you are unsure whether OpenMP is installed correctly, download the ``src/omp_
             cl /openmp omp_test.cpp
             omp_test.exe
         
-        **MinGW**: ensure you have a recent version with OpenMP support. You may need to add ``-fopenmp`` to your compiler flags if building manually. Compile and test it:
-
-        .. code-block:: bash
-
-            g++ -fopenmp omp_test.cpp -o omp_test.exe
-            omp_test.exe
-
         
 Running the Test Suite
 ----------------------

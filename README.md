@@ -72,19 +72,12 @@ clang++ -Xpreprocessor -fopenmp omp_test.cpp \
 
 #### Windows
 
-**Note:** Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems. On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC) and MinGW compilers. 
+**Note:** Windows is currently not officially supported. However, the following instructions are provided for users who wish to attempt installation on Windows systems. On Windows, OpenMP is supported by Microsoft Visual Studio (MSVC). 
 
 **MSVC**: no extra installation is needed; OpenMP is included with MSVC. The build system will automatically enable OpenMP if available.
 Compile and test it:
 ```sh
 cl /openmp omp_test.cpp
-omp_test.exe
-```
-
-**MinGW**: ensure you have a recent version with OpenMP support. You may need to add `-fopenmp` to your compiler flags if building manually. 
-Compile and test it:
-```sh
-g++ -fopenmp omp_test.cpp -o omp_test.exe
 omp_test.exe
 ```
 
