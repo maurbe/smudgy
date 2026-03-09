@@ -16,7 +16,8 @@ BoxInput = float | Sequence[float] | npt.ArrayLike
 def build_kdtree(
     points: npt.ArrayLike, boxsize: BoxInput | None = None
 ) -> spatial.cKDTree:
-    """Construct a cKDTree with optional per-dimension periodic box sizes.
+    """Construct a cKDTree with optional periodic box sizes.
+    If ``boxsize`` is provided, the tree will use periodic boundary conditions.
 
     Parameters
     ----------
@@ -72,8 +73,13 @@ def shift_particle_positions(pos: npt.ArrayLike) -> FloatArray:
     numpy.ndarray
             Shifted coordinates with the same shape as ``pos``.
 
+    Raises
+    ------
+    AssertionError
+            If the input array is not 2D.
     """
     pos_array = np.asarray(pos)
+    assert pos_array.ndim == 2, "Input positions must be a 2D array of shape (N, D)"
     return pos_array - pos_array.min(axis=0)
 
 
@@ -97,63 +103,37 @@ def coordinate_difference_with_pbc(
             Coordinate differences wrapped into the range
             $[-0.5 * boxsize, 0.5 * boxsize)$ per dimension.
 
+    Raises
+    ------
+    AssertionError
+            If the input coordinate arrays do not have the same spatial dimension.
+            If ``boxsize`` is an array, if it is not 1D or if its length does not match the coordinate dimension.
     """
-    diff = np.asarray(x) - np.asarray(y)
+    shape_x = x.shape
+    shape_y = y.shape
+    assert (
+        shape_x[-1] == shape_y[-1]
+    ), "Input coordinate arrays must have the same spatial dimension"
+
+    # compute differences
+    coordinate_differences = np.asarray(x) - np.asarray(y)
 
     # early exit if boxsize is None (non-periodic case)
     if boxsize is None:
-        return diff
+        return coordinate_differences
 
-    box_arr = np.asarray(boxsize)
-    if box_arr.ndim == 0:
-        half_box = 0.5 * box_arr
-        return (diff + half_box) % box_arr - half_box
-
-    if box_arr.ndim != 1:
-        raise ValueError("'boxsize' must be a scalar or 1D array")
-
-    if diff.ndim == 0:
-        raise ValueError("Vector 'boxsize' requires vector inputs for x and y")
-
-    if diff.shape[-1] != box_arr.shape[0]:
-        raise ValueError("Dimension mismatch between coordinates and 'boxsize'")
+    # prepare boxsize array for broadcasting
+    if np.isscalar(boxsize):
+        box_arr = np.array([boxsize] * shape_x.shape[-1])
+    else:
+        assert np.asarray(boxsize).ndim == 1, "'boxsize' must be a scalar or 1D array"
+        assert (
+            len(boxsize) == shape_x[-1]
+        ), "Length of 'boxsize' must match coordinate dimension"
+        box_arr = np.asarray(boxsize)
 
     half_box = 0.5 * box_arr
-    return (diff + half_box) % box_arr - half_box
-
-
-def compute_pcellsize_half(
-    tree: spatial.cKDTree,
-    num_neighbors: int,
-    query_pos: npt.ArrayLike | None = None,
-) -> tuple[FloatArray, IntArray]:
-    """Estimate rectangular particle extent as half-distance to the Nth neighbor.
-
-    Parameters
-    ----------
-    tree
-            cKDTree built from particle positions.
-    num_neighbors
-            Number of neighbors used for the estimate.
-    query_pos
-            Array of shape ``(M, D)`` with query coordinates.
-            If ``None``, uses particle positions from the tree.
-
-    Returns
-    -------
-    Tuple[numpy.ndarray, numpy.ndarray]
-            Tuple of ``(h_cellsize, nn_inds)`` where ``h_cellsize`` has shape ``(M,)``
-            and contains half the distance to the Nth neighbor, and ``nn_inds`` has
-            shape ``(M, num_neighbors)``.
-
-    """
-    if query_pos is None:
-        query_pos = tree.data
-
-    # smoothing length as 0.5 * distance to Nth nearest neighbor
-    nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
-    h_cellsize = nn_dists[:, -1] * 0.5
-    return h_cellsize, nn_inds
+    return (coordinate_differences + half_box) % box_arr - half_box
 
 
 def compute_hsm(
@@ -221,21 +201,17 @@ def compute_hsm_tensor(
             and ``rel_coords`` has shape ``(M, num_neighbors, D)``.
 
     """
-    # Get particle positions and boxsize from the tree object
     pos = tree.data
     boxsize = tree.boxsize
-    D = pos.shape[-1]
+    spatial_dim = pos.shape[-1]
 
-    if D not in (2, 3):
+    if spatial_dim not in (2, 3):
         raise ValueError(
             "Only 2D and 3D positions are supported for anisotropic smoothing tensors."
         )
 
-    # Use particle positions if query_pos not provided
     if query_pos is None:
         query_pos = pos
-
-    # Ensure weights is 1D
     weights = weights.flatten() if weights.ndim > 1 else weights
 
     # Find nearest neighbors
@@ -259,7 +235,7 @@ def compute_hsm_tensor(
     # Compute eigendecomposition and construct smoothing tensor H = VΛV^T
     eigvals, eigvecs = np.linalg.eigh(Sigma)
     eigvals = np.sqrt(eigvals)
-    Λ = eigvals[..., np.newaxis] * np.eye(D)
+    Λ = eigvals[..., np.newaxis] * np.eye(spatial_dim)
     H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
 
     return H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords
@@ -291,12 +267,20 @@ def project_hsm_tensor_to_2d(
             shape ``(N, 2, 2)``, ``eigvals`` has shape ``(N, 2)``, and ``eigvecs``
             has shape ``(N, 2, 2)``.
 
+    Raises
+    ------
+    ValueError
+            If neither or both of ``plane`` and ``basis`` are provided.
+            If ``plane`` is not one of the allowed values.
+            If ``basis`` is not a 2-tuple of 3D vectors.
     """
     # Validate inputs
     if plane is None and basis is None:
         raise ValueError("Either 'plane' or 'basis' must be provided")
     if plane is not None and basis is not None:
-        raise ValueError("'plane' and 'basis' are mutually exclusive")
+        raise ValueError(
+            "'plane' and 'basis' are mutually exclusive, only provide one of the two"
+        )
 
     # Define projection basis vectors
     if basis is not None:

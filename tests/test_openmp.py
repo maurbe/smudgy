@@ -10,9 +10,7 @@ def test_openmp_attribute_is_bool():
 
 
 def test_openmp_serial_consistency():
-    """
-    If OpenMP is disabled, ensure behavior is consistent with serial mode.
-    """
+    """If OpenMP is disabled, ensure behavior is consistent with serial mode."""
     if not cpp.has_openmp:
         # Nothing parallel should happen; just assert flag is False
         assert cpp.has_openmp is False

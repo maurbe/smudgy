@@ -12,7 +12,6 @@ from .utils import (
     build_kdtree,
     compute_hsm,
     compute_hsm_tensor,
-    compute_pcellsize_half,
     coordinate_difference_with_pbc,
     project_hsm_tensor_to_2d,
 )
@@ -181,10 +180,7 @@ class PointCloud:
             "query_pos": query_pos,
         }
 
-        if self.mode == "adaptive":
-            self.hsm, self.nn_inds = compute_pcellsize_half(**kwargs)
-
-        if self.mode == "isotropic":
+        if self.mode in ["adaptive", "isotropic"]:
             self.hsm, self.nn_inds, self.nn_dists = compute_hsm(**kwargs)
 
         elif self.mode == "anisotropic":
