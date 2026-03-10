@@ -78,7 +78,7 @@ def _normalize_cells(n_cells: CellInput, dim: int) -> IntArray:
     return n_cells_full
 
 
-def _create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32Array:
+def create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32Array:
     """Generate N-dimensional grid cell centers.
 
     Parameters
@@ -110,7 +110,7 @@ def _create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32A
 
 
 def create_grid_1d(n_cells: int, boxsize: BoxInput) -> Float32Array:
-    """Generate 1D grid cell centers. Calls ``_create_grid_nd`` with 1D parameters.
+    """Generate 1D grid cell centers. Calls ``create_grid_nd`` with 1D parameters.
 
     Parameters
     ----------
@@ -125,11 +125,11 @@ def create_grid_1d(n_cells: int, boxsize: BoxInput) -> Float32Array:
         Float32 array of shape ``(n_cells, 1)`` with cell-center coordinates.
 
     """
-    return _create_grid_nd(n_cells, boxsize, dim=1)
+    return create_grid_nd(n_cells, boxsize, dim=1)
 
 
 def create_grid_2d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
-    """Generate 2D grid cell centers. Calls ``_create_grid_nd`` with 2D parameters.
+    """Generate 2D grid cell centers. Calls ``create_grid_nd`` with 2D parameters.
 
     Parameters
     ----------
@@ -144,11 +144,11 @@ def create_grid_2d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
         Float32 array of shape ``(n_cells[0] * n_cells[1], 2)`` containing cell centers.
 
     """
-    return _create_grid_nd(n_cells, boxsize, dim=2)
+    return create_grid_nd(n_cells, boxsize, dim=2)
 
 
 def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
-    """Generate 3D grid cell centers. Calls ``_create_grid_nd`` with 3D parameters.
+    """Generate 3D grid cell centers. Calls ``create_grid_nd`` with 3D parameters.
 
     Parameters
     ----------
@@ -163,4 +163,4 @@ def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
         Float32 array of shape ``(n_cells[0] * n_cells[1] * n_cells[2], 3)`` containing cell centers.
 
     """
-    return _create_grid_nd(n_cells, boxsize, dim=3)
+    return create_grid_nd(n_cells, boxsize, dim=3)

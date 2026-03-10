@@ -15,8 +15,8 @@ class Kernel:
     Parameters
     ----------
     kernel_name : str
-        Kernel name: ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
-        ``"wendland_c2"``, ``"wendland_c4"``, ``"wendland_c6"``, or ``"super_gaussian"``.
+        Kernel name: ``"gaussian"``, ``"super_gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
+        ``"wendland_c2"``, ``"wendland_c4"`` or ``"wendland_c6"``.
     dim : int
         Spatial dimension (1, 2, or 3).
 
@@ -33,8 +33,8 @@ class Kernel:
         Parameters
         ----------
         kernel_name : str
-                Kernel name: ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
-                                ``"wendland_c2"``, ``"wendland_c4"``, ``"wendland_c6"``, or ``"super_gaussian"``.
+                Kernel name: ``"gaussian"``, ``"super_gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
+                ``"wendland_c2"``, ``"wendland_c4"`` or ``"wendland_c6"``.
         dim : int
                 Spatial dimension (1, 2, or 3).
 
@@ -46,12 +46,12 @@ class Kernel:
         """
         allowed_kernels = {
             "gaussian",
+            "super_gaussian",
             "cubic_spline",
             "quintic_spline",
             "wendland_c2",
             "wendland_c4",
             "wendland_c6",
-            "super_gaussian",
         }
         assert isinstance(kernel_name, str), "kernel_name must be a string"
         assert (
@@ -65,8 +65,8 @@ class Kernel:
     def evaluate_kernel(
         self,
         r_ij: npt.NDArray[np.floating],
-        h: npt.NDArray[np.floating] | None = None,
-        H: npt.NDArray[np.floating] | None = None,
+        smoothing_lengths: npt.NDArray[np.floating] | None = None,
+        smoothing_tensors: npt.NDArray[np.floating] | None = None,
     ) -> npt.NDArray[np.floating]:
         """Evaluate the kernel function $W$ at given distances.
 
@@ -78,9 +78,9 @@ class Kernel:
                 Distance array with shape ``(M, K)`` for isotropic case or ``(M, K, D)``
                 for anisotropic case (relative position vectors). ``M`` is the number of
                 query positions, ``K`` the number of neighbors, and ``D`` the dimension.
-        h : numpy.ndarray, optional
+        smoothing_lengths : numpy.ndarray, optional
                 Smoothing lengths with shape ``(M, 1)`` or ``(M,)`` (isotropic only).
-        H : numpy.ndarray, optional
+        smoothing_tensors : numpy.ndarray, optional
                 Smoothing tensors with shape ``(M, D, D)`` (anisotropic only).
 
         Returns
@@ -92,30 +92,45 @@ class Kernel:
         Raises
         ------
         AssertionError
-                If input types or shapes are invalid (e.g., wrong type or dimension for ``r_ij``, ``h``, or ``H``).
+                If input types or shapes are invalid (e.g., wrong type or dimension for ``r_ij``, ``smoothing_lengths``, or ``smoothing_tensors``).
         ValueError
-                If neither ``h`` nor ``H`` is provided, or if shapes are incompatible for anisotropic case.
+                If neither ``smoothing_lengths`` nor ``smoothing_tensors`` is provided, or if shapes are incompatible for anisotropic case.
 
         """
         assert isinstance(r_ij, np.ndarray), "r_ij must be a numpy array"
-        if h is not None:
-            assert isinstance(h, np.ndarray), "h must be a numpy array if provided"
-            assert h.ndim in (1, 2), "h must be 1D or 2D array"
+        if smoothing_lengths is not None:
+            assert isinstance(
+                smoothing_lengths, np.ndarray
+            ), "smoothing_lengths must be a numpy array if provided"
+            assert smoothing_lengths.ndim in (
+                1,
+                2,
+            ), "smoothing_lengths must be 1D or 2D array"
             assert r_ij.ndim in (1, 2), "r_ij must be 1D or 2D for isotropic case"
-            h = h[:, np.newaxis] if len(h.shape) == 1 else h
-            q = r_ij / h
-            norm = h**self.dim
+            smoothing_lengths = (
+                smoothing_lengths[:, np.newaxis]
+                if len(smoothing_lengths.shape) == 1
+                else smoothing_lengths
+            )
+            q = r_ij / smoothing_lengths
+            norm = smoothing_lengths**self.dim
             W = self._kernel_sigma() / norm * self._kernel_values(q)
         else:
-            assert H is not None, "Anisotropic kernel evaluation requires 'H'"
-            assert isinstance(H, np.ndarray), "H must be a numpy array if provided"
-            assert H.ndim == 3, "H must be a 3D array (N, D, D)"
+            assert (
+                smoothing_tensors is not None
+            ), "Anisotropic kernel evaluation requires 'smoothing_tensors'"
+            assert isinstance(
+                smoothing_tensors, np.ndarray
+            ), "smoothing_tensors must be a numpy array if provided"
+            assert (
+                smoothing_tensors.ndim == 3
+            ), "smoothing_tensors must be a 3D array of shape (N, D, D)"
             assert r_ij.ndim == 3, "For anisotropic kernels, r_ij must be (N, M, d)"
             assert (
-                H.shape[1] == H.shape[2] == self.dim
-            ), "H must be (N, D, D) with D=dim"
-            H_inv = np.linalg.inv(H)  # (N, d, d)
-            det_H = np.linalg.det(H)  # (N,)
+                smoothing_tensors.shape[1] == smoothing_tensors.shape[2] == self.dim
+            ), "smoothing_tensors must be (N, D, D) with D=dim"
+            H_inv = np.linalg.inv(smoothing_tensors)  # (N, d, d)
+            det_H = np.linalg.det(smoothing_tensors)  # (N,)
             xi = np.einsum("mij,mkj->mki", H_inv, r_ij)
             q = np.linalg.norm(xi, axis=-1)  # (N, M)
             norm = det_H  # (N,)
@@ -125,8 +140,8 @@ class Kernel:
     def evaluate_gradient(
         self,
         r_ij_vec: npt.NDArray[np.floating],
-        h: npt.NDArray[np.floating] | None = None,
-        H: npt.NDArray[np.floating] | None = None,
+        smoothing_lengths: npt.NDArray[np.floating] | None = None,
+        smoothing_tensors: npt.NDArray[np.floating] | None = None,
     ) -> npt.NDArray[np.floating]:
         """Evaluate the kernel gradient nabla W at given positions.
 
@@ -138,9 +153,9 @@ class Kernel:
                 Relative position vectors with shape ``(M, K, D)`` where ``M`` is the
                 number of query positions, ``K`` the number of neighbors, and ``D`` the
                 dimension.
-        h : numpy.ndarray, optional
+        smoothing_lengths : numpy.ndarray, optional
                 Smoothing lengths with shape ``(M, 1)`` or ``(M,)`` (isotropic only).
-        H : numpy.ndarray, optional
+        smoothing_tensors : numpy.ndarray, optional
                 Smoothing tensors with shape ``(M, D, D)`` (anisotropic only).
 
         Returns
@@ -152,23 +167,32 @@ class Kernel:
         Raises
         ------
         AssertionError
-                If input types or shapes are invalid (e.g., wrong type or dimension for ``r_ij_vec``, ``h``, or ``H``).
+                If input types or shapes are invalid (e.g., wrong type or dimension for ``r_ij_vec``, ``smoothing_lengths``, or ``smoothing_tensors``).
         ValueError
-                If neither ``h`` nor ``H`` is provided, or if shapes are incompatible for anisotropic case.
+                If neither ``smoothing_lengths`` nor ``smoothing_tensors`` is provided, or if shapes are incompatible for anisotropic case.
 
         """
         assert isinstance(r_ij_vec, np.ndarray), "r_ij_vec must be a numpy array"
-        if h is not None:
-            assert isinstance(h, np.ndarray), "h must be a numpy array if provided"
-            assert h.ndim in (1, 2), "h must be 1D or 2D array"
+        if smoothing_lengths is not None:
+            assert isinstance(
+                smoothing_lengths, np.ndarray
+            ), "smoothing_lengths must be a numpy array if provided"
+            assert smoothing_lengths.ndim in (
+                1,
+                2,
+            ), "smoothing_lengths must be 1D or 2D array"
             assert (
                 r_ij_vec.ndim == 3
             ), "r_ij_vec must be 3D (N, M, d) for isotropic case"
-            h = h[:, np.newaxis] if len(h.shape) == 1 else h  # (N, 1)
+            smoothing_lengths = (
+                smoothing_lengths[:, np.newaxis]
+                if len(smoothing_lengths.shape) == 1
+                else smoothing_lengths
+            )  # (N, 1)
             r_ij_mag = np.linalg.norm(r_ij_vec, axis=-1)  # (N, M)
-            q = r_ij_mag / h  # (N, M)
+            q = r_ij_mag / smoothing_lengths  # (N, M)
             dW_dq = self._kernel_gradient_values(q)
-            dW_dr = dW_dq / h  # (N, M)
+            dW_dr = dW_dq / smoothing_lengths  # (N, M)
             # Safe normalization: if r_ij_mag == 0, set er = 0
             er = np.zeros_like(r_ij_vec)
             np.divide(
@@ -179,24 +203,30 @@ class Kernel:
             )
             grad_W = (
                 self._kernel_sigma()
-                / h[..., np.newaxis] ** self.dim
+                / smoothing_lengths[..., np.newaxis] ** self.dim
                 * dW_dr[..., np.newaxis]
                 * er
             )  # (N, M, d)
             return grad_W
         else:
-            assert H is not None, "Anisotropic kernel gradient requires 'H'"
-            assert isinstance(H, np.ndarray), "H must be a numpy array if provided"
-            assert H.ndim == 3, "H must be a 3D array (N, D, D)"
+            assert (
+                smoothing_tensors is not None
+            ), "Anisotropic kernel gradient requires 'smoothing_tensors'"
+            assert isinstance(
+                smoothing_tensors, np.ndarray
+            ), "smoothing_tensors must be a numpy array if provided"
+            assert (
+                smoothing_tensors.ndim == 3
+            ), "smoothing_tensors must be a 3D array (N, D, D)"
             assert (
                 r_ij_vec.ndim == 3
             ), "For anisotropic kernels, r_ij_vec must be (N, M, d)"
             assert (
-                H.shape[1] == H.shape[2] == self.dim
-            ), "H must be (N, D, D) with D=dim"
-            H_inv = np.linalg.inv(H)  # (N, d, d)
+                smoothing_tensors.shape[1] == smoothing_tensors.shape[2] == self.dim
+            ), "smoothing_tensors must be (N, D, D) with D=dim"
+            H_inv = np.linalg.inv(smoothing_tensors)  # (N, d, d)
             H_inv_T = np.transpose(H_inv, (0, 2, 1))  # (N, d, d)
-            det_H = np.linalg.det(H)  # (N,)
+            det_H = np.linalg.det(smoothing_tensors)  # (N,)
             xi = np.einsum("nij,nmj->nmi", H_inv, r_ij_vec)  # (N, M, d)
             q = np.linalg.norm(xi, axis=-1)  # (N, M)
             dK_dq = self._kernel_gradient_values(q)

@@ -74,7 +74,7 @@ class PointCloud:
         Parameters
         ----------
         kernel_name
-                Name of the SPH kernel to use (e.g., ``"cubic_spline"``, ``"quintic"``).
+                Name of the SPH kernel to use (e.g., ``"gaussian"``, ``"cubic_spline"``).
         mode
                 Smoothing mode: ``"adaptive"``, ``"isotropic"``, or ``"anisotropic"``.
         num_neighbors
@@ -163,7 +163,7 @@ class PointCloud:
         """
         assert hasattr(
             self, "mode"
-        ), "Smoothing mode not set. Please call either 'set_sph_parameters' or 'set_mode' before computing smoothing lengths."
+        ), "Smoothing mode not set. Please call 'set_sph_parameters' before computing smoothing lengths."
 
         if not hasattr(self, "tree"):
             if self.verbose:
@@ -250,10 +250,11 @@ class PointCloud:
         kwargs = {}
         if self.mode == "isotropic":
             kwargs["r_ij"] = self.nn_dists
-            kwargs["h"] = self.hsm
+            kwargs["smoothing_lengths"] = self.hsm
+
         elif self.mode == "anisotropic":
             kwargs["r_ij"] = self.rel_coords
-            kwargs["H"] = self.h_tensor
+            kwargs["smoothing_tensors"] = self.h_tensor
 
         # Kernel evaluation and density computation
         w = self.kernel.evaluate_kernel(**kwargs)
@@ -388,9 +389,9 @@ class PointCloud:
                     query_positions[:, np.newaxis, :],
                     self.boxsize,
                 )
-                kernel_kwargs = {"r_ij_vec": rel_coords, "h": hsm}
+                kernel_kwargs = {"r_ij_vec": rel_coords, "smoothing_lengths": hsm}
             else:
-                kernel_kwargs = {"r_ij": nn_dists, "h": hsm}
+                kernel_kwargs = {"r_ij": nn_dists, "smoothing_lengths": hsm}
 
         elif mode == "anisotropic":
             # Compute smoothing tensors at query positions
@@ -401,7 +402,7 @@ class PointCloud:
                 query_positions=query_positions,
             )
             kernel_key = "r_ij_vec" if compute_gradients else "r_ij"
-            kernel_kwargs = {kernel_key: rel_coords, "H": h_tensor}
+            kernel_kwargs = {kernel_key: rel_coords, "smoothing_tensors": h_tensor}
 
         else:
             raise ValueError(f"Unsupported interpolation mode '{mode}'")

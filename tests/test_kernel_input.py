@@ -28,7 +28,8 @@ def test_evaluate_kernel_invalid_r_ij_type():
     """Test invalid r_ij type in evaluate_kernel."""
     k = Kernel("gaussian", 2)
     with pytest.raises(AssertionError):
-        k.evaluate_kernel(r_ij=[[0, 1]], h=np.ones(1))
+        k.evaluate_kernel(r_ij=[[0, 1]], 
+                          smoothing_lengths=np.ones(1))
 
 
 def test_evaluate_kernel_invalid_h_type():
@@ -36,7 +37,8 @@ def test_evaluate_kernel_invalid_h_type():
     k = Kernel("gaussian", 2)
     r_ij = np.zeros((1, 1))
     with pytest.raises(AssertionError):
-        k.evaluate_kernel(r_ij=r_ij, h=[1.0])
+        k.evaluate_kernel(r_ij=r_ij, 
+                          smoothing_lengths=[1.0])
 
 
 def test_evaluate_kernel_invalid_h_shape():
@@ -45,7 +47,8 @@ def test_evaluate_kernel_invalid_h_shape():
     r_ij = np.zeros((1, 1))
     h = np.ones((1, 1, 1))
     with pytest.raises(AssertionError):
-        k.evaluate_kernel(r_ij=r_ij, h=h)
+        k.evaluate_kernel(r_ij=r_ij, 
+                          smoothing_lengths=h)
 
 
 def test_evaluate_kernel_anisotropic_missing_H():
@@ -53,7 +56,9 @@ def test_evaluate_kernel_anisotropic_missing_H():
     k = Kernel("gaussian", 2)
     r_ij = np.zeros((1, 1, 2))
     with pytest.raises(AssertionError):
-        k.evaluate_kernel(r_ij=r_ij, h=None, H=None)
+        k.evaluate_kernel(r_ij=r_ij, 
+                          smoothing_lengths=None,
+                          smoothing_tensors=None)
 
 
 def test_evaluate_kernel_anisotropic_invalid_H_type():
@@ -61,7 +66,9 @@ def test_evaluate_kernel_anisotropic_invalid_H_type():
     k = Kernel("gaussian", 2)
     r_ij = np.zeros((1, 1, 2))
     with pytest.raises(AssertionError):
-        k.evaluate_kernel(r_ij=r_ij, h=None, H=[[[1.0, 0.0], [0.0, 1.0]]])
+        k.evaluate_kernel(r_ij=r_ij, 
+                          smoothing_lengths=None, 
+                          smoothing_tensors=[[[1.0, 0.0], [0.0, 1.0]]])
 
 
 def test_evaluate_kernel_anisotropic_invalid_H_shape():
@@ -70,14 +77,17 @@ def test_evaluate_kernel_anisotropic_invalid_H_shape():
     r_ij = np.zeros((1, 1, 2))
     H = np.ones((1, 2, 3))
     with pytest.raises(AssertionError):
-        k.evaluate_kernel(r_ij=r_ij, h=None, H=H)
+        k.evaluate_kernel(r_ij=r_ij, 
+                          smoothing_lengths=None, 
+                          smoothing_tensors=H)
 
 
 def test_evaluate_gradient_invalid_r_ij_vec_type():
     """Test invalid r_ij_vec type in evaluate_gradient."""
     k = Kernel("gaussian", 2)
     with pytest.raises(AssertionError):
-        k.evaluate_gradient(r_ij_vec=[[0, 1]], h=np.ones(1))
+        k.evaluate_gradient(r_ij_vec=[[0, 1]], 
+                            smoothing_lengths=np.ones(1))
 
 
 def test_evaluate_gradient_invalid_h_type():
@@ -85,7 +95,8 @@ def test_evaluate_gradient_invalid_h_type():
     k = Kernel("gaussian", 2)
     r_ij_vec = np.zeros((1, 1, 2))
     with pytest.raises(AssertionError):
-        k.evaluate_gradient(r_ij_vec=r_ij_vec, h=[1.0])
+        k.evaluate_gradient(r_ij_vec=r_ij_vec, 
+                            smoothing_lengths=[1.0])
 
 
 def test_evaluate_gradient_invalid_h_shape():
@@ -94,7 +105,8 @@ def test_evaluate_gradient_invalid_h_shape():
     r_ij_vec = np.zeros((1, 1, 2))
     h = np.ones((1, 1, 1))
     with pytest.raises(AssertionError):
-        k.evaluate_gradient(r_ij_vec=r_ij_vec, h=h)
+        k.evaluate_gradient(r_ij_vec=r_ij_vec, 
+                            smoothing_lengths=h)
 
 
 def test_evaluate_gradient_anisotropic_missing_H():
@@ -102,7 +114,9 @@ def test_evaluate_gradient_anisotropic_missing_H():
     k = Kernel("gaussian", 2)
     r_ij_vec = np.zeros((1, 1, 2))
     with pytest.raises(AssertionError):
-        k.evaluate_gradient(r_ij_vec=r_ij_vec, h=None, H=None)
+        k.evaluate_gradient(r_ij_vec=r_ij_vec, 
+                            smoothing_lengths=None, 
+                            smoothing_tensors=None)
 
 
 def test_evaluate_gradient_anisotropic_invalid_H_type():
@@ -110,7 +124,9 @@ def test_evaluate_gradient_anisotropic_invalid_H_type():
     k = Kernel("gaussian", 2)
     r_ij_vec = np.zeros((1, 1, 2))
     with pytest.raises(AssertionError):
-        k.evaluate_gradient(r_ij_vec=r_ij_vec, h=None, H=[[[1.0, 0.0], [0.0, 1.0]]])
+        k.evaluate_gradient(r_ij_vec=r_ij_vec, 
+                            smoothing_lengths=None, 
+                            smoothing_tensors=[[[1.0, 0.0], [0.0, 1.0]]])
 
 
 def test_evaluate_gradient_anisotropic_invalid_H_shape():
@@ -119,4 +135,6 @@ def test_evaluate_gradient_anisotropic_invalid_H_shape():
     r_ij_vec = np.zeros((1, 1, 2))
     H = np.ones((1, 2, 3))
     with pytest.raises(AssertionError):
-        k.evaluate_gradient(r_ij_vec=r_ij_vec, h=None, H=H)
+        k.evaluate_gradient(r_ij_vec=r_ij_vec, 
+                            smoothing_lengths=None, 
+                            smoothing_tensors=H)
