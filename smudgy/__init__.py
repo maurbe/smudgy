@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from .ops import PointCloud
+from .main import *
+from .utils import *
+from .grid import *
 
 
 def check_openmp() -> bool:

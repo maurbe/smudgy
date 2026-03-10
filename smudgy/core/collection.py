@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy.typing as npt
 
-from .core import _cpp_functions as _cpp_backend
-from .core import _py_functions as _py_backend
+from . import _cpp_functions as _cpp_backend
+from . import _py_functions as _py_backend
 
 _PYTHON_UNSUPPORTED = {
     "cic_2d_adaptive",

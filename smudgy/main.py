@@ -1,19 +1,20 @@
 """Core SPH operations and PointCloud class for particle-based computations."""
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
 
-from . import collection as backend
-from .kernels import Kernel
+from .core.kernels import Kernel
 from .utils import (
     build_kdtree,
     compute_hsm,
     compute_hsm_tensor,
     coordinate_difference_with_pbc,
     project_hsm_tensor_to_2d,
+    _interpolate_fields,
+    _deposit_to_grid,
 )
 
 
@@ -142,6 +143,20 @@ class PointCloud:
         ], f"Mode must be one of 'adaptive', 'isotropic' or 'anisotropic' but found {mode}"
         self.mode = mode
 
+    def _check_smoothing_computed(self):
+        if self.mode in ["adaptive", "isotropic"] and not hasattr(self, "hsm"):
+            raise AttributeError(
+                f"Smoothing lengths have not been computed for mode '{self.mode}'. Please call 'compute_smoothing_lengths' first."
+            )
+        if self.mode == "anisotropic" and (
+            not hasattr(self, "h_tensor")
+            or not hasattr(self, "h_eigvals")
+            or not hasattr(self, "h_eigvecs")
+        ):
+            raise AttributeError(
+                "Smoothing tensors have not been computed for anisotropic mode. Please call 'compute_smoothing_lengths' first."
+            )
+
     def compute_smoothing_lengths(
         self, query_positions: npt.ArrayLike | None = None
     ) -> None:
@@ -207,20 +222,6 @@ class PointCloud:
                 raise IndexError(
                     f"Neighbor index {max_idx} is out of bounds for {self.pos.shape[0]} particles. This indicates a bug in the neighbor search or input setup."
                 )
-
-    def _check_smoothing_computed(self):
-        if self.mode in ["adaptive", "isotropic"] and not hasattr(self, "hsm"):
-            raise AttributeError(
-                f"Smoothing lengths have not been computed for mode '{self.mode}'. Please call 'compute_smoothing_lengths' first."
-            )
-        if self.mode == "anisotropic" and (
-            not hasattr(self, "h_tensor")
-            or not hasattr(self, "h_eigvals")
-            or not hasattr(self, "h_eigvecs")
-        ):
-            raise AttributeError(
-                "Smoothing tensors have not been computed for anisotropic mode. Please call 'compute_smoothing_lengths' first."
-            )
 
     def compute_density(self) -> None:
         """Compute particle densities using SPH kernels.
@@ -308,15 +309,16 @@ class PointCloud:
                 print("Particle density has not been computed yet, computing now")
             self.compute_density()
 
-        return self._interpolate_fields(
-            self.tree,
-            self.pos,
-            self.weight,
-            self.density,
-            fields,
-            self.kernel,
+        return _interpolate_fields(
+            tree=self.tree,
+            positions=self.pos,
+            weights=self.weight,
+            density=self.density,
+            fields=fields,
+            kernel=self.kernel,
             num_neighbors=self.num_neighbors,
             query_positions=query_positions,
+            boxsize=self.boxsize,
             mode=self.mode,
             compute_gradients=compute_gradients,
         )
@@ -337,88 +339,6 @@ class PointCloud:
 
         """
         return self.interpolate_fields(query_positions, compute_gradients=True)
-
-    def _interpolate_fields(
-        self,
-        tree: Any,
-        positions: npt.NDArray[np.floating],
-        weights: npt.NDArray[np.floating],
-        density: npt.NDArray[np.floating],
-        fields: npt.NDArray[np.floating],
-        kernel: Any,
-        num_neighbors: int,
-        query_positions: npt.ArrayLike,
-        mode: Literal["isotropic", "anisotropic"],
-        compute_gradients: bool = False,
-    ) -> npt.NDArray[np.floating]:
-        """Interpolate or compute gradients of particle fields at query positions.
-
-        Internal helper for SPH field interpolation supporting both isotropic and
-        anisotropic smoothing kernels.
-
-        Args:
-                tree: Spatial index structure (cKDTree) for nearest neighbor queries.
-                positions: Particle positions with shape (N, D).
-                weights: Particle weights (e.g. masses) with shape (N,).
-                density: Particle densities with shape (N,). Used for SPH weighting.
-                fields: Particle field values with shape (N, num_fields).
-                kernel: Kernel instance with evaluate_kernel() and evaluate_gradient() methods.
-                num_neighbors: Number of nearest neighbors to use for interpolation.
-                query_positions: Positions where fields are evaluated, shape (M, D).
-                mode: Smoothing mode - 'isotropic' uses scalar smoothing lengths,
-                        'anisotropic' uses smoothing tensors.
-                compute_gradients: If True, compute field gradients via kernel.evaluate_gradient().
-                        If False, compute field values via kernel.evaluate_kernel().
-
-        Returns:
-                - If compute_gradients=False: array of shape (M, num_fields) with interpolated field values.
-                - If compute_gradients=True: array of shape (M, num_fields, D) with interpolated gradients.
-
-        """
-        if mode == "isotropic":
-            # Compute smoothing lengths at query positions
-            hsm, nn_inds, nn_dists = compute_hsm(
-                tree,
-                num_neighbors=num_neighbors,
-                query_positions=query_positions,
-            )
-            if compute_gradients:
-                # For gradients, need relative coordinate vectors
-                rel_coords = coordinate_difference_with_pbc(
-                    positions[nn_inds],
-                    query_positions[:, np.newaxis, :],
-                    self.boxsize,
-                )
-                kernel_kwargs = {"r_ij_vec": rel_coords, "smoothing_lengths": hsm}
-            else:
-                kernel_kwargs = {"r_ij": nn_dists, "smoothing_lengths": hsm}
-
-        elif mode == "anisotropic":
-            # Compute smoothing tensors at query positions
-            h_tensor, _, _, nn_inds, _, rel_coords = compute_hsm_tensor(
-                tree,
-                weights=weights,
-                num_neighbors=num_neighbors,
-                query_positions=query_positions,
-            )
-            kernel_key = "r_ij_vec" if compute_gradients else "r_ij"
-            kernel_kwargs = {kernel_key: rel_coords, "smoothing_tensors": h_tensor}
-
-        else:
-            raise ValueError(f"Unsupported interpolation mode '{mode}'")
-
-        # Unified weight computation and kernel evaluation
-        weights = weights[nn_inds] / (density[nn_inds] + 1e-8)
-        fields_ = fields[nn_inds]
-
-        if compute_gradients:
-            w = kernel.evaluate_gradient(**kernel_kwargs)
-            result = np.einsum("mkf,mkd,mk->mfd", fields_, w, weights)
-        else:
-            w = kernel.evaluate_kernel(**kernel_kwargs)
-            result = np.einsum("mkf,mk,mk->mf", fields_, w, weights)
-
-        return result
 
     def deposit_to_grid(
         self,
@@ -621,7 +541,7 @@ class PointCloud:
             else:
                 print("[smudgy] OpenMP disabled for this deposition call")
 
-        res = self._deposit_to_grid(
+        res = _deposit_to_grid(
             positions=pos_temp,
             quantities=fields_temp,
             smoothing_lengths=hsm_temp,
@@ -639,137 +559,6 @@ class PointCloud:
             min_kernel_evaluations=min_kernel_evaluations,
             use_openmp=use_openmp,
             omp_threads=omp_threads_value,
+            verbose=self.verbose,
         )
         return res
-
-    def _deposit_to_grid(
-        self,
-        positions: npt.NDArray[np.floating],
-        quantities: npt.NDArray[np.floating],
-        smoothing_lengths: npt.NDArray[np.floating] | None,
-        smoothing_tensor_eigvecs: npt.NDArray[np.floating] | None,
-        smoothing_tensor_eigvals: npt.NDArray[np.floating] | None,
-        averaged: Sequence[bool],
-        gridnums: npt.NDArray[np.int32],
-        boxsizes: npt.NDArray[np.floating],
-        periodic: bool,
-        *,
-        method: str,
-        return_weights: bool,
-        use_python: bool,
-        kernel: str,
-        integration: str,
-        min_kernel_evaluations: int,
-        use_openmp: bool,
-        omp_threads: int | None,
-    ) -> (
-        npt.NDArray[np.floating]
-        | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
-    ):
-        """Dispatch particle-to-grid deposition to the selected backend.
-
-        Internal helper that routes deposition to Python or C++ backend based on
-        method and user preferences.
-
-        Args:
-                positions: Particle coordinates with shape (N, dim), shifted to domain origin.
-                quantities: Fields to deposit with shape (N, num_fields).
-                averaged: Flags indicating which fields should be normalized by weights.
-                gridnums: Number of grid cells per dimension, shape (dim,).
-                boxsizes: Domain extents (max - min) for each axis, shape (dim,).
-                periodic: Per-axis periodicity flags, shape (dim,).
-                method: Name of the deposition method (e.g., "ngp", "cic", "tsc", "isotropic").
-                smoothing_lengths: Smoothing lengths for isotropic/adaptive methods, shape (N,) or None.
-                smoothing_tensor_eigvecs: Smoothing tensor eigenvectors for anisotropic method, shape (N, D, D) or None.
-                smoothing_tensor_eigvals: Smoothing tensor eigenvalues for anisotropic method, shape (N, D) or None.
-                return_weights: Whether to return accumulated weights alongside deposited fields.
-                use_python: Use Python backend instead of compiled C++ backend.
-                kernel: SPH kernel name for SPH-based methods.
-                integration: Quadrature rule name for kernel integration.
-                min_kernel_evaluations: Minimum number of kernel samples for SPH methods.
-                use_openmp: Enable OpenMP parallelism in C++ backend.
-                omp_threads: Number of OpenMP threads (0 = runtime default).
-
-        Returns:
-                - If return_weights=False: array of shape (gridnums..., num_fields) with deposited fields.
-                - If return_weights=True: tuple of (deposited_fields, weight_grid) arrays.
-
-        Raises:
-                AttributeError: If requested deposition function not found in backend module.
-
-        """
-        dim = positions.shape[-1]
-
-        # select the deposition function based on the method, dim and use_python
-        if use_python and (
-            "adaptive" in method or method in ["isotropic", "anisotropic"]
-        ):
-            raise NotImplementedError(
-                "Python backend does not implement adaptive or SPH deposition methods. "
-                "Set use_python=False to use the C++ backend."
-            )
-        func = getattr(backend, f"{method}_{dim}d")
-
-        if self.verbose:
-            print(f"Using deposition function: {func.__name__}")
-
-        if "adaptive" in method:
-            args = (
-                positions,
-                quantities,
-                smoothing_lengths,
-                boxsizes,
-                gridnums,
-                periodic,
-            )
-
-        elif "isotropic" == method:
-            args = (
-                positions,
-                quantities,
-                smoothing_lengths,
-                boxsizes,
-                gridnums,
-                periodic,
-                kernel,
-                integration,
-                min_kernel_evaluations,
-            )
-
-        elif "anisotropic" == method:
-            args = (
-                positions,
-                quantities,
-                smoothing_tensor_eigvecs,
-                smoothing_tensor_eigvals,
-                boxsizes,
-                gridnums,
-                periodic,
-                kernel,
-                integration,
-                min_kernel_evaluations,
-            )
-
-        else:
-            args = (
-                positions,
-                quantities,
-                boxsizes,
-                gridnums,
-                periodic,
-            )
-
-        threads_arg = 0 if omp_threads is None else int(omp_threads)
-        fields, weights = func(
-            *args, use_python=use_python, use_openmp=use_openmp, omp_threads=threads_arg
-        )
-
-        # divide averaged fields by weight
-        for i in range(len(averaged)):
-            if averaged[i]:
-                fields[..., i] /= weights + 1e-10
-
-        if return_weights:
-            return fields, weights
-        else:
-            return fields
