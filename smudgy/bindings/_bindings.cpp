@@ -12,8 +12,8 @@
 
 namespace py = pybind11;
 
-// Example: wrapper for ngp_2d
-py::tuple _ngp_2d_cpp(py::array_t<float> pos,
+
+py::tuple _ngp_2d_cpp(py::array_t<float> positions,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -23,38 +23,37 @@ py::tuple _ngp_2d_cpp(py::array_t<float> pos,
                 )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
-    
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
 
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    ngp_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr,
-               periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    ngp_2d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
+               periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _ngp_3d_cpp(py::array_t<float> pos,
+py::tuple _ngp_3d_cpp(py::array_t<float> positions,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -64,39 +63,38 @@ py::tuple _ngp_3d_cpp(py::array_t<float> pos,
                 )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    ngp_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr,
-               periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    ngp_3d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
+               periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _cic_2d_cpp(py::array_t<float> pos,
+py::tuple _cic_2d_cpp(py::array_t<float> positions,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -106,39 +104,38 @@ py::tuple _cic_2d_cpp(py::array_t<float> pos,
                 )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
 
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    cic_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, 
-        periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    cic_2d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
+        periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _cic_3d_cpp(py::array_t<float> pos,
+py::tuple _cic_3d_cpp(py::array_t<float> positions,
                     py::array_t<float> quantities,
                     py::array_t<float> boxsizes,
                     py::array_t<int> gridnums,
@@ -148,305 +145,347 @@ py::tuple _cic_3d_cpp(py::array_t<float> pos,
                 )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
 
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    cic_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, 
-        periodic, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    cic_3d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer, 
+        periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
 
-py::tuple _cic_2d_adaptive_cpp(py::array_t<float> pos,
+py::tuple _cic_2d_adaptive_cpp(py::array_t<float> positions,
                      py::array_t<float> quantities,
+                     py::array_t<float> smoothing_lengths,
                      py::array_t<float> boxsizes,
                      py::array_t<int> gridnums,
                      bool periodic,
-                     py::array_t<float> pcellsizesHalf,
                      bool use_openmp, 
                      int omp_threads
                     )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto pcs_buf = pcellsizesHalf.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* pcs_ptr = static_cast<float*>(pcs_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    cic_2d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
-                        pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    cic_2d_adaptive_cpp(positions_pointer, 
+                        quantities_pointer, 
+                        smoothing_lengths_pointer, 
+                        num_particles, 
+                        num_fields, 
+                        boxsizes_pointer, 
+                        gridnums_pointer, 
+                        periodic,
+                        use_openmp, 
+                        omp_threads, 
+                        fields_pointer, 
+                        weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _cic_3d_adaptive_cpp(py::array_t<float> pos,
+py::tuple _cic_3d_adaptive_cpp(py::array_t<float> positions,
                      py::array_t<float> quantities,
+                     py::array_t<float> smoothing_lengths,
                      py::array_t<float> boxsizes,
                      py::array_t<int> gridnums,
                      bool periodic,
-                     py::array_t<float> pcellsizesHalf,
                      bool use_openmp, 
                      int omp_threads
                     )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto pcs_buf = pcellsizesHalf.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* pcs_ptr = static_cast<float*>(pcs_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    cic_3d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
-                        pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    cic_3d_adaptive_cpp(positions_pointer, 
+                        quantities_pointer, 
+                        smoothing_lengths_pointer, 
+                        num_particles, 
+                        num_fields, 
+                        boxsizes_pointer, 
+                        gridnums_pointer, 
+                        periodic,
+                        use_openmp, 
+                        omp_threads, 
+                        fields_pointer, 
+                        weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _tsc_2d_cpp(py::array_t<float> pos,
+py::tuple _tsc_2d_cpp(py::array_t<float> positions,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
              bool periodic,
-            bool use_openmp, int omp_threads)
+            bool use_openmp, 
+            int omp_threads)
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    tsc_2d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
-               use_openmp, omp_threads, fields_ptr, weights_ptr);
+    tsc_2d_cpp(positions_pointer, 
+               quantities_pointer, 
+               num_particles, 
+               num_fields, 
+               boxsizes_pointer, 
+               gridnums_pointer, 
+               periodic,
+               use_openmp, 
+               omp_threads, 
+               fields_pointer, 
+               weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _tsc_3d_cpp(py::array_t<float> pos,
+py::tuple _tsc_3d_cpp(py::array_t<float> positions,
              py::array_t<float> quantities,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
              bool periodic,
-            bool use_openmp, int omp_threads)
+            bool use_openmp, 
+            int omp_threads)
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
-
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    tsc_3d_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
-               use_openmp, omp_threads, fields_ptr, weights_ptr);
+    tsc_3d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer, periodic,
+               use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> pos,
+py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> positions,
              py::array_t<float> quantities,
+             py::array_t<float> smoothing_lengths,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
              bool periodic,
-             py::array_t<float> pcellsizesHalf,
-            bool use_openmp, int omp_threads)
+            bool use_openmp, 
+            int omp_threads)
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto pcs_buf = pcellsizesHalf.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
-
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* pcs_ptr = static_cast<float*>(pcs_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    tsc_2d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
-                        pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    tsc_2d_adaptive_cpp(positions_pointer, 
+                        quantities_pointer, 
+                        smoothing_lengths_pointer, 
+                        num_particles, 
+                        num_fields, 
+                        boxsizes_pointer, 
+                        gridnums_pointer, 
+                        periodic,
+                        use_openmp, 
+                        omp_threads, 
+                        fields_pointer, 
+                        weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
-py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> pos,
+py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> positions,
              py::array_t<float> quantities,
+             py::array_t<float> smoothing_lengths,
              py::array_t<float> boxsizes,
              py::array_t<int> gridnums,
              bool periodic,
-             py::array_t<float> pcellsizesHalf,
              bool use_openmp, 
              int omp_threads
             )
 {
     // Request buffer info
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto pcs_buf = pcellsizesHalf.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
-
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* pcs_ptr = static_cast<float*>(pcs_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     // Call backend function (direct loop)
-    tsc_3d_adaptive_cpp(pos_ptr, q_ptr, N, num_fields, boxsizes_ptr, grid_ptr, periodic,
-                        pcs_ptr, use_openmp, omp_threads, fields_ptr, weights_ptr);
+    tsc_3d_adaptive_cpp(positions_pointer, 
+                        quantities_pointer, 
+                        smoothing_lengths_pointer, 
+                        num_particles, 
+                        num_fields, 
+                        boxsizes_pointer, 
+                        gridnums_pointer, 
+                        periodic,
+                        use_openmp, 
+                        omp_threads, 
+                        fields_pointer, 
+                        weights_pointer);
 
     // Return numpy arrays
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
 py::tuple _isotropic_2d_cpp(
-    py::array_t<float> pos,
+    py::array_t<float> positions,
     py::array_t<float> quantities,
+    py::array_t<float> smoothing_lengths,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    py::array_t<float> hsm,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
@@ -454,230 +493,230 @@ py::tuple _isotropic_2d_cpp(
     int omp_threads
 )
 {
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto hsm_buf = hsm.request();
-    auto grid_buf = gridnums.request();
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
 
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* hsm_ptr = static_cast<float*>(hsm_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     isotropic_kernel_deposition_2d_cpp(
-        pos_ptr,
-        q_ptr,
-        hsm_ptr,
-        N,
+        positions_pointer,
+        quantities_pointer,
+        smoothing_lengths_pointer,
+        num_particles,
         num_fields,
-        boxsizes_ptr,
-        grid_ptr,
+        boxsizes_pointer,
+        gridnums_pointer,
         periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
         use_openmp,
         omp_threads,
-        fields_ptr,
-        weights_ptr
+        fields_pointer,
+        weights_pointer
     );
 
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
 py::tuple _isotropic_3d_cpp(
-    py::array_t<float> pos,
+    py::array_t<float> positions,
     py::array_t<float> quantities,
+    py::array_t<float> smoothing_lengths,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    py::array_t<float> hsm,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
     bool use_openmp, int omp_threads)
 {
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto hsm_buf = hsm.request();
-    auto grid_buf = gridnums.request();
-    
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* hsm_ptr = static_cast<float*>(hsm_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     isotropic_kernel_deposition_3d_cpp(
-        pos_ptr,
-        q_ptr,
-        hsm_ptr,
-        N,
+        positions_pointer,
+        quantities_pointer,
+        smoothing_lengths_pointer,
+        num_particles,
         num_fields,
-        boxsizes_ptr,
-        grid_ptr,
+        boxsizes_pointer,
+        gridnums_pointer,
         periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
         use_openmp,
         omp_threads,
-        fields_ptr,
-        weights_ptr
+        fields_pointer,
+        weights_pointer
     );
 
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
 py::tuple _anisotropic_2d_cpp(
-    py::array_t<float> pos,
+    py::array_t<float> positions,
     py::array_t<float> quantities,
+    py::array_t<float> smoothing_tensor_eigvecs,
+    py::array_t<float> smoothing_tensor_eigvals,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    py::array_t<float> hmat_eigvecs,
-    py::array_t<float> hmat_eigvals,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
     bool use_openmp, int omp_threads)
 {
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto vec_buf = hmat_eigvecs.request();
-    auto val_buf = hmat_eigvals.request();
-    auto grid_buf = gridnums.request();
-    
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* vec_ptr = static_cast<float*>(vec_buf.ptr);
-    float* val_ptr = static_cast<float*>(val_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_tensor_eigvecs_buffer = smoothing_tensor_eigvecs.request();
+    auto smoothing_tensor_eigvals_buffer = smoothing_tensor_eigvals.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
+
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_tensor_eigvecs_pointer = static_cast<float*>(smoothing_tensor_eigvecs_buffer.ptr);
+    float* smoothing_tensor_eigvals_pointer = static_cast<float*>(smoothing_tensor_eigvals_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     anisotropic_kernel_deposition_2d_cpp(
-        pos_ptr,
-        q_ptr,
-        vec_ptr,
-        val_ptr,
-        N,
+        positions_pointer,
+        quantities_pointer,
+        smoothing_tensor_eigvecs_pointer,
+        smoothing_tensor_eigvals_pointer,
+        num_particles,
         num_fields,
-        boxsizes_ptr,
-        grid_ptr,
+        boxsizes_pointer,
+        gridnums_pointer,
         periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
         use_openmp,
         omp_threads,
-        fields_ptr,
-        weights_ptr
+        fields_pointer,
+        weights_pointer
     );
 
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
 py::tuple _anisotropic_3d_cpp(
-    py::array_t<float> pos,
+    py::array_t<float> positions,
     py::array_t<float> quantities,
+    py::array_t<float> smoothing_tensor_eigvecs,
+    py::array_t<float> smoothing_tensor_eigvals,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    py::array_t<float> hmat_eigvecs,
-    py::array_t<float> hmat_eigvals,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
     bool use_openmp, int omp_threads)
 {
-    auto pos_buf = pos.request();
-    auto q_buf = quantities.request();
-    auto box_buf = boxsizes.request();
-    auto vec_buf = hmat_eigvecs.request();
-    auto val_buf = hmat_eigvals.request();
-    auto grid_buf = gridnums.request();
-    
-    float* pos_ptr = static_cast<float*>(pos_buf.ptr);
-    float* q_ptr   = static_cast<float*>(q_buf.ptr);
-    float* vec_ptr = static_cast<float*>(vec_buf.ptr);
-    float* val_ptr = static_cast<float*>(val_buf.ptr);
-    float* boxsizes_ptr = static_cast<float*>(box_buf.ptr);
-    const int* grid_ptr = static_cast<int*>(grid_buf.ptr);
+    auto positions_buffer = positions.request();
+    auto quantities_buffer = quantities.request();
+    auto boxsizes_buffer = boxsizes.request();
+    auto smoothing_tensor_eigvecs_buffer = smoothing_tensor_eigvecs.request();
+    auto smoothing_tensor_eigvals_buffer = smoothing_tensor_eigvals.request();
+    auto gridnums_buffer = gridnums.request();
+    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
-    int N = pos_buf.shape[0];
-    int num_fields = q_buf.shape[1];
-    int gridnum_x = grid_ptr[0];
-    int gridnum_y = grid_ptr[1];
-    int gridnum_z = grid_ptr[2];
+    int num_particles = positions_buffer.shape[0];
+    int num_fields = quantities_buffer.shape[1];
+    int gridnum_x = gridnums_pointer[0];
+    int gridnum_y = gridnums_pointer[1];
+    int gridnum_z = gridnums_pointer[2];
 
-    py::array_t<float> fields_arr({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights_arr({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_ptr = fields_arr.mutable_data();
-    float* weights_ptr = weights_arr.mutable_data();
-    std::fill_n(fields_ptr, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_ptr, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
+    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
+    float* fields_pointer = fields.mutable_data();
+    float* weights_pointer = weights.mutable_data();
+    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
+    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
+
+    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
+    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
+    float* smoothing_tensor_eigvecs_pointer = static_cast<float*>(smoothing_tensor_eigvecs_buffer.ptr);
+    float* smoothing_tensor_eigvals_pointer = static_cast<float*>(smoothing_tensor_eigvals_buffer.ptr);
+    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
 
     anisotropic_kernel_deposition_3d_cpp(
-        pos_ptr,
-        q_ptr,
-        vec_ptr,
-        val_ptr,
-        N,
+        positions_pointer,
+        quantities_pointer,
+        smoothing_tensor_eigvecs_pointer,
+        smoothing_tensor_eigvals_pointer,
+        num_particles,
         num_fields,
-        boxsizes_ptr,
-        grid_ptr,
+        boxsizes_pointer,
+        gridnums_pointer,
         periodic,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
         use_openmp,
         omp_threads,
-        fields_ptr,
-        weights_ptr
+        fields_pointer,
+        weights_pointer
     );
 
-    return py::make_tuple(fields_arr, weights_arr);
+    return py::make_tuple(fields, weights);
 }
 
 
@@ -707,7 +746,7 @@ Deposit particle quantities onto a 2D grid using NGP (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 2)
+positions : numpy.ndarray, shape (N, 2)
     Particle positions, where ``N`` is the number of particles.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
@@ -729,7 +768,7 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
         py::arg("gridnums"),
@@ -743,7 +782,7 @@ Deposit particle quantities onto a 3D grid using NGP (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 3)
+positions : numpy.ndarray, shape (N, 3)
     Particle positions, where ``N`` is the number of particles.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
@@ -765,7 +804,7 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
         py::arg("gridnums"),
@@ -779,7 +818,7 @@ Deposit particle quantities onto a 2D grid using CIC (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 2)
+positions : numpy.ndarray, shape (N, 2)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
@@ -801,7 +840,7 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
         py::arg("gridnums"),
@@ -815,7 +854,7 @@ Deposit particle quantities onto a 3D grid using CIC (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 3)
+positions : numpy.ndarray, shape (N, 3)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
@@ -837,7 +876,7 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
         py::arg("gridnums"),
@@ -851,18 +890,18 @@ Deposit particle quantities onto a 2D grid using adaptive CIC (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 2)
+positions : numpy.ndarray, shape (N, 2)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_lengths : numpy.ndarray, shape (N, 2)
+    Smoothing lengths per particle (adaptive support).
 boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-pcellsizesHalf : numpy.ndarray, shape (N, 2)
-    Half cell sizes per particle (adaptive support).
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -875,12 +914,12 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
+        py::arg("smoothing_lengths"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("pcellsizesHalf"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -890,18 +929,18 @@ Deposit particle quantities onto a 3D grid using adaptive CIC (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 3)
+positions : numpy.ndarray, shape (N, 3)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_lengths : numpy.ndarray, shape (N, 3)
+    Smoothing lengths per particle (adaptive support).
 boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-pcellsizesHalf : numpy.ndarray, shape (N, 3)
-    Half cell sizes per particle (adaptive support).
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -914,12 +953,12 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
+        py::arg("smoothing_lengths"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("pcellsizesHalf"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -951,7 +990,7 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
         py::arg("gridnums"),
@@ -987,7 +1026,7 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
         py::arg("gridnums"),
@@ -1005,14 +1044,14 @@ pos : numpy.ndarray, shape (N, 2)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_lengths : numpy.ndarray, shape (N, 2)
+    Smoothing lengths per particle (adaptive support).
 boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-pcellsizesHalf : numpy.ndarray, shape (N, 2)
-    Half cell sizes per particle (adaptive support).
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1025,12 +1064,12 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
+        py::arg("smoothing_lengths"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("pcellsizesHalf"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1040,18 +1079,18 @@ Deposit particle quantities onto a 3D grid using adaptive TSC (C++ backend).
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 3)
+positions : numpy.ndarray, shape (N, 3)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_lengths : numpy.ndarray, shape (N, 3)
+    Smoothing lengths per particle (adaptive support).
 boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-pcellsizesHalf : numpy.ndarray, shape (N, 3)
-    Half cell sizes per particle (adaptive support).
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1064,12 +1103,12 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"), 
+        py::arg("positions"), 
         py::arg("quantities"), 
+        py::arg("smoothing_lengths"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("pcellsizesHalf"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1079,18 +1118,18 @@ Deposit particle quantities onto a 2D grid using an isotropic SPH kernel (C++ ba
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 2)
+positions : numpy.ndarray, shape (N, 2)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_lengths : numpy.ndarray, shape (N,)
+    Smoothing lengths per particle.
 boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-hsm : numpy.ndarray, shape (N,)
-    Smoothing lengths per particle.
 kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
@@ -1109,12 +1148,12 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"),
+        py::arg("positions"),
         py::arg("quantities"),
+        py::arg("smoothing_lengths"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("hsm"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
         py::arg("min_kernel_evaluations"),
@@ -1127,18 +1166,18 @@ Deposit particle quantities onto a 3D grid using an isotropic SPH kernel (C++ ba
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 3)
+positions : numpy.ndarray, shape (N, 3)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_lengths : numpy.ndarray, shape (N,)
+    Smoothing lengths per particle.
 boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-hsm : numpy.ndarray, shape (N,)
-    Smoothing lengths per particle.
 kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
@@ -1157,12 +1196,12 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"),
+        py::arg("positions"),
         py::arg("quantities"),
+        py::arg("smoothing_lengths"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("hsm"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
         py::arg("min_kernel_evaluations"),
@@ -1175,20 +1214,20 @@ Deposit particle quantities onto a 2D grid using an anisotropic SPH kernel (C++ 
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 2)
+positions : numpy.ndarray, shape (N, 2)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 2, 2)
+    Eigenvectors of the smoothing tensor per particle.
+smoothing_tensor_eigvals : numpy.ndarray, shape (N, 2)
+    Eigenvalues of the smoothing tensor per particle.
 boxsizes : array_like, shape (2,)
     Domain size per axis.
 gridnums : array_like, shape (2,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-hmat_eigvecs : numpy.ndarray, shape (N, 2, 2)
-    Eigenvectors of the smoothing tensor per particle.
-hmat_eigvals : numpy.ndarray, shape (N, 2)
-    Eigenvalues of the smoothing tensor per particle.
 kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
@@ -1207,13 +1246,13 @@ fields : numpy.ndarray, shape (Gx, Gy, F)
 weights : numpy.ndarray, shape (Gx, Gy)
     Weight sum per cell.
 )doc",
-        py::arg("pos"),
+        py::arg("positions"),
         py::arg("quantities"),
+        py::arg("smoothing_tensor_eigvecs"),
+        py::arg("smoothing_tensor_eigvals"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("hmat_eigvecs"),
-        py::arg("hmat_eigvals"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
         py::arg("min_kernel_evaluations"),
@@ -1226,20 +1265,20 @@ Deposit particle quantities onto a 3D grid using an anisotropic SPH kernel (C++ 
 
 Parameters
 ----------
-pos : numpy.ndarray, shape (N, 3)
+positions : numpy.ndarray, shape (N, 3)
     Particle positions.
 quantities : numpy.ndarray, shape (N, F)
     Per-particle fields to deposit.
+smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 3, 3)
+    Eigenvectors of the smoothing tensor per particle.
+smoothing_tensor_eigvals : numpy.ndarray, shape (N, 3)
+    Eigenvalues of the smoothing tensor per particle.
 boxsizes : array_like, shape (3,)
     Domain size per axis.
 gridnums : array_like, shape (3,)
     Number of grid cells per axis.
 periodic : bool
     Periodic boundaries.
-hmat_eigvecs : numpy.ndarray, shape (N, 3, 3)
-    Eigenvectors of the smoothing tensor per particle.
-hmat_eigvals : numpy.ndarray, shape (N, 3)
-    Eigenvalues of the smoothing tensor per particle.
 kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
@@ -1258,13 +1297,13 @@ fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
 weights : numpy.ndarray, shape (Gx, Gy, Gz)
     Weight sum per cell.
 )doc",
-        py::arg("pos"),
+        py::arg("positions"),
         py::arg("quantities"),
+        py::arg("smoothing_tensor_eigvecs"),
+        py::arg("smoothing_tensor_eigvals"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("hmat_eigvecs"),
-        py::arg("hmat_eigvals"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
         py::arg("min_kernel_evaluations"),

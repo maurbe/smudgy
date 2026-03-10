@@ -1,1 +1,1 @@
-"""Internal backend modules for sph_lib."""
+"""Internal backend modules for smudgy."""

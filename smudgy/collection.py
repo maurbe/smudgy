@@ -180,9 +180,6 @@ def ngp_3d(
     )
 
 
-# CIC
-
-
 def cic_2d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
@@ -296,10 +293,10 @@ def cic_3d(
 def cic_adaptive_2d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    pcellsizesHalf: npt.ArrayLike,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -313,14 +310,14 @@ def cic_adaptive_2d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
     boxsizes : array_like, shape (2,)
         Domain size per axis.
     gridnums : array_like, shape (2,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    pcellsizesHalf : numpy.ndarray, shape (N, 2)
-        Half cell sizes per particle (adaptive support).
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -343,10 +340,10 @@ def cic_adaptive_2d(
         use_python,
         positions,
         quantities,
+        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
-        pcellsizesHalf,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
@@ -355,10 +352,10 @@ def cic_adaptive_2d(
 def cic_adaptive_3d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    pcellsizesHalf: npt.ArrayLike,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -372,14 +369,14 @@ def cic_adaptive_3d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
     boxsizes : array_like, shape (3,)
         Domain size per axis.
     gridnums : array_like, shape (3,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    pcellsizesHalf : numpy.ndarray, shape (N, 3)
-        Half cell sizes per particle (adaptive support).
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -402,16 +399,13 @@ def cic_adaptive_3d(
         use_python,
         positions,
         quantities,
+        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
-        pcellsizesHalf,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
-
-
-# TSC
 
 
 def tsc_2d(
@@ -527,10 +521,10 @@ def tsc_3d(
 def tsc_adaptive_2d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    pcellsizesHalf: npt.ArrayLike,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -544,14 +538,14 @@ def tsc_adaptive_2d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
     boxsizes : array_like, shape (2,)
         Domain size per axis.
     gridnums : array_like, shape (2,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    pcellsizesHalf : numpy.ndarray, shape (N, 2)
-        Half cell sizes per particle (adaptive support).
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -574,10 +568,10 @@ def tsc_adaptive_2d(
         use_python,
         positions,
         quantities,
+        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
-        pcellsizesHalf,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
@@ -586,10 +580,10 @@ def tsc_adaptive_2d(
 def tsc_adaptive_3d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    pcellsizesHalf: npt.ArrayLike,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -603,14 +597,14 @@ def tsc_adaptive_3d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle (adaptive support).
     boxsizes : array_like, shape (3,)
         Domain size per axis.
     gridnums : array_like, shape (3,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    pcellsizesHalf : numpy.ndarray, shape (N, 3)
-        Half cell sizes per particle (adaptive support).
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -633,25 +627,22 @@ def tsc_adaptive_3d(
         use_python,
         positions,
         quantities,
+        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
-        pcellsizesHalf,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
 
 
-# SPH kernels
-
-
 def isotropic_2d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    hsm: npt.ArrayLike,
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
@@ -668,14 +659,14 @@ def isotropic_2d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
     boxsizes : array_like, shape (2,)
         Domain size per axis.
     gridnums : array_like, shape (2,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    hsm : numpy.ndarray, shape (N,)
-        Smoothing lengths per particle.
     kernel_name : str
         Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
     integration_method : str
@@ -704,10 +695,10 @@ def isotropic_2d(
         use_python,
         positions,
         quantities,
+        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
-        hsm,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -719,10 +710,10 @@ def isotropic_2d(
 def isotropic_3d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    hsm: npt.ArrayLike,
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
@@ -739,14 +730,14 @@ def isotropic_3d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
     boxsizes : array_like, shape (3,)
         Domain size per axis.
     gridnums : array_like, shape (3,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    hsm : numpy.ndarray, shape (N,)
-        Smoothing lengths per particle.
     kernel_name : str
         Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
     integration_method : str
@@ -775,10 +766,10 @@ def isotropic_3d(
         use_python,
         positions,
         quantities,
+        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
-        hsm,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -790,11 +781,11 @@ def isotropic_3d(
 def anisotropic_2d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_tensor_eigvecs: npt.ArrayLike,
+    smoothing_tensor_eigvals: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    hmat_eigvecs: npt.ArrayLike,
-    hmat_eigvals: npt.ArrayLike,
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
@@ -811,16 +802,16 @@ def anisotropic_2d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 2, 2)
+        Eigenvectors of the smoothing tensor per particle.
+    smoothing_tensor_eigvals : numpy.ndarray, shape (N, 2)
+        Eigenvalues of the smoothing tensor per particle.
     boxsizes : array_like, shape (2,)
         Domain size per axis.
     gridnums : array_like, shape (2,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    hmat_eigvecs : numpy.ndarray, shape (N, 2, 2)
-        Eigenvectors of the smoothing tensor per particle.
-    hmat_eigvals : numpy.ndarray, shape (N, 2)
-        Eigenvalues of the smoothing tensor per particle.
     kernel_name : str
         Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
     integration_method : str
@@ -849,11 +840,11 @@ def anisotropic_2d(
         use_python,
         positions,
         quantities,
+        smoothing_tensor_eigvecs,
+        smoothing_tensor_eigvals,
         boxsizes,
         gridnums,
         periodic,
-        hmat_eigvecs,
-        hmat_eigvals,
         kernel_name,
         integration_method,
         min_kernel_evaluations,
@@ -865,11 +856,11 @@ def anisotropic_2d(
 def anisotropic_3d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
+    smoothing_tensor_eigvecs: npt.ArrayLike,
+    smoothing_tensor_eigvals: npt.ArrayLike,
     boxsizes: Sequence[float],
     gridnums: Sequence[int],
     periodic: bool,
-    hmat_eigvecs: npt.ArrayLike,
-    hmat_eigvals: npt.ArrayLike,
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
@@ -886,16 +877,16 @@ def anisotropic_3d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
+    smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 3, 3)
+        Eigenvectors of the smoothing tensor per particle.
+    smoothing_tensor_eigvals : numpy.ndarray, shape (N, 3)
+        Eigenvalues of the smoothing tensor per particle.
     boxsizes : array_like, shape (3,)
         Domain size per axis.
     gridnums : array_like, shape (3,)
         Number of grid cells per axis.
     periodic : bool
         Global periodic boundaries.
-    hmat_eigvecs : numpy.ndarray, shape (N, 3, 3)
-        Eigenvectors of the smoothing tensor per particle.
-    hmat_eigvals : numpy.ndarray, shape (N, 3)
-        Eigenvalues of the smoothing tensor per particle.
     kernel_name : str
         Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
     integration_method : str
@@ -924,11 +915,11 @@ def anisotropic_3d(
         use_python,
         positions,
         quantities,
+        smoothing_tensor_eigvecs,
+        smoothing_tensor_eigvals,
         boxsizes,
         gridnums,
         periodic,
-        hmat_eigvecs,
-        hmat_eigvals,
         kernel_name,
         integration_method,
         min_kernel_evaluations,

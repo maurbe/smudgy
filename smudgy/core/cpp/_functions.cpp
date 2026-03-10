@@ -131,9 +131,9 @@ inline void accumulate_weight(float* weights, int idx, float value, bool paralle
 // =============================================================================
 
 void ngp_2d_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    int N,                      
+    const float* positions,     // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    int num_particles,                      
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
@@ -160,11 +160,11 @@ void ngp_2d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute cell index of mother cell
-        int ix = static_cast<int>(pos[2 * n + 0] * inv_cell_size_x);
-        int iy = static_cast<int>(pos[2 * n + 1] * inv_cell_size_y);
+        int ix = static_cast<int>(positions[2 * n + 0] * inv_cell_size_x);
+        int iy = static_cast<int>(positions[2 * n + 1] * inv_cell_size_y);
 
         // early-out if particle lies outside the grid domain
         if (is_outside_domain(ix, gridnum_x)) return;
@@ -181,9 +181,9 @@ void ngp_2d_cpp(
 
 
 void ngp_3d_cpp(
-    const float* pos,           // (N, 3)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,     // (num_particles, 3)
+    const float* quantities,    // (num_particles, num_fields)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
@@ -213,12 +213,12 @@ void ngp_3d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute cell index of mother cell
-        int ix = static_cast<int>(pos[3 * n + 0] * inv_cell_size_x);
-        int iy = static_cast<int>(pos[3 * n + 1] * inv_cell_size_y);
-        int iz = static_cast<int>(pos[3 * n + 2] * inv_cell_size_z);
+        int ix = static_cast<int>(positions[3 * n + 0] * inv_cell_size_x);
+        int iy = static_cast<int>(positions[3 * n + 1] * inv_cell_size_y);
+        int iz = static_cast<int>(positions[3 * n + 2] * inv_cell_size_z);
 
         // early-out if particle lies outside the grid domain
         if (is_outside_domain(ix, gridnum_x)) return;
@@ -236,9 +236,9 @@ void ngp_3d_cpp(
 
 
 void cic_2d_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,     // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
@@ -265,11 +265,11 @@ void cic_2d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // identify indices of the 4 surrounding grid cells
-        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
+        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
         int i0 = static_cast<int>(std::floor(x_cell));
         int j0 = static_cast<int>(std::floor(y_cell));
         int i1 = i0 + 1;
@@ -318,9 +318,9 @@ void cic_2d_cpp(
 
 
 void cic_3d_cpp(
-    const float* pos,           // (N, 3)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,     // (num_particles, 3)
+    const float* quantities,    // (num_particles, num_fields)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
@@ -350,12 +350,12 @@ void cic_3d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // identify indices of the 8 surrounding grid cells
-        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
-        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
+        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
+        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
         int i0 = static_cast<int>(std::floor(x_cell));
         int j0 = static_cast<int>(std::floor(y_cell));
         int k0 = static_cast<int>(std::floor(z_cell));
@@ -419,14 +419,14 @@ void cic_3d_cpp(
 
 
 void cic_2d_adaptive_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,      // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    const float* smoothing_lengths,// (num_particles)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
     bool periodic,              // (2,)
-    const float* pcellsizesHalf,// (N)
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, num_fields)
@@ -450,16 +450,16 @@ void cic_2d_adaptive_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute half cell sizes in grid units and particle volume
-        float pcs_x = pcellsizesHalf[n] * inv_cell_size_x;
-        float pcs_y = pcellsizesHalf[n] * inv_cell_size_y;
+        float pcs_x = smoothing_lengths[n] * inv_cell_size_x;
+        float pcs_y = smoothing_lengths[n] * inv_cell_size_y;
         float V = (2.0f * pcs_x) * (2.0f * pcs_y);
 
         // compute mother cell index and bounding box
-        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
+        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
         float c1 = x_cell - pcs_x, c2 = x_cell + pcs_x;
         float c3 = y_cell - pcs_y, c4 = y_cell + pcs_y;
 
@@ -512,14 +512,14 @@ void cic_2d_adaptive_cpp(
 }
 
 void cic_3d_adaptive_cpp(
-    const float* pos,         // (N,3)
-    const float* quantities,  // (N,num_fields)
-    int N,
+    const float* positions,         // (num_particles,3)
+    const float* quantities,  // (num_particles,num_fields)
+    const float* smoothing_lengths, // (num_particles)
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
     bool periodic,
-    const float* pcellsizesHalf, // (N)
     bool use_openmp,
     int omp_threads,
     float* fields,            // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -548,18 +548,18 @@ void cic_3d_adaptive_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute half cell sizes in grid units and particle volume
-        float h_x = pcellsizesHalf[n] * inv_cell_size_x;
-        float h_y = pcellsizesHalf[n] * inv_cell_size_y;
-        float h_z = pcellsizesHalf[n] * inv_cell_size_z;
+        float h_x = smoothing_lengths[n] * inv_cell_size_x;
+        float h_y = smoothing_lengths[n] * inv_cell_size_y;
+        float h_z = smoothing_lengths[n] * inv_cell_size_z;
         float V = (2.0f * h_x) * (2.0f * h_y) * (2.0f * h_z);
 
         // compute mother cell index and bounding box
-        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
-        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
+        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
+        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
         float c1 = x_cell - h_x, c2 = x_cell + h_x;
         float c3 = y_cell - h_y, c4 = y_cell + h_y;
         float c5 = z_cell - h_z, c6 = z_cell + h_z;
@@ -640,9 +640,9 @@ inline std::array<float, 3> tsc_weights(float d) {
 
 // Triangular Shaped Cloud deposition in 2D
 void tsc_2d_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,     // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
@@ -672,11 +672,11 @@ void tsc_2d_cpp(
     const int offsets[3] = {-1, 0, 1};
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
+        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
         int i_base = static_cast<int>(std::floor(x_cell));
         int j_base = static_cast<int>(std::floor(y_cell));
 
@@ -719,9 +719,9 @@ void tsc_2d_cpp(
 }
 
 void tsc_3d_cpp(
-    const float* pos,           // (N, 3)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,           // (num_particles, 3)
+    const float* quantities,    // (num_particles, num_fields)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (3,) 
     const int* gridnums,        // (3,)
@@ -754,12 +754,12 @@ void tsc_3d_cpp(
     // Neighbor offsets
     const int offsets[3] = {-1, 0, 1};
 
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
-        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
+        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
+        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
 
         // compute base cell index (mother cell)
         int i_base = static_cast<int>(std::floor(x_cell));
@@ -839,14 +839,14 @@ inline float tsc_integrated_weight_1d(float x_center, float cell_left, float cel
 }
 
 void tsc_2d_adaptive_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    int N,
+    const float* positions,           // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    const float* smoothing_lengths,// (num_particles)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
     bool periodic,              
-    const float* pcellsizesHalf,// (N)
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, num_fields)
@@ -871,13 +871,13 @@ void tsc_2d_adaptive_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x_cell = pos[2 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[2 * n + 1] * inv_cell_size_y;
-        float h_x = pcellsizesHalf[n] * inv_cell_size_x;
-        float h_y = pcellsizesHalf[n] * inv_cell_size_y;
+        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
+        float h_x = smoothing_lengths[n] * inv_cell_size_x;
+        float h_y = smoothing_lengths[n] * inv_cell_size_y;
         float support_x = 1.5f * h_x;
         float support_y = 1.5f * h_y;
 
@@ -926,14 +926,14 @@ void tsc_2d_adaptive_cpp(
 }
 
 void tsc_3d_adaptive_cpp(
-    const float* pos,           // (N,3)
-    const float* quantities,    // (N,num_fields)
-    int N,
+    const float* positions,           // (num_particles,3)
+    const float* quantities,    // (num_particles,num_fields)
+    const float* smoothing_lengths,// (num_particles)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
     bool periodic,
-    const float* pcellsizesHalf,// (N)
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -962,15 +962,15 @@ void tsc_3d_adaptive_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // iterate over particles and accumulate to grid
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // compute normalized position in grid units
-        float x_cell = pos[3 * n + 0] * inv_cell_size_x;
-        float y_cell = pos[3 * n + 1] * inv_cell_size_y;
-        float z_cell = pos[3 * n + 2] * inv_cell_size_z;
-        float h_x = pcellsizesHalf[n] * inv_cell_size_x;
-        float h_y = pcellsizesHalf[n] * inv_cell_size_y;
-        float h_z = pcellsizesHalf[n] * inv_cell_size_z;
+        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
+        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
+        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
+        float h_x = smoothing_lengths[n] * inv_cell_size_x;
+        float h_y = smoothing_lengths[n] * inv_cell_size_y;
+        float h_z = smoothing_lengths[n] * inv_cell_size_z;
         float support_x = 1.5f * h_x;
         float support_y = 1.5f * h_y;
         float support_z = 1.5f * h_z;
@@ -1040,10 +1040,10 @@ void tsc_3d_adaptive_cpp(
 // =============================================================================
 
 void isotropic_kernel_deposition_2d_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    const float* hsm,           // (N)
-    int N,
+    const float* positions,           // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    const float* smoothing_lengths,           // (num_particles)
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
@@ -1086,15 +1086,15 @@ void isotropic_kernel_deposition_2d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // perform for loop over particles
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // gather relevant values for the current particle
-        float hsm_current = hsm[n];
+        float hsm_current = smoothing_lengths[n];
         float detH = hsm_current * hsm_current;
         
         // convert particle position to cell units
-        float x_pos = pos[2 * n + 0];
-        float y_pos = pos[2 * n + 1];
+        float x_pos = positions[2 * n + 0];
+        float y_pos = positions[2 * n + 1];
         float x_cell = x_pos / cellSize_x;
         float y_cell = y_pos / cellSize_y;
 
@@ -1195,21 +1195,21 @@ void isotropic_kernel_deposition_2d_cpp(
 // =============================================================================
 
 void isotropic_kernel_deposition_3d_cpp(
-    const float* pos,           // (N, 3)
-    const float* quantities,    // (N, num_fields)
-    const float* hsm,           // (N)
-    int N,
+    const float* positions,         // (num_particles, 3)
+    const float* quantities,        // (num_particles, num_fields)
+    const float* smoothing_lengths, // (num_particles)
+    int num_particles,
     int num_fields,
-    const float* boxsizes,      // (3,)
-    const int* gridnums,        // (3,)
+    const float* boxsizes,          // (3,)
+    const int* gridnums,            // (3,)
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     int min_kernel_evaluations,
     bool use_openmp,
     int omp_threads,
-    float* fields,             // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights             // (gridnum_x, gridnum_y, gridnum_z)
+    float* fields,                  // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights                  // (gridnum_x, gridnum_y, gridnum_z)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -1246,16 +1246,16 @@ void isotropic_kernel_deposition_3d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // perform for loop over particles
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // gather relevant values for the current particle
-        float hsm_current = hsm[n];
+        float hsm_current = smoothing_lengths[n];
         float detH = hsm_current * hsm_current * hsm_current;
 
         // convert particle position to cell units
-        float x_pos = pos[3 * n + 0];
-        float y_pos = pos[3 * n + 1];
-        float z_pos = pos[3 * n + 2];
+        float x_pos = positions[3 * n + 0];
+        float y_pos = positions[3 * n + 1];
+        float z_pos = positions[3 * n + 2];
         float x_cell = x_pos / cellSize_x;
         float y_cell = y_pos / cellSize_y;
         float z_cell = z_pos / cellSize_z;
@@ -1371,11 +1371,11 @@ void isotropic_kernel_deposition_3d_cpp(
 // =============================================================================
 
 void anisotropic_kernel_deposition_2d_cpp(
-    const float* pos,           // (N, 2)
-    const float* quantities,    // (N, num_fields)
-    const float* hmat_eigvecs,  // (N, 4) - stored as [v00, v10, v01, v11] for each particle
-    const float* hmat_eigvals,  // (N, 2) - stored as [lambda0, lambda1] for each particle
-    int N,
+    const float* positions,           // (num_particles, 2)
+    const float* quantities,    // (num_particles, num_fields)
+    const float* hmat_eigvecs,  // (num_particles, 4) - stored as [v00, v10, v01, v11] for each particle
+    const float* hmat_eigvals,  // (num_particles, 2) - stored as [lambda0, lambda1] for each particle
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (2,)
     const int* gridnums,        // (2,)
@@ -1418,7 +1418,7 @@ void anisotropic_kernel_deposition_2d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
     
     // perform for loop over particles
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
         
         // gather relevant values for the current particle
         const float* vecs = &hmat_eigvecs[n * 4];
@@ -1428,8 +1428,8 @@ void anisotropic_kernel_deposition_2d_cpp(
         float kernel_normalization = kernel_ptr->normalization(detH);
         
         // convert particle position to cell units
-        float x_pos = pos[2 * n + 0];
-        float y_pos = pos[2 * n + 1];
+        float x_pos = positions[2 * n + 0];
+        float y_pos = positions[2 * n + 1];
         float x_cell = x_pos / cellSize_x;
         float y_cell = y_pos / cellSize_y;
 
@@ -1538,11 +1538,11 @@ void anisotropic_kernel_deposition_2d_cpp(
 // =============================================================================
 
 void anisotropic_kernel_deposition_3d_cpp(
-    const float* pos,           // (N, 3)
-    const float* quantities,    // (N, num_fields)
-    const float* hmat_eigvecs,  // (N, 9) - column-major eigenvectors
-    const float* hmat_eigvals,  // (N, 3) - eigenvalues per particle
-    int N,
+    const float* positions,           // (num_particles, 3)
+    const float* quantities,    // (num_particles, num_fields)
+    const float* hmat_eigvecs,  // (num_particles, 9) - column-major eigenvectors
+    const float* hmat_eigvals,  // (num_particles, 3) - eigenvalues per particle
+    int num_particles,
     int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
@@ -1591,7 +1591,7 @@ void anisotropic_kernel_deposition_3d_cpp(
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // perform for loop over particles
-    for_each_particle(N, parallel, threads, [&](int n) {
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
         // gather relevant values for the current particle
         const float* vecs = &hmat_eigvecs[n * 9];
         const float* vals = &hmat_eigvals[n * 3];
@@ -1602,9 +1602,9 @@ void anisotropic_kernel_deposition_3d_cpp(
         float kernel_normalization = kernel_ptr->normalization(detH);
 
         // convert particle position to cell units
-        float x_pos = pos[3 * n + 0];
-        float y_pos = pos[3 * n + 1];
-        float z_pos = pos[3 * n + 2];
+        float x_pos = positions[3 * n + 0];
+        float y_pos = positions[3 * n + 1];
+        float z_pos = positions[3 * n + 2];
         float x_cell = x_pos / cellSize_x;
         float y_cell = y_pos / cellSize_y;
         float z_cell = z_pos / cellSize_z;

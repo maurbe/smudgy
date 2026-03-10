@@ -3,9 +3,9 @@
 #include <string>
 
 void ngp_2d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -17,9 +17,9 @@ void ngp_2d_cpp(
 );
 
 void ngp_3d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -31,9 +31,9 @@ void ngp_3d_cpp(
 );
 
 void cic_2d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -45,9 +45,9 @@ void cic_2d_cpp(
 );
 
 void cic_3d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -59,14 +59,14 @@ void cic_3d_cpp(
 );
 
 void cic_2d_adaptive_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    const float* smoothing_lengths,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
     bool periodic,
-    const float* pcellsizesHalf,
     bool use_openmp,
     int omp_threads,
     float* fields,
@@ -74,14 +74,14 @@ void cic_2d_adaptive_cpp(
 );
 
 void cic_3d_adaptive_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    const float* smoothing_lengths,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
     bool periodic,
-    const float* pcellsizesHalf,
     bool use_openmp,
     int omp_threads,
     float* fields,
@@ -89,9 +89,9 @@ void cic_3d_adaptive_cpp(
 );
 
 void tsc_2d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -103,9 +103,9 @@ void tsc_2d_cpp(
 );
 
 void tsc_3d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -117,14 +117,14 @@ void tsc_3d_cpp(
 );
 
 void tsc_2d_adaptive_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    const float* smoothing_lengths,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
     bool periodic,
-    const float* pcellsizesHalf,
     bool use_openmp,
     int omp_threads,
     float* fields,
@@ -132,14 +132,14 @@ void tsc_2d_adaptive_cpp(
 );
 
 void tsc_3d_adaptive_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    int N,
+    const float* smoothing_lengths,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
     bool periodic,
-    const float* pcellsizesHalf,
     bool use_openmp,
     int omp_threads,
     float* fields,
@@ -147,10 +147,10 @@ void tsc_3d_adaptive_cpp(
 );
 
 void isotropic_kernel_deposition_2d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    const float* hsm,
-    int N,
+    const float* smoothing_lengths,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -165,10 +165,10 @@ void isotropic_kernel_deposition_2d_cpp(
 );
 
 void isotropic_kernel_deposition_3d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    const float* hsm,
-    int N,
+    const float* smoothing_lengths,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -183,11 +183,11 @@ void isotropic_kernel_deposition_3d_cpp(
 );
 
 void anisotropic_kernel_deposition_2d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    const float* hmat_eigvecs,
-    const float* hmat_eigvals,
-    int N,
+    const float* smoothing_tensor_eigvecs,
+    const float* smoothing_tensor_eigvals,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,
@@ -202,11 +202,11 @@ void anisotropic_kernel_deposition_2d_cpp(
 );
 
 void anisotropic_kernel_deposition_3d_cpp(
-    const float* pos,
+    const float* positions,
     const float* quantities,
-    const float* hmat_eigvecs,
-    const float* hmat_eigvals,
-    int N,
+    const float* smoothing_tensor_eigvecs,
+    const float* smoothing_tensor_eigvals,
+    int num_particles,
     int num_fields,
     const float* boxsizes,
     const int* gridnums,

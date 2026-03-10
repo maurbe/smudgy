@@ -142,12 +142,14 @@ class PointCloud:
         ], f"Mode must be one of 'adaptive', 'isotropic' or 'anisotropic' but found {mode}"
         self.mode = mode
 
-    def compute_smoothing_lengths(self, query_pos: npt.ArrayLike | None = None) -> None:
+    def compute_smoothing_lengths(
+        self, query_positions: npt.ArrayLike | None = None
+    ) -> None:
         """Compute smoothing lengths or tensors for SPH calculations.
 
         Parameters
         ----------
-        query_pos
+        query_positions
                 Optional array of shape ``(M, D)`` with positions where smoothing is evaluated.
                 If ``None``, uses the particle positions from the instance.
 
@@ -177,7 +179,7 @@ class PointCloud:
         kwargs = {
             "tree": self.tree,
             "num_neighbors": self.num_neighbors,
-            "query_pos": query_pos,
+            "query_positions": query_positions,
         }
 
         if self.mode in ["adaptive", "isotropic"]:
@@ -377,7 +379,7 @@ class PointCloud:
             hsm, nn_inds, nn_dists = compute_hsm(
                 tree,
                 num_neighbors=num_neighbors,
-                query_pos=query_positions,
+                query_positions=query_positions,
             )
             if compute_gradients:
                 # For gradients, need relative coordinate vectors
@@ -396,7 +398,7 @@ class PointCloud:
                 tree,
                 weights=weights,
                 num_neighbors=num_neighbors,
-                query_pos=query_positions,
+                query_positions=query_positions,
             )
             kernel_key = "r_ij_vec" if compute_gradients else "r_ij"
             kernel_kwargs = {kernel_key: rel_coords, "H": h_tensor}
@@ -621,13 +623,13 @@ class PointCloud:
         res = self._deposit_to_grid(
             positions=pos_temp,
             quantities=fields_temp,
+            smoothing_lengths=hsm_temp,
+            smoothing_tensor_eigvecs=h_eigvecs_temp,
+            smoothing_tensor_eigvals=h_eigvals_temp,
             averaged=averaged,
             gridnums=gridnums_array,
             boxsizes=domain_lengths,
             periodic=periodic_flag,
-            hsm=hsm_temp,
-            hmat_eigvecs=h_eigvecs_temp,
-            hmat_eigvals=h_eigvals_temp,
             return_weights=return_weights,
             method=method,
             use_python=use_python,
@@ -643,15 +645,15 @@ class PointCloud:
         self,
         positions: npt.NDArray[np.floating],
         quantities: npt.NDArray[np.floating],
+        smoothing_lengths: npt.NDArray[np.floating] | None,
+        smoothing_tensor_eigvecs: npt.NDArray[np.floating] | None,
+        smoothing_tensor_eigvals: npt.NDArray[np.floating] | None,
         averaged: Sequence[bool],
         gridnums: npt.NDArray[np.int32],
         boxsizes: npt.NDArray[np.floating],
         periodic: bool,
         *,
         method: str,
-        hsm: npt.NDArray[np.floating] | None,
-        hmat_eigvecs: npt.NDArray[np.floating] | None,
-        hmat_eigvals: npt.NDArray[np.floating] | None,
         return_weights: bool,
         use_python: bool,
         kernel: str,
@@ -676,9 +678,9 @@ class PointCloud:
                 boxsizes: Domain extents (max - min) for each axis, shape (dim,).
                 periodic: Per-axis periodicity flags, shape (dim,).
                 method: Name of the deposition method (e.g., "ngp", "cic", "tsc", "isotropic").
-                hsm: Smoothing lengths for isotropic/adaptive methods, shape (N,) or None.
-                hmat_eigvecs: Smoothing tensor eigenvectors for anisotropic method, shape (N, D, D) or None.
-                hmat_eigvals: Smoothing tensor eigenvalues for anisotropic method, shape (N, D) or None.
+                smoothing_lengths: Smoothing lengths for isotropic/adaptive methods, shape (N,) or None.
+                smoothing_tensor_eigvecs: Smoothing tensor eigenvectors for anisotropic method, shape (N, D, D) or None.
+                smoothing_tensor_eigvals: Smoothing tensor eigenvalues for anisotropic method, shape (N, D) or None.
                 return_weights: Whether to return accumulated weights alongside deposited fields.
                 use_python: Use Python backend instead of compiled C++ backend.
                 kernel: SPH kernel name for SPH-based methods.
@@ -714,20 +716,20 @@ class PointCloud:
             args = (
                 positions,
                 quantities,
+                smoothing_lengths,
                 boxsizes,
                 gridnums,
                 periodic,
-                hsm,
             )
 
         elif "isotropic" == method:
             args = (
                 positions,
                 quantities,
+                smoothing_lengths,
                 boxsizes,
                 gridnums,
                 periodic,
-                hsm,
                 kernel,
                 integration,
                 min_kernel_evaluations,
@@ -737,11 +739,11 @@ class PointCloud:
             args = (
                 positions,
                 quantities,
+                smoothing_tensor_eigvecs,
+                smoothing_tensor_eigvals,
                 boxsizes,
                 gridnums,
                 periodic,
-                hmat_eigvecs,
-                hmat_eigvals,
                 kernel,
                 integration,
                 min_kernel_evaluations,

@@ -1,7 +1,6 @@
 """Utility functions for SPH operations."""
 
 from __future__ import annotations
-
 from collections.abc import Sequence
 
 import numpy as np
@@ -60,27 +59,29 @@ def query_kdtree(
     return tree.query(points, k=k, workers=-1)
 
 
-def shift_particle_positions(pos: npt.ArrayLike) -> FloatArray:
-    """Shift particle positions so the minimum per-axis value is at zero.
+def shift_coordinates(coordinates: npt.ArrayLike) -> FloatArray:
+    """Shift coordinates so the minimum per-axis value is at zero.
 
     Parameters
     ----------
-    pos
+    coordinates
             Array of shape ``(N, D)`` with particle coordinates.
 
     Returns
     -------
     numpy.ndarray
-            Shifted coordinates with the same shape as ``pos``.
+            Shifted coordinates with the same shape as ``coordinates``.
 
     Raises
     ------
     AssertionError
             If the input array is not 2D.
     """
-    pos_array = np.asarray(pos)
-    assert pos_array.ndim == 2, "Input positions must be a 2D array of shape (N, D)"
-    return pos_array - pos_array.min(axis=0)
+    coordinates_array = np.asarray(coordinates)
+    assert (
+        coordinates_array.ndim == 2
+    ), "Input coordinates must be a 2D array of shape (N, D)"
+    return coordinates_array - coordinates_array.min(axis=0)
 
 
 def coordinate_difference_with_pbc(
@@ -139,7 +140,7 @@ def coordinate_difference_with_pbc(
 def compute_hsm(
     tree: spatial.cKDTree,
     num_neighbors: int,
-    query_pos: npt.ArrayLike | None = None,
+    query_positions: npt.ArrayLike | None = None,
 ) -> tuple[FloatArray, IntArray, FloatArray]:
     """Estimate smoothing length as half the distance to the Nth neighbor.
 
@@ -149,7 +150,7 @@ def compute_hsm(
             cKDTree built from particle positions.
     num_neighbors
             Number of neighbors used for the estimate.
-    query_pos
+    query_positions
             Array of shape ``(M, D)`` with positions where smoothing length is evaluated.
             If ``None``, uses particle positions from the tree.
 
@@ -161,10 +162,10 @@ def compute_hsm(
             ``(M, num_neighbors)``.
 
     """
-    if query_pos is None:
-        query_pos = tree.data
+    if query_positions is None:
+        query_positions = tree.data
 
-    nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
+    nn_dists, nn_inds = query_kdtree(tree, query_positions, k=num_neighbors)
     hsm = nn_dists[:, -1] * 0.5
     return hsm, nn_inds, nn_dists
 
@@ -173,7 +174,7 @@ def compute_hsm_tensor(
     tree: spatial.cKDTree,
     weights: npt.ArrayLike,
     num_neighbors: int,
-    query_pos: npt.ArrayLike | None = None,
+    query_positions: npt.ArrayLike | None = None,
 ) -> tuple[FloatArray, FloatArray, FloatArray, IntArray, FloatArray]:
     """Compute anisotropic smoothing tensor using a covariance-based method.
 
@@ -187,7 +188,7 @@ def compute_hsm_tensor(
             Array of shape ``(N,)`` with particle weights.
     num_neighbors
             Number of neighbors used for covariance estimation.
-    query_pos
+    query_positions
             Array of shape ``(M, D)`` where the tensor is evaluated.
             If ``None``, uses particle positions from the tree.
 
@@ -210,18 +211,18 @@ def compute_hsm_tensor(
             "Only 2D and 3D positions are supported for anisotropic smoothing tensors."
         )
 
-    if query_pos is None:
-        query_pos = pos
+    if query_positions is None:
+        query_positions = pos
     weights = weights.flatten() if weights.ndim > 1 else weights
 
     # Find nearest neighbors
-    nn_dists, nn_inds = query_kdtree(tree, query_pos, k=num_neighbors)
+    nn_dists, nn_inds = query_kdtree(tree, query_positions, k=num_neighbors)
     neighbor_coords = pos[nn_inds]
     neighbor_weights = weights[nn_inds]
 
     # Account for periodic boundary conditions
     rel_coords = coordinate_difference_with_pbc(
-        neighbor_coords, query_pos[:, np.newaxis, :], boxsize
+        neighbor_coords, query_positions[:, np.newaxis, :], boxsize
     )
 
     # Compute mass-weighted covariance matrix

@@ -1,1 +1,1 @@
-pip install -v . && black . && ruff check . -- fix && pytest -rs
+pip install . && black . && ruff check . -- fix && pytest -rs
