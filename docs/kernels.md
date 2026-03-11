@@ -1,6 +1,6 @@
 # Kernels
 
-```{automodule} smudgy.kernels
+```{automodule} smudgy.core.kernels
 :members:
 :undoc-members:
 :show-inheritance:

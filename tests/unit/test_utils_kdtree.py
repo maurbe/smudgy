@@ -2,17 +2,19 @@ import numpy as np
 import pytest
 from smudgy.utils import build_kdtree, query_kdtree
 
+
 def test_build_kdtree_basic():
     points = np.random.rand(10, 2)
     tree = build_kdtree(points)
-    assert hasattr(tree, 'query')
+    assert hasattr(tree, "query")
     assert tree.n == 10
 
-@pytest.mark.parametrize('boxsize', [None, 1.0, [1.0, 1.0]])
+
+@pytest.mark.parametrize("boxsize", [None, 1.0, [1.0, 1.0]])
 def test_build_kdtree_periodic(boxsize):
     points = np.random.rand(5, 2)
     tree = build_kdtree(points, boxsize=boxsize)
-    assert hasattr(tree, 'query')
+    assert hasattr(tree, "query")
 
 
 def test_query_kdtree_basic():

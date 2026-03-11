@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from smudgy.utils import shift_coordinates, coordinate_difference_with_pbc
 
+
 def test_shift_coordinates_basic():
     coords = np.array([[2, 3], [5, 7], [1, 9]])
     shifted = shift_coordinates(coords)

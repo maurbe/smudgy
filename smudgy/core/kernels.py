@@ -252,7 +252,7 @@ class Kernel:
                 If ``kernel_name`` is not recognized.
 
         """
-        
+
         if self.kernel_name == "lucy":
             if self.dim == 1:
                 return 5.0 / 4.0
@@ -260,7 +260,7 @@ class Kernel:
                 return 5.0 / math.pi
             elif self.dim == 3:
                 return 105.0 / (16.0 * math.pi)
-        
+
         if self.kernel_name == "gaussian":
             if self.dim == 1:
                 return 1.0 / math.pi**0.5
@@ -404,7 +404,7 @@ class Kernel:
 
         if self.kernel_name == "lucy":
             mask = q <= 1
-            return np.where(mask, -12 * q * (1 - q) ** 2, 0.0)  
+            return np.where(mask, -12 * q * (1 - q) ** 2, 0.0)
 
         if self.kernel_name == "gaussian":
             mask = q <= 3
@@ -418,7 +418,7 @@ class Kernel:
             return dW_dq
 
         if self.kernel_name == "quintic_spline":
-            mask1 = (q <= 1)
+            mask1 = q <= 1
             mask2 = (q > 1) & (q <= 2)
             mask3 = (q > 2) & (q <= 3)
             dW_dq = np.where(

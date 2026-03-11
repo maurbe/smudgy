@@ -1,6 +1,12 @@
 import numpy as np
 import pytest
-from smudgy.utils import build_kdtree, compute_hsm, compute_hsm_tensor, project_hsm_tensor_to_2d
+from smudgy.utils import (
+    build_kdtree,
+    compute_hsm,
+    compute_hsm_tensor,
+    project_hsm_tensor_to_2d,
+)
+
 
 def test_compute_hsm_basic():
     points = np.random.rand(10, 2)
@@ -26,7 +32,9 @@ def test_compute_hsm_tensor_basic():
     points = np.random.rand(10, 3)
     weights = np.random.rand(10)
     tree = build_kdtree(points)
-    H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords = compute_hsm_tensor(tree, weights, num_neighbors=3)
+    H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords = compute_hsm_tensor(
+        tree, weights, num_neighbors=3
+    )
     assert H.shape == (10, 3, 3)
     assert eigvals.shape == (10, 3)
     assert eigvecs.shape == (10, 3, 3)
@@ -39,7 +47,9 @@ def test_compute_hsm_tensor_2d():
     points = np.random.rand(10, 2)
     weights = np.random.rand(10)
     tree = build_kdtree(points)
-    H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords = compute_hsm_tensor(tree, weights, num_neighbors=3)
+    H, eigvals, eigvecs, nn_inds, nn_dists, rel_coords = compute_hsm_tensor(
+        tree, weights, num_neighbors=3
+    )
     assert H.shape == (10, 2, 2)
     assert eigvals.shape == (10, 2)
     assert eigvecs.shape == (10, 2, 2)
@@ -72,4 +82,4 @@ def test_project_hsm_tensor_to_2d_error():
     with pytest.raises(ValueError):
         project_hsm_tensor_to_2d(h_tensor, plane="abc")
     with pytest.raises(ValueError):
-        project_hsm_tensor_to_2d(h_tensor, plane="xy", basis=([1,0,0],[0,1,0]))
+        project_hsm_tensor_to_2d(h_tensor, plane="xy", basis=([1, 0, 0], [0, 1, 0]))

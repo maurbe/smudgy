@@ -1,6 +1,6 @@
 # Point Cloud API
 
-```{automodule} smudgy.ops
+```{automodule} smudgy.main
 :members:
 :undoc-members:
 :show-inheritance:
