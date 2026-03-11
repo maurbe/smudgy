@@ -15,7 +15,7 @@ class Kernel:
     Parameters
     ----------
     kernel_name : str
-        Kernel name: ``"gaussian"``, ``"super_gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
+        Kernel name: ``"lucy"``, ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
         ``"wendland_c2"``, ``"wendland_c4"`` or ``"wendland_c6"``.
     dim : int
         Spatial dimension (1, 2, or 3).
@@ -33,7 +33,7 @@ class Kernel:
         Parameters
         ----------
         kernel_name : str
-                Kernel name: ``"gaussian"``, ``"super_gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
+                Kernel name: ``"lucy"``, ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
                 ``"wendland_c2"``, ``"wendland_c4"`` or ``"wendland_c6"``.
         dim : int
                 Spatial dimension (1, 2, or 3).
@@ -45,8 +45,8 @@ class Kernel:
 
         """
         allowed_kernels = {
+            "lucy",
             "gaussian",
-            "super_gaussian",
             "cubic_spline",
             "quintic_spline",
             "wendland_c2",
@@ -112,7 +112,7 @@ class Kernel:
                 if len(smoothing_lengths.shape) == 1
                 else smoothing_lengths
             )
-            q = r_ij / smoothing_lengths
+            q = np.abs(r_ij) / smoothing_lengths
             norm = smoothing_lengths**self.dim
             W = self._kernel_sigma() / norm * self._kernel_values(q)
         else:
@@ -252,6 +252,15 @@ class Kernel:
                 If ``kernel_name`` is not recognized.
 
         """
+        
+        if self.kernel_name == "lucy":
+            if self.dim == 1:
+                return 5.0 / 4.0
+            elif self.dim == 2:
+                return 5.0 / math.pi
+            elif self.dim == 3:
+                return 105.0 / (16.0 * math.pi)
+        
         if self.kernel_name == "gaussian":
             if self.dim == 1:
                 return 1.0 / math.pi**0.5
@@ -259,9 +268,6 @@ class Kernel:
                 return 1.0 / math.pi
             elif self.dim == 3:
                 return 1.0 / math.pi ** (3.0 / 2.0)
-
-        if self.kernel_name == "super_gaussian":
-            return 1.0 / math.pi ** (self.dim / 2.0)
 
         if self.kernel_name == "cubic_spline":
             if self.dim == 1:
@@ -318,13 +324,14 @@ class Kernel:
                 Kernel values $W(q)$ of the same shape as input with compact support applied.
 
         """
+
+        if self.kernel_name == "lucy":
+            mask = q <= 1
+            return np.where(mask, (1 + 3 * q) * (1 - q) ** 3, 0.0)
+
         if self.kernel_name == "gaussian":
             mask = q <= 3
             return np.where(mask, np.exp(-(q**2)), 0.0)
-
-        if self.kernel_name == "super_gaussian":
-            mask = q <= 3
-            return np.where(mask, np.exp(-(q**2)) * (self.dim / 2 + 1 - q**2), 0.0)
 
         if self.kernel_name == "cubic_spline":
             mask1 = q <= 0.5
@@ -394,15 +401,14 @@ class Kernel:
                 Kernel gradient values $dW/dq$ of the same shape as input.
 
         """
+
+        if self.kernel_name == "lucy":
+            mask = q <= 1
+            return np.where(mask, -12 * q * (1 - q) ** 2, 0.0)  
+
         if self.kernel_name == "gaussian":
             mask = q <= 3
             return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
-
-        if self.kernel_name == "super_gaussian":
-            mask = q <= 3
-            return np.where(
-                mask, -2 * q * (self.dim / 2 + 2 - q**2) * np.exp(-(q**2)), 0.0
-            )
 
         if self.kernel_name == "cubic_spline":
             mask1 = q <= 0.5

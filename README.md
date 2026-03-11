@@ -6,7 +6,7 @@
 Welcome to the `smudgy` GitHub page. 
 `smudgy` is a python package with a C++ and (optionally) OpenMP backend support for point cloud smoothing and interpolation using SPH operations – lightning fast, scalable and memory-efficient. Please refer to the official [docs](https://smudgy.readthedocs.io/en/latest/quickstart.html) for guides and tutorials.
 
-### How to install 
+### How to install <img src="src/test.png" alt="Icon" style="height:1em;vertical-align:-0.15em;">
 You can install `smudgy` in several ways. OpenMP support is optional but recommended for parallel performance. See the [OpenMP Support](#openmp-support) section for details on how to setup OpenMP **before** installation.
 
 #### 1. Install from PyPI (recommended)

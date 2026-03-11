@@ -23,12 +23,22 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
     "sphinx_design",
+    "myst_parser",
 ]
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 
 autodoc_typehints = "description"
+
+source_suffix = {
+    ".md": "markdown",
+}
+
+myst_enable_extensions = [
+    "colon_fence",
+    "html_image",
+]
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
@@ -41,4 +51,4 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_static_path = ["_static"]
-html_logo = "_static/logo-light.png"
+html_logo = "_static/test.png"
