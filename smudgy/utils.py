@@ -128,7 +128,7 @@ def coordinate_difference_with_pbc(
 
     # prepare boxsize array for broadcasting
     if np.isscalar(boxsize):
-        box_arr = np.array([boxsize] * shape_x.shape[-1])
+        box_arr = np.array([boxsize] * shape_x[-1])
     else:
         assert np.asarray(boxsize).ndim == 1, "'boxsize' must be a scalar or 1D array"
         assert (
@@ -237,8 +237,9 @@ def compute_hsm_tensor(
     )
 
     # Compute eigendecomposition and construct smoothing tensor H = VΛV^T
+    # Numerical errors can yield small negative eigenvalues; clip to zero before sqrt
     eigvals, eigvecs = np.linalg.eigh(Sigma)
-    eigvals = np.sqrt(eigvals)
+    eigvals = np.sqrt(np.clip(eigvals, 0, None))
     Λ = eigvals[..., np.newaxis] * np.eye(spatial_dim)
     H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
 
