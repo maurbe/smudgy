@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cmath>
 
-#define _USE_MATH_DEFINES
+namespace {
+constexpr float kPi = 3.14159265358979323846f;
+}
 
 
 class Lucy : public SPHKernel {
@@ -24,8 +26,8 @@ public:
 
     float normalization(float detH) const override {
         if (dim_ == 1) return 5.0f / (4.0f * detH);
-        if (dim_ == 2) return 5.0f / (M_PI * detH);
-        if (dim_ == 3) return 105.0f / (16.0f * M_PI * detH);
+        if (dim_ == 2) return 5.0f / (kPi * detH);
+        if (dim_ == 3) return 105.0f / (16.0f * kPi * detH);
         throw std::invalid_argument("Unsupported dimension for Lucy");
     }
 };
@@ -46,9 +48,9 @@ public:
 
     float normalization(float detH) const override {
         float sigma;
-        if (dim_ == 1) sigma = 1.0f / std::sqrt(M_PI);
-        else if (dim_ == 2) sigma = 1.0f / M_PI;
-        else if (dim_ == 3) sigma = 1.0f / std::pow(M_PI, 1.5f);
+        if (dim_ == 1) sigma = 1.0f / std::sqrt(kPi);
+        else if (dim_ == 2) sigma = 1.0f / kPi;
+        else if (dim_ == 3) sigma = 1.0f / std::pow(kPi, 1.5f);
         else throw std::invalid_argument("Unsupported dimension for Gaussian");
         return sigma / detH;
     }
@@ -78,8 +80,8 @@ public:
 
     float normalization(float detH) const override {
         if (dim_ == 1) return 4.0f / (3.0f * detH);
-        if (dim_ == 2) return 40.0f / (7.0f * M_PI * detH);
-        if (dim_ == 3) return 8.0f / (M_PI * detH);
+        if (dim_ == 2) return 40.0f / (7.0f * kPi * detH);
+        if (dim_ == 3) return 8.0f / (kPi * detH);
         throw std::invalid_argument("Unsupported dimension for CubicSpline");
     }
 };
@@ -110,8 +112,8 @@ public:
 
     float normalization(float detH) const override {
         if (dim_ == 1) return 1.0f / (120.0f * detH);
-        if (dim_ == 2) return 7.0f / (478.0f * M_PI * detH);
-        if (dim_ == 3) return 3.0f / (359.0f * M_PI * detH);
+        if (dim_ == 2) return 7.0f / (478.0f * kPi * detH);
+        if (dim_ == 3) return 3.0f / (359.0f * kPi * detH);
         throw std::invalid_argument("Unsupported dimension for QuinticSpline");
     }
 };
@@ -138,8 +140,8 @@ public:
 
     float normalization(float detH) const override {
         if (dim_ == 1) return 5.0f / (8.0f * detH);
-        if (dim_ == 2) return 7.0f / (4.0f * M_PI * detH);
-        if (dim_ == 3) return 21.0f / (16.0f * M_PI * detH);
+        if (dim_ == 2) return 7.0f / (4.0f * kPi * detH);
+        if (dim_ == 3) return 21.0f / (16.0f * kPi * detH);
         throw std::invalid_argument("Unsupported dimension for WendlandC2");
     }
 };
@@ -166,8 +168,8 @@ public:
 
     float normalization(float detH) const override {
         if (dim_ == 1) return 3.0f / (4.0f * detH);
-        if (dim_ == 2) return 9.0f / (4.0f * M_PI * detH);
-        if (dim_ == 3) return 495.0f / (256.0f * M_PI * detH);
+        if (dim_ == 2) return 9.0f / (4.0f * kPi * detH);
+        if (dim_ == 3) return 495.0f / (256.0f * kPi * detH);
         throw std::invalid_argument("Unsupported dimension for WendlandC4");
     }
 };
@@ -194,8 +196,8 @@ public:
 
     float normalization(float detH) const override {
         if (dim_ == 1) return 55.0f / (64.0f * detH);
-        if (dim_ == 2) return 78.0f / (28.0f * M_PI * detH);
-        if (dim_ == 3) return 1365.0f / (512.0f * M_PI * detH);
+        if (dim_ == 2) return 78.0f / (28.0f * kPi * detH);
+        if (dim_ == 3) return 1365.0f / (512.0f * kPi * detH);
         throw std::invalid_argument("Unsupported dimension for WendlandC6");
     }
 };
@@ -254,7 +256,7 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
         factor_counts_2d(min_kernel_evaluations, n_r, n_theta);
 
         const float dr = support / static_cast<float>(n_r);
-        const float dtheta = 2.0f * M_PI / static_cast<float>(n_theta);
+        const float dtheta = 2.0f * kPi / static_cast<float>(n_theta);
 
         for (int ir = 0; ir < n_r; ++ir) {
             const float r0 = static_cast<float>(ir) * dr;
@@ -288,8 +290,8 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
         factor_counts_3d(min_kernel_evaluations, n_r, n_theta, n_phi);
 
         const float dr = support / static_cast<float>(n_r);
-        const float dtheta = 2.0f * M_PI / static_cast<float>(n_theta);
-        const float dphi = M_PI / static_cast<float>(n_phi);
+        const float dtheta = 2.0f * kPi / static_cast<float>(n_theta);
+        const float dphi = kPi / static_cast<float>(n_phi);
 
         for (int ir = 0; ir < n_r; ++ir) {
             const float r0 = static_cast<float>(ir) * dr;
