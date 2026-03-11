@@ -6,7 +6,6 @@ from .main import *
 from .utils import *
 from .grid import *
 
-
 def check_openmp() -> bool:
     """Return whether the C++ backend was built with OpenMP support."""
     try:

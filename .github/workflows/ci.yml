@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest] #, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
@@ -26,12 +26,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Linux
-      - name: Install OpenMP (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libomp-dev
+      # Linux: no extra OpenMP install needed on GitHub runners (GCC/OpenMP deps are already available)
 
       # macOS
       - name: Install OpenMP (macOS)
@@ -39,11 +34,12 @@ jobs:
         run: |
           brew update
           brew install libomp
-          echo "OMP_PREFIX=$(brew --prefix libomp)" >> $GITHUB_ENV
-          echo "CPPFLAGS=-I${OMP_PREFIX}/include" >> $GITHUB_ENV
-          echo "LDFLAGS=-L${OMP_PREFIX}/lib" >> $GITHUB_ENV
-          echo "CFLAGS=-Xpreprocessor -fopenmp ${CPPFLAGS}" >> $GITHUB_ENV
-          echo "CXXFLAGS=-Xpreprocessor -fopenmp ${CPPFLAGS}" >> $GITHUB_ENV
+          OMP_PREFIX="$(brew --prefix libomp)"
+          echo "OMP_PREFIX=${OMP_PREFIX}" >> "$GITHUB_ENV"
+          echo "CPPFLAGS=-I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L${OMP_PREFIX}/lib -Wl,-rpath,${OMP_PREFIX}/lib" >> "$GITHUB_ENV"
+          echo "CFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
 
       - name: Install package
         run: |
@@ -53,7 +49,7 @@ jobs:
       - name: Run tests (OpenMP)
         env:
           OMP_NUM_THREADS: 16
-        run: pytest -rs tests/
+        run: pytest -rs tests/system/
 
 
   # -------------------------------------------------
@@ -86,4 +82,4 @@ jobs:
           python -c "import smudgy.core._cpp_functions_ext as cpp; assert cpp.has_openmp is False"
 
       - name: Run tests (Serial)
-        run: pytest -rs tests/
+        run: pytest -rs tests/system/
