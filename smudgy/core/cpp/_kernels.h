@@ -7,7 +7,7 @@
 
 class SPHKernel {
 protected:
-    int dim_;  // ⬅️ store dimension internally
+    int dim_;
 
 public:
     explicit SPHKernel(int dim) : dim_(dim) {}

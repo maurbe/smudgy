@@ -6,7 +6,7 @@ on:
 
 jobs:
   # ==========================================================
-  # Build wheels (Linux + macOS)
+  # Build wheels (Linux + macOS + Windows)
   # ==========================================================
   build-wheels:
     name: Build Wheels (${{ matrix.os }})
@@ -14,7 +14,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       # ------------------------------------------------------
@@ -30,8 +30,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install libomp
-          echo "CPPFLAGS=-I$(brew --prefix libomp)/include" >> $GITHUB_ENV
-          echo "LDFLAGS=-L$(brew --prefix libomp)/lib" >> $GITHUB_ENV
+          OMP_PREFIX="$(brew --prefix libomp)"
+          echo "OMP_PREFIX=${OMP_PREFIX}" >> "$GITHUB_ENV"
+          echo "CPPFLAGS=-I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L${OMP_PREFIX}/lib -Wl,-rpath,${OMP_PREFIX}/lib" >> "$GITHUB_ENV"
+          echo "CFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
 
       # ------------------------------------------------------
       # Build wheels via cibuildwheel
@@ -42,9 +46,10 @@ jobs:
           # Build for CPython only
           CIBW_BUILD: "cp3*-*"
 
-          # macOS universal2
-          CIBW_ARCHS_MACOS: "x86_64 arm64"
-          MACOSX_DEPLOYMENT_TARGET: "15.0"
+          # macOS universal2 + Windows amd64
+          CIBW_ARCHS_MACOS: "universal2"
+          CIBW_ARCHS_WINDOWS: "AMD64"
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
 
           # Skip musllinux unless explicitly needed
           CIBW_SKIP: "*-musllinux_*"
