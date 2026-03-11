@@ -49,7 +49,9 @@ jobs:
       - name: Run tests (OpenMP)
         env:
           OMP_NUM_THREADS: 16
-        run: pytest -rs tests/system/
+        run: |
+          cd /tmp
+          pytest -rs "$GITHUB_WORKSPACE/tests/system/"
 
 
   # -------------------------------------------------
@@ -79,7 +81,10 @@ jobs:
 
       - name: Verify serial fallback
         run: |
+          cd /tmp
           python -c "import smudgy.core._cpp_functions_ext as cpp; assert cpp.has_openmp is False"
 
       - name: Run tests (Serial)
-        run: pytest -rs tests/system/
+        run: |
+          cd /tmp
+          pytest -rs "$GITHUB_WORKSPACE/tests/system/"
