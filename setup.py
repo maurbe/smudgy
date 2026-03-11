@@ -3,6 +3,7 @@ Automatically falls back to serial build if OpenMP is unavailable.
 """
 
 import platform
+import os
 from distutils.errors import CompileError, LinkError
 
 import numpy as np
@@ -10,6 +11,10 @@ from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import find_packages, setup
 
 system = platform.system()
+
+
+def _env_flag_is_true(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 # -------------------------------------------------
@@ -54,6 +59,14 @@ class BuildExtWithFallback(build_ext):
     def build_extensions(self):
         openmp_compile, openmp_link = get_openmp_flags()
         serial_compile, serial_link = get_serial_flags()
+
+        if _env_flag_is_true("SMUDGY_FORCE_SERIAL"):
+            print("\nSMUDGY_FORCE_SERIAL is set. Building serial backend only.\n")
+            for ext in self.extensions:
+                ext.extra_compile_args = serial_compile
+                ext.extra_link_args = serial_link
+            super().build_extensions()
+            return
 
         # First try with OpenMP
         for ext in self.extensions:
