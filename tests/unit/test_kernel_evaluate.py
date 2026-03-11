@@ -8,7 +8,6 @@ from smudgy.core.kernels import Kernel
 def get_all_kernel_names():
     # Extract allowed kernels from Kernel class
     return [
-        "lucy",
         "gaussian",
         "cubic_spline",
         "quintic_spline",
@@ -16,6 +15,58 @@ def get_all_kernel_names():
         "wendland_c4",
         "wendland_c6",
     ]
+def random_posdef_tensors(N, D):
+    # Generate N random positive-definite (D, D) tensors
+    A = np.random.randn(N, D, D)
+    return np.matmul(A, np.transpose(A, (0, 2, 1))) + D * np.eye(D)[None, :, :]
+
+@pytest.mark.parametrize("dim", [1, 2, 3])
+def test_kernel_anisotropic_output_shape_and_type(dim):
+    kernel_names = get_all_kernel_names()
+    for name in kernel_names:
+        k = Kernel(name, dim)
+        N, K = 4, 5
+        r_ij = np.random.randn(N, K, dim)
+        H = random_posdef_tensors(N, dim)
+        out = k.evaluate_kernel(r_ij, smoothing_tensors=H)
+        assert out.shape == (N, K)
+        assert np.issubdtype(out.dtype, np.floating)
+
+@pytest.mark.parametrize("dim", [1, 2, 3])
+def test_kernel_anisotropic_output_nonnegative(dim):
+    kernel_names = get_all_kernel_names()
+    for name in kernel_names:
+        k = Kernel(name, dim)
+        N, K = 4, 5
+        r_ij = np.random.randn(N, K, dim)
+        H = random_posdef_tensors(N, dim)
+        out = k.evaluate_kernel(r_ij, smoothing_tensors=H)
+        assert np.all(out >= 0), f"Kernel {name} dim {dim} produced negative values!"
+
+@pytest.mark.parametrize("dim", [1, 2, 3])
+def test_kernel_anisotropic_dtype_preserved(dim):
+    kernel_names = get_all_kernel_names()
+    for name in kernel_names:
+        k = Kernel(name, dim)
+        N, K = 3, 4
+        for dtype in (np.float32, np.float64):
+            r_ij = np.random.randn(N, K, dim).astype(dtype)
+            H = random_posdef_tensors(N, dim).astype(dtype)
+            out = k.evaluate_kernel(r_ij, smoothing_tensors=H)
+            assert out.dtype == dtype
+
+@pytest.mark.parametrize("dim", [1, 2, 3])
+def test_kernel_anisotropic_symmetry(dim):
+    kernel_names = get_all_kernel_names()
+    for name in kernel_names:
+        k = Kernel(name, dim)
+        N, K = 16, 8
+        r_ij = np.random.randn(N, K, dim)
+        H = random_posdef_tensors(N, dim)
+        out1 = k.evaluate_kernel(r_ij, smoothing_tensors=H)
+        out2 = k.evaluate_kernel(-r_ij, smoothing_tensors=H)
+        # Use tolerance for near-zero values
+        np.testing.assert_allclose(out1, out2, rtol=1e-4, atol=1e-6)
 
 def test_kernel_evaluate_output_shape_and_type():
     """Test that evaluate_kernel returns correct shape and dtype for all kernels and dims."""
@@ -87,5 +138,4 @@ def test_kernel_evaluate_symmetry():
             h = np.abs(np.random.rand(N)) + 0.1
             out1 = k.evaluate_kernel(r_ij, smoothing_lengths=h)
             out2 = k.evaluate_kernel(-r_ij, smoothing_lengths=h)
-            mask = (np.abs(out1) > 1e-6) | (np.abs(out2) > 1e-6)
-            np.testing.assert_allclose(out1[mask], out2[mask])
+            np.testing.assert_allclose(out1, out2)

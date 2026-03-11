@@ -418,7 +418,7 @@ class Kernel:
             return dW_dq
 
         if self.kernel_name == "quintic_spline":
-            mask1 = (q >= 0) & (q <= 1)
+            mask1 = (q <= 1)
             mask2 = (q > 1) & (q <= 2)
             mask3 = (q > 2) & (q <= 3)
             dW_dq = np.where(
