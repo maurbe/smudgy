@@ -106,6 +106,8 @@ ext_modules = [
             np.get_include(),
         ],
         language="c++",
+        # define_macros=[("NDEBUG", "0")],          # ensure assert() is active
+        # extra_compile_args=["-O0", "-g"],        # optional: disable optimization, add debug symbols
     ),
 ]
 

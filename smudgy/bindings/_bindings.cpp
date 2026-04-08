@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../core/cpp/_functions.h"  // backend declarations
+#include "../core/cpp/_kernels.h"  // for kernel integral testing
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -176,7 +177,6 @@ py::tuple _cic_3d_cpp(py::array_t<float> positions,
     // Return numpy arrays
     return py::make_tuple(fields, weights);
 }
-
 
 py::tuple _cic_2d_adaptive_cpp(py::array_t<float> positions,
                      py::array_t<float> quantities,
@@ -488,7 +488,7 @@ py::tuple _isotropic_2d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations,
+    int min_kernel_evaluations_per_axis,
     bool use_openmp, 
     int omp_threads
 )
@@ -528,7 +528,7 @@ py::tuple _isotropic_2d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations,
+        min_kernel_evaluations_per_axis,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -547,7 +547,7 @@ py::tuple _isotropic_3d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations,
+    int min_kernel_evaluations_per_axis,
     bool use_openmp, int omp_threads)
 {
     auto positions_buffer = positions.request();
@@ -586,7 +586,7 @@ py::tuple _isotropic_3d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations,
+        min_kernel_evaluations_per_axis,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -606,7 +606,7 @@ py::tuple _anisotropic_2d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations,
+    int min_kernel_evaluations_per_axis,
     bool use_openmp, int omp_threads)
 {
     auto positions_buffer = positions.request();
@@ -647,7 +647,7 @@ py::tuple _anisotropic_2d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations,
+        min_kernel_evaluations_per_axis,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -667,7 +667,7 @@ py::tuple _anisotropic_3d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations,
+    int min_kernel_evaluations_per_axis,
     bool use_openmp, int omp_threads)
 {
     auto positions_buffer = positions.request();
@@ -709,7 +709,7 @@ py::tuple _anisotropic_3d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations,
+        min_kernel_evaluations_per_axis,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -719,6 +719,14 @@ py::tuple _anisotropic_3d_cpp(
     return py::make_tuple(fields, weights);
 }
 
+py::float_ _compute_kernel_total_integral(
+    const std::string& kernel_name,
+    const int dim,
+    const int min_kernel_evaluations_per_axis
+)
+{
+    return compute_kernel_total_integral(kernel_name, dim, min_kernel_evaluations_per_axis);
+}
 
 // -------------------------------------------------
 PYBIND11_MODULE(_cpp_functions_ext, m) {
@@ -740,34 +748,55 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
     #endif
     });
 
+    m.def("compute_total_kernel_integral", &_compute_kernel_total_integral, 
+        R"doc(Compute the total integral of a kernel function.
+
+        Parameters
+        ----------
+        kernel_name : str
+            The name of the kernel function.
+        dim : int
+            The dimensionality of the kernel.
+        min_kernel_evaluations_per_axis : int, optional
+            Minimum number of evaluations per axis for numerical integration (if needed).
+
+        Returns
+        -------
+        float
+            The total integral of the kernel function.
+        )doc",
+        py::arg("kernel_name"),
+        py::arg("dim"),        
+        py::arg("min_kernel_evaluations_per_axis"));
+
     m.def("_ngp_2d_cpp", &_ngp_2d_cpp, 
         R"doc(
-Deposit particle quantities onto a 2D grid using NGP (C++ backend).
+        Deposit particle quantities onto a 2D grid using NGP (C++ backend).
 
-Parameters
-----------
-positions : numpy.ndarray, shape (N, 2)
-    Particle positions, where ``N`` is the number of particles.
-quantities : numpy.ndarray, shape (N, F)
-    Per-particle fields to deposit.
-boxsizes : array_like, shape (2,)
-    Domain size per axis.
-gridnums : array_like, shape (2,)
-    Number of grid cells per axis.
-periodic : bool
-    Periodic boundaries.
-use_openmp : bool
-    Enable OpenMP parallelism.
-omp_threads : int
-    Number of OpenMP threads (0 uses the default).
+        Parameters
+        ----------
+        positions : numpy.ndarray, shape (N, 2)
+            Particle positions, where ``N`` is the number of particles.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        boxsizes : array_like, shape (2,)
+            Domain size per axis.
+        gridnums : array_like, shape (2,)
+            Number of grid cells per axis.
+        periodic : bool
+            Periodic boundaries.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
 
-Returns
--------
-fields : numpy.ndarray, shape (Gx, Gy, F)
-    Deposited field values.
-weights : numpy.ndarray, shape (Gx, Gy)
-    Weight sum per cell.
-)doc",
+        Returns
+        -------
+        fields : numpy.ndarray, shape (Gx, Gy, F)
+            Deposited field values.
+        weights : numpy.ndarray, shape (Gx, Gy)
+            Weight sum per cell.
+        )doc",
         py::arg("positions"), 
         py::arg("quantities"), 
         py::arg("boxsizes"),
@@ -1134,8 +1163,8 @@ kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
     Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-min_kernel_evaluations : int
-    Minimum kernel samples per particle.
+min_kernel_evaluations_per_axis : int
+    Minimum kernel samples per axis and per particle.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1156,7 +1185,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations"),
+        py::arg("min_kernel_evaluations_per_axis"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1182,8 +1211,8 @@ kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
     Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-min_kernel_evaluations : int
-    Minimum kernel samples per particle.
+min_kernel_evaluations_per_axis : int
+    Minimum kernel samples per axis and per particle.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1204,7 +1233,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations"),
+        py::arg("min_kernel_evaluations_per_axis"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1229,11 +1258,11 @@ gridnums : array_like, shape (2,)
 periodic : bool
     Periodic boundaries.
 kernel_name : str
-    Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+    Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
 integration_method : str
     Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-min_kernel_evaluations : int
-    Minimum kernel samples per particle.
+min_kernel_evaluations_per_axis : int
+    Minimum kernel samples per axis and per particle.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1255,7 +1284,7 @@ weights : numpy.ndarray, shape (Gx, Gy)
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations"),
+        py::arg("min_kernel_evaluations_per_axis"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1283,8 +1312,8 @@ kernel_name : str
     Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
 integration_method : str
     Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-min_kernel_evaluations : int
-    Minimum kernel samples per particle.
+min_kernel_evaluations_per_axis : int
+    Minimum kernel samples per axis and per particle.
 use_openmp : bool
     Enable OpenMP parallelism.
 omp_threads : int
@@ -1306,7 +1335,7 @@ weights : numpy.ndarray, shape (Gx, Gy, Gz)
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations"),
+        py::arg("min_kernel_evaluations_per_axis"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 }

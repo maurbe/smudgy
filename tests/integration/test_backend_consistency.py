@@ -1,8 +1,7 @@
 """Tests cross-backend consistency between Python and C++ deposition."""
 
-import numpy as np
 import pytest
-
+import numpy as np
 from smudgy import PointCloud
 
 GRIDNUM = 64

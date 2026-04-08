@@ -9,6 +9,7 @@ import numpy.typing as npt
 
 from scipy import spatial
 from .core import collection as backend
+from .core.kernels import get_kernel
 
 FloatArray = npt.NDArray[np.floating]
 IntArray = npt.NDArray[np.int_]
@@ -211,7 +212,7 @@ def compute_hsm_tensor(
 
     if spatial_dim not in (2, 3):
         raise ValueError(
-            "Only 2D and 3D positions are supported for anisotropic smoothing tensors."
+            "[smudgy] Only 2D and 3D positions are supported for anisotropic smoothing tensors."
         )
 
     if query_positions is None:
@@ -237,8 +238,12 @@ def compute_hsm_tensor(
     )
 
     # Compute eigendecomposition and construct smoothing tensor H = VΛV^T
-    # Numerical errors can yield small negative eigenvalues; clip to zero before sqrt
-    eigvals, eigvecs = np.linalg.eigh(Sigma)
+    # Relative regularization of the Sigma matrix, to make sure H, eigvals, and vecs are all finite
+    eps = 1e-6
+    trace = np.trace(Sigma, axis1=-2, axis2=-1)[..., None, None]
+    Sigma_reg = Sigma + eps * trace * np.eye(spatial_dim)[None, :, :]
+
+    eigvals, eigvecs = np.linalg.eigh(Sigma_reg)
     eigvals = np.sqrt(np.clip(eigvals, 0, None))
     Λ = eigvals[..., np.newaxis] * np.eye(spatial_dim)
     H = np.matmul(np.matmul(eigvecs, Λ), np.transpose(eigvecs, axes=(0, 2, 1)))
@@ -323,11 +328,11 @@ def _interpolate_fields(
     weights: npt.NDArray[np.floating],
     density: npt.NDArray[np.floating],
     fields: npt.NDArray[np.floating],
-    kernel: Any,
+    kernel_name: str,
     num_neighbors: int,
     query_positions: npt.ArrayLike,
     boxsize: BoxInput | None,
-    mode: Literal["isotropic", "anisotropic"],
+    method: Literal["isotropic", "anisotropic"],
     compute_gradients: bool = False,
 ) -> npt.NDArray[np.floating]:
     """Interpolate or compute gradients of particle fields at query positions.
@@ -341,20 +346,20 @@ def _interpolate_fields(
             weights: Particle weights (e.g. masses) with shape (N,).
             density: Particle densities with shape (N,). Used for SPH weighting.
             fields: Particle field values with shape (N, num_fields).
-            kernel: Kernel instance with evaluate_kernel() and evaluate_gradient() methods.
+            kernel_name: Name of the SPH kernel to use (e.g., ``"cubic_spline"``, ``"quintic_spline"``).
             num_neighbors: Number of nearest neighbors to use for interpolation.
             query_positions: Positions where fields are evaluated, shape (M, D).
-            mode: Smoothing mode - 'isotropic' uses scalar smoothing lengths,
+            method: Smoothing method - 'isotropic' uses scalar smoothing lengths,
                     'anisotropic' uses smoothing tensors.
             compute_gradients: If True, compute field gradients via kernel.evaluate_gradient().
-                    If False, compute field values via kernel.evaluate_kernel().
+                    If False, compute field values via kernel.evaluate().
 
     Returns:
             - If compute_gradients=False: array of shape (M, num_fields) with interpolated field values.
             - If compute_gradients=True: array of shape (M, num_fields, D) with interpolated gradients.
 
     """
-    if mode == "isotropic":
+    if method == "isotropic":
         # Compute smoothing lengths at query positions
         hsm, nn_inds, nn_dists = compute_hsm(
             tree,
@@ -368,11 +373,11 @@ def _interpolate_fields(
                 query_positions[:, np.newaxis, :],
                 boxsize,
             )
-            kernel_kwargs = {"r_ij_vec": rel_coords, "smoothing_lengths": hsm}
+            kernel_kwargs = {"r_ij_vec": rel_coords, "h": hsm}
         else:
-            kernel_kwargs = {"r_ij": nn_dists, "smoothing_lengths": hsm}
+            kernel_kwargs = {"r_ij": nn_dists, "h": hsm}
 
-    elif mode == "anisotropic":
+    elif method == "anisotropic":
         # Compute smoothing tensors at query positions
         h_tensor, _, _, nn_inds, _, rel_coords = compute_hsm_tensor(
             tree,
@@ -381,20 +386,23 @@ def _interpolate_fields(
             query_positions=query_positions,
         )
         kernel_key = "r_ij_vec" if compute_gradients else "r_ij"
-        kernel_kwargs = {kernel_key: rel_coords, "smoothing_tensors": h_tensor}
+        kernel_kwargs = {kernel_key: rel_coords, "h": h_tensor}
 
     else:
-        raise ValueError(f"Unsupported interpolation mode '{mode}'")
+        raise ValueError(f"Unsupported interpolation method '{method}'")
 
     # Unified weight computation and kernel evaluation
     weights = weights[nn_inds] / (density[nn_inds] + 1e-8)
     fields_ = fields[nn_inds]
+    kernel = get_kernel(kernel_name, dim=positions.shape[-1])
+
+    # cast arrays to correct shapes
 
     if compute_gradients:
         w = kernel.evaluate_gradient(**kernel_kwargs)
         result = np.einsum("mkf,mkd,mk->mfd", fields_, w, weights)
     else:
-        w = kernel.evaluate_kernel(**kernel_kwargs)
+        w = kernel.evaluate(**kernel_kwargs)
         result = np.einsum("mkf,mk,mk->mf", fields_, w, weights)
 
     return result
@@ -414,9 +422,9 @@ def _deposit_to_grid(
     method: str,
     return_weights: bool,
     use_python: bool,
-    kernel: str,
+    kernel_name: str,
     integration: str,
-    min_kernel_evaluations: int,
+    min_kernel_evaluations_per_axis: int,
     use_openmp: bool,
     omp_threads: int | None,
     verbose: bool = False,
@@ -441,9 +449,9 @@ def _deposit_to_grid(
             smoothing_tensor_eigvals: Smoothing tensor eigenvalues for anisotropic method, shape (N, D) or None.
             return_weights: Whether to return accumulated weights alongside deposited fields.
             use_python: Use Python backend instead of compiled C++ backend.
-            kernel: SPH kernel name for SPH-based methods.
+            kernel_name: SPH kernel name for SPH-based methods.
             integration: Quadrature rule name for kernel integration.
-            min_kernel_evaluations: Minimum number of kernel samples for SPH methods.
+            min_kernel_evaluations_per_axis: Minimum number of kernel samples per axis for SPH methods.
             use_openmp: Enable OpenMP parallelism in C++ backend.
             omp_threads: Number of OpenMP threads (0 = runtime default).
 
@@ -466,7 +474,7 @@ def _deposit_to_grid(
     func = getattr(backend, f"{method}_{dim}d")
 
     if verbose:
-        print(f"Using deposition function: {func.__name__}")
+        print(f"[smudgy] Using deposition function: {func.__name__}")
 
     if "adaptive" in method:
         args = (
@@ -486,9 +494,9 @@ def _deposit_to_grid(
             boxsizes,
             gridnums,
             periodic,
-            kernel,
+            kernel_name,
             integration,
-            min_kernel_evaluations,
+            min_kernel_evaluations_per_axis,
         )
 
     elif "anisotropic" == method:
@@ -500,9 +508,9 @@ def _deposit_to_grid(
             boxsizes,
             gridnums,
             periodic,
-            kernel,
+            kernel_name,
             integration,
-            min_kernel_evaluations,
+            min_kernel_evaluations_per_axis,
         )
 
     else:

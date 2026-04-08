@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 import numpy.typing as npt
 
-from .core.kernels import Kernel
+from .core.kernels import get_kernel
 from .utils import (
     build_kdtree,
     compute_hsm,
@@ -46,8 +46,8 @@ class PointCloud:
         assert (
             self.dim == 2 or self.dim == 3
         ), f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
-        self.pos = positions
-        self.weight = weights
+        self.positions = positions
+        self.weights = weights
         self.verbose = verbose
 
         if boxsize is None:
@@ -61,35 +61,48 @@ class PointCloud:
             else:
                 assert boxsize_arr.shape == (
                     self.dim,
-                ), f"boxsize must be a scalar or have shape ({self.dim},), got {boxsize_arr.shape}"
+                ), f"'boxsize' must be a scalar or have shape ({self.dim},), got {boxsize_arr.shape}"
                 self.boxsize = boxsize_arr
 
-    def set_sph_parameters(
+        if self.verbose:
+            periodic_str = (
+                f" with boxsize={self.boxsize}"
+                if self.periodic
+                else " without periodicity"
+            )
+            print(
+                f"[smudgy] Initialized PointCloud with {self.positions.shape[0]} particles in {self.dim}D{periodic_str}"
+            )
+
+    def setup(
         self,
-        kernel_name: str = "cubic_spline",
-        mode: Literal["adaptive", "isotropic", "anisotropic"] = "isotropic",
         num_neighbors: int = 32,
+        method: Literal["isotropic", "anisotropic"] = "isotropic",
+        kernel_name: str = None,
     ) -> None:
         """Set all SPH-related properties in one call.
 
         Parameters
         ----------
-        kernel_name
-                Name of the SPH kernel to use (e.g., ``"gaussian"``, ``"cubic_spline"``).
-        mode
-                Smoothing mode: ``"adaptive"``, ``"isotropic"``, or ``"anisotropic"``.
+        method
+                Smoothing method: ``"isotropic"``, or ``"anisotropic"``.
         num_neighbors
                 Number of nearest neighbors used for smoothing length estimation.
+        kernel_name
+                Name of the SPH kernel. Available options are:
+                ``"lucy"``, ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``,
+                ``"wendland_c2"``, ``"wendland_c4"``, or ``"wendland_c6"``.
 
         Returns
         -------
         None
-                The selected kernel, mode, and computed smoothing lengths/tensors are stored on the instance.
+                The selected kernel, method, and computed smoothing lengths/tensors are stored on the instance.
 
         """
-        self._set_kernel(kernel_name)
-        self._set_mode(mode)
         self.num_neighbors = num_neighbors
+        self._set_method(method)
+        if kernel_name is not None:
+            self._set_kernel(kernel_name)
 
     def _set_kernel(self, kernel_name: str) -> None:
         """Set the SPH kernel.
@@ -109,52 +122,52 @@ class PointCloud:
         assert isinstance(
             kernel_name, str
         ), f"Kernel name must be a string but found {type(kernel_name)}"
-
-        try:
-            self.kernel = Kernel(kernel_name, dim=self.dim)
-            self.kernel_name = kernel_name
-        except AttributeError:
-            raise ValueError(f"Kernel '{kernel_name}' is not implemented")
+        self.kernel = get_kernel(kernel_name, dim=self.dim)
 
     def _check_kernel_set(self):
         if not hasattr(self, "kernel"):
             raise AttributeError(
-                "You must first set a kernel using the 'set_kernel' method before calling this function"
+                "No kernel set: use the 'set_sph_parameters' method with a valid 'kernel_name'"
             )
 
-    def _set_mode(self, mode: Literal["adaptive", "isotropic", "anisotropic"]) -> None:
-        """Set the smoothing mode for SPH calculations.
+    def _set_method(self, method: Literal["isotropic", "anisotropic"]) -> None:
+        """Set the smoothing method for SPH calculations.
 
         Parameters
         ----------
-        mode
-                Smoothing mode: ``"adaptive"``, ``"isotropic"``, or ``"anisotropic"``.
+        method
+                Smoothing method: ``"isotropic"``, or ``"anisotropic"``.
 
         Returns
         -------
         None
-                The selected mode is stored in the instance attribute ``mode`` for reference.
+                The selected method is stored in the instance attribute ``method`` for reference.
 
         """
-        assert mode in [
-            "adaptive",
+        assert method in [
             "isotropic",
             "anisotropic",
-        ], f"Mode must be one of 'adaptive', 'isotropic' or 'anisotropic' but found {mode}"
-        self.mode = mode
+        ], f"Method must be one of 'isotropic' or 'anisotropic' but found {method}"
+        self.method = method
+
+    def _check_method_set(self):
+        if not hasattr(self, "method"):
+            raise AttributeError(
+                "'method' not set. Please call 'set_sph_parameters' with a valid 'method'."
+            )
 
     def _check_smoothing_computed(self):
-        if self.mode in ["adaptive", "isotropic"] and not hasattr(self, "hsm"):
+        if self.method == "isotropic" and not hasattr(self, "hsm"):
             raise AttributeError(
-                f"Smoothing lengths have not been computed for mode '{self.mode}'. Please call 'compute_smoothing_lengths' first."
+                f"Smoothing lengths have not been computed for method '{self.method}'. Please call 'compute_smoothing_lengths' first."
             )
-        if self.mode == "anisotropic" and (
+        if self.method == "anisotropic" and (
             not hasattr(self, "h_tensor")
             or not hasattr(self, "h_eigvals")
             or not hasattr(self, "h_eigvecs")
         ):
             raise AttributeError(
-                "Smoothing tensors have not been computed for anisotropic mode. Please call 'compute_smoothing_lengths' first."
+                f"Smoothing tensors have not been computed for anisotropic method '{self.method}'. Please call 'compute_smoothing_lengths' first."
             )
 
     def compute_smoothing_lengths(
@@ -165,29 +178,30 @@ class PointCloud:
         Parameters
         ----------
         query_positions
-                Optional array of shape ``(M, D)`` with positions where smoothing is evaluated.
-                If ``None``, uses the particle positions from the instance.
+            Optional array of shape ``(M, D)`` with positions where smoothing is evaluated.
+            If ``None``, uses the particle positions from the instance.
 
         Returns
         -------
         None
-                Results are stored on the instance: ``hsm`` (adaptive/isotropic),
-                ``h_tensor``/``h_eigvals``/``h_eigvecs`` (anisotropic), ``nn_inds``
-                (all modes), and ``nn_dists`` (isotropic only).
+            Results are stored on the instance: ``hsm`` (isotropic),
+            ``h_tensor``/``h_eigvals``/``h_eigvecs`` (anisotropic), ``nn_inds``
+            (all modes), and ``nn_dists`` (isotropic only).
 
         """
         assert hasattr(
-            self, "mode"
-        ), "Smoothing mode not set. Please call 'set_sph_parameters' before computing smoothing lengths."
+            self, "method"
+        ), "Smoothing method not set. Please call 'set_sph_parameters' before computing smoothing lengths."
 
         if not hasattr(self, "tree"):
             if self.verbose:
-                print("Building kd-tree from particle positions")
-            self.tree = build_kdtree(self.pos, boxsize=self.boxsize)
+                print("[smudgy] Building kd-tree from particle positions")
+            self.tree = build_kdtree(self.positions, boxsize=self.boxsize)
 
         if self.verbose:
+            method_str = f"lengths" if self.method == "isotropic" else "tensors"
             print(
-                f"Computing smoothing lengths/tensors using mode='{self.mode}' with num_neighbors={self.num_neighbors}"
+                f"[smudgy] Computing smoothing {method_str} from {self.num_neighbors} neighbors"
             )
 
         # construct kwargs
@@ -197,10 +211,10 @@ class PointCloud:
             "query_positions": query_positions,
         }
 
-        if self.mode in ["adaptive", "isotropic"]:
+        if self.method == "isotropic":
             self.hsm, self.nn_inds, self.nn_dists = compute_hsm(**kwargs)
 
-        elif self.mode == "anisotropic":
+        elif self.method == "anisotropic":
             (
                 self.h_tensor,
                 self.h_eigvals,
@@ -208,22 +222,22 @@ class PointCloud:
                 self.nn_inds,
                 self.nn_dists,
                 self.rel_coords,
-            ) = compute_hsm_tensor(**kwargs, weights=self.weight)
+            ) = compute_hsm_tensor(**kwargs, weights=self.weights)
 
         else:
             raise AssertionError(
-                f"'mode' must be either, 'adaptive', 'isotropic' or 'anisotropic' but found {self.mode}"
+                f"'method' must be either, 'isotropic' or 'anisotropic' but found {self.method}"
             )
 
         # Safeguard: check for invalid neighbor indices
         if hasattr(self, "nn_inds"):
             max_idx = np.max(self.nn_inds)
-            if max_idx >= self.pos.shape[0]:
+            if max_idx >= self.positions.shape[0]:
                 raise IndexError(
-                    f"Neighbor index {max_idx} is out of bounds for {self.pos.shape[0]} particles. This indicates a bug in the neighbor search or input setup."
+                    f"Neighbor index {max_idx} is out of bounds for {self.positions.shape[0]} particles. This indicates a bug in the neighbor search or input setup."
                 )
 
-    def compute_density(self) -> None:
+    def compute_density(self, kernel_name: str = None) -> None:
         """Compute particle densities using SPH kernels.
 
         Supports both isotropic and anisotropic smoothing modes. Requires that
@@ -231,47 +245,51 @@ class PointCloud:
 
         Parameters
         ----------
-        None
-                This method does not take any arguments.
+        kernel_name
+                Name of the SPH kernel to use.
 
         Returns
         -------
         None
                 The result is stored in the instance attribute ``density``.
-
         """
-        assert self.mode in [
-            "isotropic",
-            "anisotropic",
-        ], "`mode` must be one of ['isotropic', 'anisotropic'] to compute density"
-        self._check_kernel_set()
+        self._check_method_set()
+
+        # if kernel_name is provided, set the kernel; otherwise check that it has already been set
+        if kernel_name is not None:
+            self._set_kernel(kernel_name)
+        else:
+            self._check_kernel_set()
+
+        # check that smoothing lengths/tensors have been computed
         self._check_smoothing_computed()
 
-        # Build kernel arguments based on mode
+        # Build kernel arguments based on method
         kwargs = {}
-        if self.mode == "isotropic":
+        if self.method == "isotropic":
             kwargs["r_ij"] = self.nn_dists
-            kwargs["smoothing_lengths"] = self.hsm
+            kwargs["h"] = self.hsm
 
-        elif self.mode == "anisotropic":
+        elif self.method == "anisotropic":
             kwargs["r_ij"] = self.rel_coords
-            kwargs["smoothing_tensors"] = self.h_tensor
+            kwargs["h"] = self.h_tensor
 
         # Kernel evaluation and density computation
-        w = self.kernel.evaluate_kernel(**kwargs)
-        print(1, w.shape, self.weight.shape)
-        self.density = np.sum(self.weight[self.nn_inds] * w, axis=1)
+        w = self.kernel.evaluate(**kwargs)
+        self.density = np.sum(self.weights[self.nn_inds] * w, axis=1)
 
     def interpolate_fields(
         self,
         fields: npt.ArrayLike,
         query_positions: npt.ArrayLike,
+        kernel_name: str = None,
         compute_gradients: bool = False,
     ) -> npt.NDArray[np.floating]:
         """Interpolate particle fields to arbitrary query positions using SPH.
 
         Requires that ``compute_smoothing_lengths`` and ``compute_density`` have been
         called first. Automatically computes density if not already available.
+        No method specification (isotropic / anisotropic) needed, since that only affects how densities are computed.
 
         Parameters
         ----------
@@ -279,6 +297,8 @@ class PointCloud:
                 Array of shape ``(N, num_fields)`` or ``(N,)`` with particle field data.
         query_positions
                 Array of shape ``(M, D)`` with positions where fields are interpolated.
+        kernel_name
+                Name of the SPH kernel to use for interpolation (e.g., ``"cubic_spline"``, ``"quintic_spline"``).
         compute_gradients
                 If ``True``, compute field gradients at query positions instead of values.
 
@@ -301,57 +321,68 @@ class PointCloud:
         if fields.ndim == 1:
             fields = fields[:, np.newaxis]  # make it (N, 1)
         assert (
-            fields.shape[0] == self.pos.shape[0]
-        ), f"'fields' array must have the same length as positions array but found position length = {self.pos.shape[0]} and fields length={fields.shape[0]}"
+            fields.shape[0] == self.positions.shape[0]
+        ), f"'fields' array must have the same length as positions array but found position length = {self.positions.shape[0]} and fields length={fields.shape[0]}"
 
         if not hasattr(self, "density"):
             if self.verbose:
-                print("Particle density has not been computed yet, computing now")
-            self.compute_density()
+                print(
+                    "[smudgy] Particle density has not been computed yet, computing now"
+                )
+            self.compute_density(kernel_name=kernel_name)
 
         return _interpolate_fields(
             tree=self.tree,
-            positions=self.pos,
-            weights=self.weight,
+            positions=self.positions,
+            weights=self.weights,
             density=self.density,
             fields=fields,
-            kernel=self.kernel,
+            kernel_name=kernel_name,
             num_neighbors=self.num_neighbors,
             query_positions=query_positions,
             boxsize=self.boxsize,
-            mode=self.mode,
+            method=self.method,
             compute_gradients=compute_gradients,
         )
 
     def interpolate_grad_fields(
         self,
         query_positions: npt.ArrayLike,
+        kernel_name: str = None,
     ) -> npt.NDArray[np.floating]:
         """Compute gradients of particle fields at arbitrary query positions using SPH.
 
         Convenience wrapper around `interpolate_fields` with `compute_gradients=True`.
 
-        Args:
-                query_positions: Array of shape (M, D) with positions where gradients are evaluated.
+        Parameters
+        ----------
+        query_positions
+            Array of shape (M, D) with positions where gradients are evaluated.
 
-        Returns:
-                Array of shape (M, num_fields, D) with interpolated field gradients.
+        kernel_name
+            Name of the SPH kernel to use for interpolation.
 
+        Returns
+        -------
+        numpy.ndarray
+            Array of shape (M, num_fields, D) with interpolated field gradients.
         """
-        return self.interpolate_fields(query_positions, compute_gradients=True)
+        return self.interpolate_fields(
+            query_positions, kernel_name=kernel_name, compute_gradients=True
+        )
 
     def deposit_to_grid(
         self,
         fields: npt.ArrayLike,
         averaged: Sequence[bool],
         gridnums: int | Sequence[int],
-        method: str,
+        method: str | None = None,
         extent: Sequence[Sequence[float]] | None = None,
         plane_projection: str | None = None,
         return_weights: bool = False,
-        kernel: str = "quintic",
+        kernel_name: str = None,
         integration: str = "midpoint",
-        min_kernel_evaluations: int = 128,
+        min_kernel_evaluations_per_axis: int = 128,
         use_python: bool = False,
         use_openmp: bool = True,
         omp_threads: int | None = None,
@@ -382,12 +413,12 @@ class PointCloud:
                 3D smoothing tensors to 2D before deposition. Only valid for 3D positions.
         return_weights
                 Whether to also return the grid of accumulated weights.
-        kernel
+        kernel_name
                 SPH kernel name used for isotropic/anisotropic methods.
         integration
                 Quadrature rule for SPH kernel integration (e.g., ``"midpoint"``).
-        min_kernel_evaluations
-                Minimum number of kernel samples for SPH methods.
+        min_kernel_evaluations_per_axis
+                Minimum number of kernel samples per axis for SPH methods (total samples = min_kernel_evaluations_per_axis ** dim).
         use_python
                 Use Python backend instead of C++ backend (mainly for debugging).
         use_openmp
@@ -421,22 +452,25 @@ class PointCloud:
         else:
             omp_threads_value = 0
 
+        if method is None:
+            self._check_method_set()
+
         # deposition grid dimension is coordinate dimension unless projecting to 2D plane
-        deposition_dim = self.pos.shape[1] if plane_projection is None else 2
+        deposition_dim = self.positions.shape[1] if plane_projection is None else 2
 
         # check that plane_projection is only specified for 3D point clouds
         if plane_projection and self.dim != 3:
             raise ValueError(
-                f"Plane projection can only be specified for 3D particle positions, but found positions with shape {self.pos.shape}"
+                f"Plane projection can only be specified for 3D particle positions, but found positions with shape {self.positions.shape}"
             )
 
         # check and typecast the 'fields' parameter
         fields = np.asarray(fields, dtype=np.float32)
         if fields.ndim == 1:
             fields = fields[:, np.newaxis]  # convert to (N, 1) if given as (N,)
-        if fields.shape[0] != self.pos.shape[0]:
+        if fields.shape[0] != self.positions.shape[0]:
             raise ValueError(
-                f"'fields' array length ({fields.shape[0]}) must match number of particles ({self.pos.shape[0]})"
+                f"'fields' array length ({fields.shape[0]}) must match number of particles ({self.positions.shape[0]})"
             )
 
         # check that either smoothing lengths or tensors have been computed if necessary
@@ -446,7 +480,7 @@ class PointCloud:
             and not hasattr(self, "h_tensor")
         ):
             raise AttributeError(
-                "You must first compute smoothing lengths or tensors using the 'compute_smoothing_lengths' method before depositing to grid"
+                f"No smoothing lengths or tensors computed for method {method}, use the 'compute_smoothing_lengths' method before depositing to grid"
             )
 
         # check and typecast the 'averaged' parameter
@@ -456,7 +490,7 @@ class PointCloud:
         if extent is None:  # assume periodic box and deposit over [0, boxsize]
             if self.boxsize is None:
                 raise ValueError(
-                    "Either 'boxsize' must be set on the class or 'extent' must be provided"
+                    f"Either 'boxsize' must be set on the class or 'extent' must be provided"
                 )
             boxsize_array = np.asarray(self.boxsize, dtype=np.float32)
             if boxsize_array.ndim == 0:
@@ -481,7 +515,7 @@ class PointCloud:
             domain_min = extent_array[:, 0]
             domain_max = extent_array[:, 1]
             if np.any(domain_max <= domain_min):
-                raise ValueError("Each extent axis must have max > min")
+                raise ValueError(f"Each extent axis must have max > min")
             periodic_flag = False
 
         # check and typecast the 'gridnums' parameter
@@ -495,7 +529,7 @@ class PointCloud:
         gridnums_array = np.ascontiguousarray(gridnums_array, dtype=np.int32)
 
         # shift the particle positions to be within [0, boxsize_i] for each axis i
-        positions = self.pos
+        positions = self.positions
         domain_lengths = domain_max - domain_min
         masks = []
         for axis in range(deposition_dim):
@@ -554,9 +588,9 @@ class PointCloud:
             return_weights=return_weights,
             method=method,
             use_python=use_python,
-            kernel=kernel,
+            kernel_name=kernel_name,
             integration=integration,
-            min_kernel_evaluations=min_kernel_evaluations,
+            min_kernel_evaluations_per_axis=min_kernel_evaluations_per_axis,
             use_openmp=use_openmp,
             omp_threads=omp_threads_value,
             verbose=self.verbose,

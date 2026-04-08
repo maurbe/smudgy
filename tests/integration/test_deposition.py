@@ -1,13 +1,12 @@
 """Test suite for deposition operations in SPH library."""
 
-import numpy as np
 import pytest
-
+import numpy as np
 from smudgy import PointCloud
 
 
-@pytest.mark.parametrize("mode", ["isotropic", "anisotropic"])
-def test_deposition_grid_adaptive(mode):
+@pytest.mark.parametrize("method", ["isotropic", "anisotropic"])
+def test_deposition_grid_adaptive(method):
     """Test grid deposition for adaptive modes."""
     np.random.seed(42)
     N = 100
@@ -15,11 +14,11 @@ def test_deposition_grid_adaptive(mode):
     positions = np.random.uniform(0, 1, size=(N, D))
     values = np.random.uniform(-1, 1, size=(N, 1))
     weights = np.ones(N)
-    boxsize = np.ones(D)
-    gridnums = np.array([16, 16, 16])
+    boxsize = 1.0
+    gridnums = 16
 
     pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
-    pc.set_sph_parameters(mode=mode)
+    pc.setup(method=method)
     pc.compute_smoothing_lengths()
 
     averaged = [False] * values.shape[1]
@@ -28,11 +27,11 @@ def test_deposition_grid_adaptive(mode):
         fields=values,
         averaged=averaged,
         gridnums=gridnums,
-        method=mode,
+        method=method,
         return_weights=True,
-        kernel="quintic",
+        kernel_name="quintic_spline",
         integration="midpoint",
-        min_kernel_evaluations=128,
+        min_kernel_evaluations_per_axis=4,
     )
     fields, weights = result
-    assert fields.shape[:3] == tuple(gridnums)
+    assert fields.shape[:3] == tuple([gridnums] * 3)

@@ -1,5 +1,4 @@
 #include "_integration.h"
-
 #include <stdexcept>
 
 float integrate_cell_2d(const std::string& method,
