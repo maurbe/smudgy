@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 from smudgy import check_kernel_integral
 
-DIMS = [2, 3]
+DIMS = [1, 2, 3]
 MIN_KERNEL_EVALUATIONS_PER_AXIS = [1, 17, 23, 100]
 KERNEL_NAMES = [
     "lucy",
@@ -14,6 +14,10 @@ KERNEL_NAMES = [
     "wendland_c2",
     "wendland_c4",
     "wendland_c6",
+    "tophat",
+    "tsc",
+    #"tophat_rect", # is defined on cartesian grid, so cannot use spherical function
+    #"tsc_rect", # is defined on cartesian grid, so cannot use spherical function
 ]
 
 

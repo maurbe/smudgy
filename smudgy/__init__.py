@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .main import *
+from .pointcloud import *
 from .utils import *
 from .grid import *
 

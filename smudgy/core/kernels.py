@@ -162,14 +162,7 @@ class LucyKernel(BaseClassKernel):
         super().__init__(dim=dim)
 
     def _kernel_sigma(self) -> float:
-        """Compute the normalization constant for the Lucy kernel.
-
-        Returns
-        -------
-        float
-                Normalization constant depending on dimension.
-
-        """
+        """Compute the normalization constant for the Lucy kernel."""
         if self.dim == 1:
             return 5.0 / 4.0
         elif self.dim == 2:
@@ -178,40 +171,98 @@ class LucyKernel(BaseClassKernel):
             return 105.0 / (16.0 * math.pi)
 
     def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        """Evaluate the Lucy kernel support function for normalized distance $q = r/h$.
-
-        Parameters
-        ----------
-        q
-                Normalized distances (dimensionless), in range ``[0, 1]``.
-
-        Returns
-        -------
-        numpy.ndarray
-                Kernel values of the same shape as input.
-
-        """
         mask = q <= 1
         return np.where(mask, (1 + 3 * q) * (1 - q) ** 3, 0.0)
 
     def _kernel_gradient_values(
         self, q: npt.NDArray[np.floating]
     ) -> npt.NDArray[np.floating]:
-        """Evaluate the Lucy kernel support derivative $dW/dq$.
-
-        Parameters
-        ----------
-        q
-                Normalized distances (dimensionless), in range ``[0, 1]``.
-
-        Returns
-        -------
-        numpy.ndarray
-                Kernel gradient values $dW/dq$ of the same shape as input.
-
-        """
         mask = q <= 1
         return np.where(mask, -12 * q * (1 - q) ** 2, 0.0)
+
+
+class TophatKernel(BaseClassKernel):
+    """Spherically symmetric Tophat kernel."""
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 0.5
+        elif self.dim == 2:
+            return 1.0 / math.pi
+        elif self.dim == 3:
+            return 3.0 / (4.0 * math.pi)
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        return np.where(q <= 1.0, 1.0, 0.0)
+
+    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        # Gradient of Tophat is a delta function at q=1, numerically problematic.
+        return np.zeros_like(q)
+
+
+class TophatRectKernel(BaseClassKernel):
+    """Rectangular Tophat kernel (Product of 1D Tophats)."""
+
+    def _kernel_sigma(self) -> float:
+        return 1.0
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        # For TophatRect, support is 0.5 in each dimension.
+        return np.where(q <= 0.5, 1.0, 0.0)
+
+    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        return np.zeros_like(q)
+
+
+class TSCKernel(BaseClassKernel):
+    """Spherically symmetric Triangular-Shaped Cloud (TSC) kernel."""
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 1.0
+        elif self.dim == 2:
+            return 2.0 / math.pi
+        elif self.dim == 3:
+            return 1.5 / math.pi
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        val = np.zeros_like(q)
+        mask1 = q <= 0.5
+        mask2 = (q > 0.5) & (q <= 1.5)
+        val[mask1] = 0.75 - q[mask1] ** 2
+        val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
+        return val
+
+    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        grad = np.zeros_like(q)
+        mask1 = q <= 0.5
+        mask2 = (q > 0.5) & (q <= 1.5)
+        grad[mask1] = -2.0 * q[mask1]
+        grad[mask2] = -(1.5 - q[mask2])
+        return grad
+
+
+class TSCRectKernel(BaseClassKernel):
+    """Rectangular TSC kernel (Product of 1D TSCs)."""
+
+    def _kernel_sigma(self) -> float:
+        return 1.0
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        val = np.zeros_like(q)
+        mask1 = q <= 0.5
+        mask2 = (q > 0.5) & (q <= 1.5)
+        val[mask1] = 0.75 - q[mask1] ** 2
+        val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
+        return val
+
+    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        grad = np.zeros_like(q)
+        mask1 = q <= 0.5
+        mask2 = (q > 0.5) & (q <= 1.5)
+        grad[mask1] = -2.0 * q[mask1]
+        grad[mask2] = -(1.5 - q[mask2])
+        return grad
 
 
 class GaussianKernel(BaseClassKernel):
@@ -432,6 +483,10 @@ KERNEL_CLASSES = {
     "wendland_c2": WendlandC2Kernel,
     "wendland_c4": WendlandC4Kernel,
     "wendland_c6": WendlandC6Kernel,
+    "tophat": TophatKernel,
+    "tophat_rect": TophatRectKernel,
+    "tsc": TSCKernel,
+    "tsc_rect": TSCRectKernel,
 }
 
 

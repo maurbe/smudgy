@@ -1,27 +1,210 @@
-#include "_kernels.h"
-#include "_integration.h"
-
 #include <iostream>
 #include <algorithm>
 #include <cmath>
 
+#include "_kernels.h"
+#include "_integration.h"
+
+
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
 }
+class TophatRect : public SPHKernel {
+    // Rectangular Tophat (NGP equivalent)
+    public:
+    explicit TophatRect(int dim) : SPHKernel(dim) {}
+    
+    const float SUPPORT = 0.5f;
+    
+    float evaluate(float q) const override {
+        // q is the maximum component |x_i| for a rectangular kernel
+        if (q > SUPPORT) return 0.0f;
+        return 1.0f;
+    }
+    
+    float support() const override { return SUPPORT; }
+    
+    float sigma() const override {
+        return 1.0f;
+    }
+    
+    float F(float q) const override {
+        if (q < 0.0f) return 0.0f;
+        if (q > SUPPORT) q = SUPPORT;
+        
+        if (dim_ == 1) return q;
+        if (dim_ == 2) return q * q;
+        if (dim_ == 3) return q * q * q;
+        throw std::invalid_argument("Unsupported dimension for TophatRect");
+    }
+};
 
+class TSCRect : public SPHKernel {
+    // Rectangular TSC
+    public:
+    explicit TSCRect(int dim) : SPHKernel(dim) {}
+
+    const float SUPPORT = 1.5f;
+    
+    float evaluate(float q) const override {
+        // 1D TSC kernel on support [-1.5, 1.5]
+        if (q >= support()) return 0.0f;
+        if (q <= 0.5f) {
+            return 0.75f - q * q;
+        } else {
+            float val = SUPPORT - q;
+            return 0.5f * val * val;
+        }
+    }
+    
+    float support() const override { return SUPPORT; }
+    
+    float sigma() const override {
+        return 1.0f;
+    }
+    
+    float F(float q) const override {
+        if (q < 0.0f) return 0.0f;
+        if (q > SUPPORT) q = SUPPORT;
+        
+        float f1d;
+        if (q <= 0.5f) {
+            f1d = 0.75f * q - (1.0f / 3.0f) * q * q * q;
+        } else {
+            f1d = (1.0f / 3.0f) - (1.0f / 6.0f) * (std::pow(SUPPORT - q, 3) - 1.0f);
+        }
+        
+        // For rectangular kernels, F(q) returns the integral from 0 to q along each dimension
+        if (dim_ == 1) return f1d;
+        if (dim_ == 2) return f1d * f1d;
+        if (dim_ == 3) return f1d * f1d * f1d;
+        throw std::invalid_argument("Unsupported dimension for TSCRect");
+    }
+};
+
+class Tophat : public SPHKernel {
+// spherical tophat
+public:
+    explicit Tophat(int dim) : SPHKernel(dim) {}
+
+    const float SUPPORT = 1.0f;
+
+    float evaluate(float q) const override {
+        if (q > SUPPORT) return 0.0f;
+        return 1.0f;
+    }
+
+    float support() const override { return SUPPORT; }
+
+    float sigma() const override {
+        if (dim_ == 1) return 0.5f;
+        if (dim_ == 2) return 1.0f / kPi;
+        if (dim_ == 3) return 3.0f / (4.0f * kPi);
+        throw std::invalid_argument("Unsupported dimension for Tophat");
+    }
+
+    float F(float q) const override {
+        if (q < 0.0f) return 0.0f;
+        if (q > SUPPORT) q = SUPPORT;
+
+        if (dim_ == 1) {
+            return q;
+        }
+
+        if (dim_ == 2) {
+            return 0.5f * q * q;
+        }
+
+        if (dim_ == 3) {
+            return (1.0f / 3.0f) * q * q * q;
+        }
+        throw std::invalid_argument("Unsupported dimension");
+    }
+};
+
+class TSC : public SPHKernel {
+// spherical triangular-shaped cloud (TSC)
+public:
+    explicit TSC(int dim) : SPHKernel(dim) {}
+
+    const float SUPPORT = 1.5f;
+    const float NODE_1 = 0.5f;
+    const float EPS = 1e-6f;
+
+    float evaluate(float q) const override {
+        if (q >= SUPPORT) return 0.0f;
+        if (q <= NODE_1) {
+            return 0.75f - q * q;
+        } else {
+            float h = SUPPORT - q;
+            return 0.5f * h * h;
+        }
+    }
+
+    float support() const override { return SUPPORT; }
+
+    float sigma() const override {
+        if (dim_ == 1) return 1.0f;
+        if (dim_ == 2) return 1.0f / 1.27627f;
+        if (dim_ == 3) return 1.0f / 1.5708f;
+        throw std::invalid_argument("Unsupported dimension");
+    }
+
+    float F(float q) const override {
+        if (q < 0.0f) return 0.0f;
+        if (q > SUPPORT) q = SUPPORT;
+
+        if (dim_ == 1) {
+            if (q <= NODE_1) {
+                return 0.75f * q - (1.0f / 3.0f) * q * q * q;
+            } else {
+                return std::pow(q, 3) / 6.0f - 3.0f / 4.0f * q * q + 9.0f/8.0f * q;
+            }
+        }
+
+        if (dim_ == 2) {
+            if (q <= NODE_1) {
+                return 0.375f * q * q - 0.25f * std::pow(q, 4);
+            } else {
+                return q * q / 2.0f * (0.25f * q * q - q + 1.125f);
+            }
+        }
+
+        if (dim_ == 3) {
+            if (q <= NODE_1) {
+                return std::pow(q, 3) * (0.25f - 0.2f * q * q);
+            } else {
+                return std::pow(q, 3) * (0.375f - 0.375f * q + 0.1 * q * q);
+            }
+        }
+        throw std::invalid_argument("Unsupported dimension");
+    }
+
+    float evaluate_integral(float q1, float q2) const override {
+        if (q2 >= SUPPORT) q2 = SUPPORT;
+        if (q1 <= 0.0f) q1 = 0.0f;
+
+        if (q1 <= NODE_1 && NODE_1 < q2) {
+            return F(NODE_1) - F(q1) + F(q2) - F(NODE_1 + EPS); // add small epsilon to ensure we evaluate the second part of the integral using the correct kernel shape
+        }
+        else {
+            return F(q2) - F(q1);
+        }
+    }
+};
 
 class Lucy : public SPHKernel {
 public:
     explicit Lucy(int dim) : SPHKernel(dim) {}
 
+    const float SUPPORT = 1.0f;
+
     float evaluate(float q) const override {
-        if (q > support()) return 0.0f;
+        if (q > SUPPORT) return 0.0f;
         return (1.0f + 3.0f * q) * std::pow(1.0f - q, 3);
     }
 
-    float support() const override {
-        return 1.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 5.0f / (4.0f);
@@ -32,7 +215,7 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         if (dim_ == 1) {
             // ∫ K(q) dq
@@ -66,14 +249,14 @@ class Gaussian : public SPHKernel {
 public:
     explicit Gaussian(int dim): SPHKernel(dim) {}
 
+    const float SUPPORT = 3.0f;
+
     float evaluate(float q) const override {
         if (q >= support()) return 0.0f;
         return std::exp(-q * q);
     }
 
-    float support() const override {
-        return 3.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 1.0f / std::sqrt(kPi);
@@ -84,7 +267,7 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         if (dim_ == 1) {
             return 0.5f * std::sqrt(kPi) * std::erf(q);
@@ -106,26 +289,25 @@ class CubicSpline : public SPHKernel {
 public:
     explicit CubicSpline(int dim) : SPHKernel(dim) {}
 
-    const float BREAKPOINT_1 = 1.0f;
+    const float SUPPORT = 2.0f;
+    const float NODE_1 = 1.0f;
     const float EPS = 1e-6f;
 
     float evaluate(float q) const override {
-        if (q >= support()) return 0.0f;
+        if (q >= SUPPORT) return 0.0f;
 
         float r = 2.0f - q;
         float r3 = r * r * r;
         float h = 1.0f - q;
         float h3 = h * h * h;
-        if (q <= BREAKPOINT_1) {
+        if (q <= NODE_1) {
             return r3 - 4.0f * h3; // std::pow(2.0f - q, 3) - 4.0f * std::pow(1.0f - q, 3);
         } else {
             return r3;  //std::pow(2.0f - q, 3);
         }
     }
 
-    float support() const override {
-        return 2.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 1.0f / (6.0f);
@@ -136,11 +318,11 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         if (dim_ == 1) {
             // ∫ K(q) dq
-            if (q <= BREAKPOINT_1) {
+            if (q <= NODE_1) {
                 return q * (4.0f - 2.0f * std::pow(q, 2) + 0.75f * std::pow(q, 3));
             } else {
                 return -0.25f * std::pow(2.0f - q, 4);
@@ -149,7 +331,7 @@ public:
 
         if (dim_ == 2) {
             // ∫ K(q) * q dq
-            if (q <= BREAKPOINT_1) {
+            if (q <= NODE_1) {
                 return std::pow(q, 2) * 
                 (
                     2.0f 
@@ -175,7 +357,7 @@ public:
 
             float q2 = q * q;
             float q3 = q2 * q;
-            if (q <= BREAKPOINT_1) {
+            if (q <= NODE_1) {
                 return q3 * 
                     (
                         4.0f / 3.0f 
@@ -197,11 +379,11 @@ public:
     }
 
     float evaluate_integral(float q1, float q2) const override {
-        if (q2 >= support()) q2 = support();
+        if (q2 >= SUPPORT) q2 = SUPPORT;
         if (q1 <= 0.0f) q1 = 0.0f;
 
-        if (q1 <= BREAKPOINT_1 && BREAKPOINT_1 < q2) {
-            return F(BREAKPOINT_1) - F(q1) + F(q2) - F(BREAKPOINT_1 + EPS); // add small epsilon to ensure we evaluate the second part of the integral using the correct kernel shape
+        if (q1 <= NODE_1 && NODE_1 < q2) {
+            return F(NODE_1) - F(q1) + F(q2) - F(NODE_1 + EPS); // add small epsilon to ensure we evaluate the second part of the integral using the correct kernel shape
         }
         else {
             return F(q2) - F(q1);
@@ -213,12 +395,13 @@ class QuinticSpline : public SPHKernel {
 public:
     explicit QuinticSpline(int dim) : SPHKernel(dim) {}
 
-    const float BREAKPOINT_1 = 1.0f;
-    const float BREAKPOINT_2 = 2.0f;
+    const float SUPPORT = 3.0f;
+    const float NODE_1 = 1.0f;
+    const float NODE_2 = 2.0f;
     const float EPS = 1e-6f;
 
     float evaluate(float q) const override {
-        if (q >= support()) return 0.0f;
+        if (q >= SUPPORT) return 0.0f;
 
         float result = 0.0f;
         float f = 3.0f - q;
@@ -229,9 +412,9 @@ public:
         float s5 = s * s * s * s * s;
         float t5 = t * t * t * t * t;
 
-        if (q < BREAKPOINT_1) {
+        if (q < NODE_1) {
             result = f5 - 6 * s5 + 15 * t5;
-        } else if (q < BREAKPOINT_2) {
+        } else if (q < NODE_2) {
             result = f5 - 6 * s5;
         } else {
             result = f5;
@@ -239,9 +422,7 @@ public:
         return result;
     }
 
-    float support() const override {
-        return 3.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 1.0f / (120.0f);
@@ -252,15 +433,15 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         // =========================
         // 1D: ∫ K(q) dq
         // =========================
         if (dim_ == 1) {
-            if (q <= BREAKPOINT_1) {
+            if (q <= NODE_1) {
                 return 66.0f * q - 20.0f * std::pow(q, 3) + 6.0f * std::pow(q, 5) - 5.0f / 3.0f * std::pow(q, 6);
-            } else if (q <= BREAKPOINT_2) {
+            } else if (q <= NODE_2) {
                 return 51.0f * q 
                         + 75.0f / 2.0f * std::pow(q, 2) 
                         - 70.0f * std::pow(q, 3) 
@@ -276,9 +457,9 @@ public:
         // 2D: ∫ K(q) * q dq
         // =========================
         if (dim_ == 2) {
-            if (q <= BREAKPOINT_1) {
+            if (q <= NODE_1) {
                 return std::pow(q, 2) * (33.0f - 15.0f * std::pow(q, 2) + 5.0f * std::pow(q, 4) - 10.0f / 7.0f * std::pow(q, 5));
-            } else if (q <= BREAKPOINT_2) {
+            } else if (q <= NODE_2) {
                 return std::pow(q, 2) * ( 25.5f 
                                         + 25.0f * q 
                                         - 52.5f * std::pow(q, 2)
@@ -301,13 +482,13 @@ public:
         // 3D: ∫ K(q) * q^2 dq
         // =========================
         if (dim_ == 3) {
-            if (q <= BREAKPOINT_1) {
+            if (q <= NODE_1) {
                 return std::pow(q, 3) * (22.0f
                                         - 12.0f * std::pow(q, 2)
                                         + 30.0f / 7.0f * std::pow(q, 4)
                                         - 1.25f * std::pow(q, 5)
                                         );
-            } else if (q <= BREAKPOINT_2) {
+            } else if (q <= NODE_2) {
                 return std::pow(q, 3) * ( 17.0f 
                                         + 75.0f / 4.0f * q 
                                         - 42.0f * std::pow(q, 2)
@@ -330,21 +511,21 @@ public:
     }
 
     float evaluate_integral(float q1, float q2) const override {
-         if (q2 >= support()) q2 = support();
+         if (q2 >= SUPPORT) q2 = SUPPORT;
          if (q1 <= 0.0f) q1 = 0.0f;
 
         // case 1
-        if (q1 <= BREAKPOINT_1 && BREAKPOINT_2 < q2) {
-            return F(BREAKPOINT_1) - F(q1) 
-                + (F(BREAKPOINT_2) - F(BREAKPOINT_1 + EPS)) 
-                + (F(q2) - F(BREAKPOINT_2 + EPS));
+        if (q1 <= NODE_1 && NODE_2 < q2) {
+            return F(NODE_1) - F(q1) 
+                + (F(NODE_2) - F(NODE_1 + EPS)) 
+                + (F(q2) - F(NODE_2 + EPS));
         }
         // case 2
-        else if (q1 <= BREAKPOINT_1 && BREAKPOINT_1 < q2) {
-            return F(BREAKPOINT_1) - F(q1) + F(q2) - F(BREAKPOINT_1 + EPS);
+        else if (q1 <= NODE_1 && NODE_1 < q2) {
+            return F(NODE_1) - F(q1) + F(q2) - F(NODE_1 + EPS);
         }
-        else if (q1 <= BREAKPOINT_2 && BREAKPOINT_2 < q2) {
-            return F(BREAKPOINT_2) - F(q1) + F(q2) - F(BREAKPOINT_2 + EPS);
+        else if (q1 <= NODE_2 && NODE_2 < q2) {
+            return F(NODE_2) - F(q1) + F(q2) - F(NODE_2 + EPS);
         }
         else {
             return F(q2) - F(q1);
@@ -356,8 +537,10 @@ class WendlandC2 : public SPHKernel {
 public:
     explicit WendlandC2(int dim) : SPHKernel(dim) {}
 
+    const float SUPPORT = 2.0f;
+
     float evaluate(float q) const override {
-        if (q >= support()) return 0.0f;
+        if (q >= SUPPORT) return 0.0f;
 
         float z = 1.0f - 0.5f * q;
         if (dim_ == 1)
@@ -366,9 +549,7 @@ public:
             return std::pow(z, 4) * (2.0f * q + 1.0f);
     }
 
-    float support() const override {
-        return 2.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 5.0f / (8.0f);
@@ -379,10 +560,10 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         if (dim_ == 1) {
-            // ∫ K dq
+            // F(q) = ∫ K dq
             return q
                 - 0.5f * std::pow(q, 3)
                 + 0.25f * std::pow(q, 4)
@@ -390,7 +571,7 @@ public:
         }
 
         if (dim_ == 2) {
-            // ∫ K * q dq
+            // F(q) = ∫ K * q dq
             return std::pow(q, 2) / 16.0f * (8.0f
                                             - 10.0f * std::pow(q, 2)
                                             + 8.0f * std::pow(q, 3)
@@ -400,7 +581,7 @@ public:
         }
 
         if (dim_ == 3) {
-            // ∫ K * q^2 dq
+            // F(q) = ∫ K * q^2 dq
             return std::pow(q, 3) / 16.0f * (16.0f / 3.0f
                                             - 8.0f * std::pow(q, 2)
                                             + 20.0f / 3.0f * std::pow(q, 3)
@@ -417,6 +598,8 @@ class WendlandC4 : public SPHKernel {
 public:
     explicit WendlandC4(int dim) : SPHKernel(dim) {}
 
+    const float SUPPORT = 2.0f;
+
     float evaluate(float q) const override {
         if (q >= support()) return 0.0f;
 
@@ -427,9 +610,7 @@ public:
             return std::pow(z, 6) * ((35.0f / 12.0f) * q * q + 3.0f * q + 1.0f);
     }
 
-    float support() const override {
-        return 2.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 3.0f / (4.0f);
@@ -440,7 +621,7 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         if (dim_ == 1) {
             return q / 64.0f * (64.0f
@@ -482,8 +663,10 @@ class WendlandC6 : public SPHKernel {
 public:
     explicit WendlandC6(int dim) : SPHKernel(dim) {}
 
+    const float SUPPORT = 2.0f;
+
     float evaluate(float q) const override {
-        if (q >= support()) return 0.0f;
+        if (q >= SUPPORT) return 0.0f;
 
         float z = 1.0f - 0.5f * q;
         if (dim_ == 1)
@@ -492,9 +675,7 @@ public:
             return std::pow(z, 8) * (4.0f * std::pow(q, 3) + 6.25f * std::pow(q, 2) + 4.0f * q + 1.0f);
     }
 
-    float support() const override {
-        return 2.0f;
-    }
+    float support() const override { return SUPPORT; }
 
     float sigma() const override {
         if (dim_ == 1) return 55.0f / (64.0f);
@@ -505,7 +686,7 @@ public:
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
-        if (q > support()) q = support();
+        if (q > SUPPORT) q = SUPPORT;
 
         if (dim_ == 1) {
             return 1.0f / 1024.0f * (
@@ -572,6 +753,29 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
     grid.integrals.reserve(total_number_o);
 
     const float support = kernel.support();
+
+    if (grid.dim == 1) {
+        int n_q = min_kernel_evaluations_per_axis;
+
+        const float dq = support / static_cast<float>(n_q);
+
+        for (int iq = 0; iq < n_q; ++iq) {
+            const float q0 = static_cast<float>(iq) * dq;
+            const float q  = q0 + dq * 0.5f;
+            const float q1 = q0 + dq;
+
+            // this integral is now analytically evaluated and thus exact!
+            // factor 2, since we integrate from [-support, + support]
+            float integral = kernel.sigma() * 2.0f * kernel.evaluate_integral(q0, q1);
+
+            std::cout << "q0: " << q0 << ", q1: " << q1 << ", integral: " << integral << std::endl;
+
+            grid.coords.push_back(q);
+            grid.q.push_back(q);
+            grid.integrals.push_back(integral);
+        }
+        return grid;
+    }
 
     if (grid.dim == 2) {
         
@@ -651,7 +855,19 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
 
 std::shared_ptr<SPHKernel> create_kernel(const std::string& name, int dim) {
 
-    if (name == "lucy") {
+    if (name == "tophat") {
+        return std::make_shared<Tophat>(dim);
+    }
+    else if (name == "tophat_rect") {
+        return std::make_shared<TophatRect>(dim);
+    }
+    else if (name == "tsc") {
+        return std::make_shared<TSC>(dim);
+    }
+    else if (name == "tsc_rect") {
+        return std::make_shared<TSCRect>(dim);
+    }
+    else if (name == "lucy") {
         return std::make_shared<Lucy>(dim);
     } 
     else if (name == "gaussian") {

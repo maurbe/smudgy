@@ -10,6 +10,8 @@ NUM_NEIGHBORS = [3, 4, 5]
 MIN_KERNEL_EVALUATIONS_PER_AXIS = [2, 3, 4]
 INTEGRAL_METHODS = ["midpoint", "trapezoidal", "simpson"]
 KERNEL_NAMES = [
+    "tophat",
+    "tsc",
     "lucy",
     "gaussian",
     "cubic_spline",
