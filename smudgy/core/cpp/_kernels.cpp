@@ -5,19 +5,19 @@
 #include "_kernels.h"
 #include "_integration.h"
 
-
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
 }
-class TophatRect : public SPHKernel {
+
+class TophatRect : public SeparableKernel {
     // Rectangular Tophat (NGP equivalent)
     public:
-    explicit TophatRect(int dim) : SPHKernel(dim) {}
+    explicit TophatRect(int dim) : SeparableKernel(dim) {}
     
     const float SUPPORT = 0.5f;
     
-    float evaluate(float q) const override {
-        // q is the maximum component |x_i| for a rectangular kernel
+    float evaluate_1d(float q) const override {
+        q = std::abs(q);
         if (q > SUPPORT) return 0.0f;
         return 1.0f;
     }
@@ -39,16 +39,18 @@ class TophatRect : public SPHKernel {
     }
 };
 
-class TSCRect : public SPHKernel {
+class TSCRect : public SeparableKernel {
     // Rectangular TSC
     public:
-    explicit TSCRect(int dim) : SPHKernel(dim) {}
+    explicit TSCRect(int dim) : SeparableKernel(dim) {}
 
     const float SUPPORT = 1.5f;
     
-    float evaluate(float q) const override {
+    float evaluate_1d(float q) const override {
         // 1D TSC kernel on support [-1.5, 1.5]
-        if (q >= support()) return 0.0f;
+        q = std::abs(q);
+
+        if (q >= SUPPORT) return 0.0f;
         if (q <= 0.5f) {
             return 0.75f - q * q;
         } else {
@@ -82,10 +84,10 @@ class TSCRect : public SPHKernel {
     }
 };
 
-class Tophat : public SPHKernel {
+class Tophat : public SphericalKernel {
 // spherical tophat
 public:
-    explicit Tophat(int dim) : SPHKernel(dim) {}
+    explicit Tophat(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 1.0f;
 
@@ -122,10 +124,10 @@ public:
     }
 };
 
-class TSC : public SPHKernel {
+class TSC : public SphericalKernel {
 // spherical triangular-shaped cloud (TSC)
 public:
-    explicit TSC(int dim) : SPHKernel(dim) {}
+    explicit TSC(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 1.5f;
     const float NODE_1 = 0.5f;
@@ -193,9 +195,9 @@ public:
     }
 };
 
-class Lucy : public SPHKernel {
+class Lucy : public SphericalKernel {
 public:
-    explicit Lucy(int dim) : SPHKernel(dim) {}
+    explicit Lucy(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 1.0f;
 
@@ -245,9 +247,9 @@ public:
         }
 };
 
-class Gaussian : public SPHKernel {
+class Gaussian : public SphericalKernel {
 public:
-    explicit Gaussian(int dim): SPHKernel(dim) {}
+    explicit Gaussian(int dim): SphericalKernel(dim) {}
 
     const float SUPPORT = 3.0f;
 
@@ -285,9 +287,9 @@ public:
     }
 };
 
-class CubicSpline : public SPHKernel {
+class CubicSpline : public SphericalKernel {
 public:
-    explicit CubicSpline(int dim) : SPHKernel(dim) {}
+    explicit CubicSpline(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 2.0f;
     const float NODE_1 = 1.0f;
@@ -391,9 +393,9 @@ public:
     }
 };
 
-class QuinticSpline : public SPHKernel {
+class QuinticSpline : public SphericalKernel {
 public:
-    explicit QuinticSpline(int dim) : SPHKernel(dim) {}
+    explicit QuinticSpline(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 3.0f;
     const float NODE_1 = 1.0f;
@@ -533,9 +535,9 @@ public:
     }
 };
 
-class WendlandC2 : public SPHKernel {
+class WendlandC2 : public SphericalKernel {
 public:
-    explicit WendlandC2(int dim) : SPHKernel(dim) {}
+    explicit WendlandC2(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 2.0f;
 
@@ -594,9 +596,9 @@ public:
     }
 };
 
-class WendlandC4 : public SPHKernel {
+class WendlandC4 : public SphericalKernel {
 public:
-    explicit WendlandC4(int dim) : SPHKernel(dim) {}
+    explicit WendlandC4(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 2.0f;
 
@@ -659,9 +661,9 @@ public:
     }
 };
 
-class WendlandC6 : public SPHKernel {
+class WendlandC6 : public SphericalKernel {
 public:
-    explicit WendlandC6(int dim) : SPHKernel(dim) {}
+    explicit WendlandC6(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 2.0f;
 
@@ -735,7 +737,7 @@ public:
 };
 
 
-KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
+KernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel,
                                           int min_kernel_evaluations_per_axis
                                         ){
     if (min_kernel_evaluations_per_axis <= 0) {
@@ -767,8 +769,6 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
             // this integral is now analytically evaluated and thus exact!
             // factor 2, since we integrate from [-support, + support]
             float integral = kernel.sigma() * 2.0f * kernel.evaluate_integral(q0, q1);
-
-            std::cout << "q0: " << q0 << ", q1: " << q1 << ", integral: " << integral << std::endl;
 
             grid.coords.push_back(q);
             grid.q.push_back(q);
@@ -853,19 +853,24 @@ KernelSampleGrid build_kernel_sample_grid(const SPHKernel& kernel,
 }
 
 
-std::shared_ptr<SPHKernel> create_kernel(const std::string& name, int dim) {
+std::shared_ptr<SeparableKernel> create_separable_kernel(const std::string& name, int dim) 
+{
+    if (name == "tophat_rect") {
+        return std::make_shared<TophatRect>(dim);
+    }
+    else if (name == "tsc_rect") {
+        return std::make_shared<TSCRect>(dim);
+    }
+    throw std::invalid_argument("Unknown kernel: " + name);
+}
+
+std::shared_ptr<SphericalKernel> create_spherical_kernel(const std::string& name, int dim) {
 
     if (name == "tophat") {
         return std::make_shared<Tophat>(dim);
     }
-    else if (name == "tophat_rect") {
-        return std::make_shared<TophatRect>(dim);
-    }
     else if (name == "tsc") {
         return std::make_shared<TSC>(dim);
-    }
-    else if (name == "tsc_rect") {
-        return std::make_shared<TSCRect>(dim);
     }
     else if (name == "lucy") {
         return std::make_shared<Lucy>(dim);
@@ -888,17 +893,40 @@ std::shared_ptr<SPHKernel> create_kernel(const std::string& name, int dim) {
     else if (name == "wendland_c6") {
         return std::make_shared<WendlandC6>(dim);
     } 
-    throw std::invalid_argument("[smudgy] Unknown kernel: " + name);
+    throw std::invalid_argument("Unknown kernel: " + name);
 }
 
 
 // Computes the total integral of the kernel over its sample grid
 float compute_kernel_total_integral(const std::string& kernel_name, int dim, int min_kernel_evaluations_per_axis) {
-    auto kernel = create_kernel(kernel_name, dim);
+    auto kernel = create_spherical_kernel(kernel_name, dim);
     const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
     float total_integral = 0.0f;
     for (int s = 0; s < kernel_samples.count; ++s) {
         total_integral += kernel_samples.integrals[s];
     }
     return total_integral;
+}
+
+std::tuple<std::vector<float>, std::vector<float>> get_kernel_values_1D(const std::string& kernel_name) 
+{    
+    auto kernel = create_spherical_kernel(kernel_name, 1);
+    float support = kernel->support();
+    int num_samples = 100;
+    float dq = 2.0f * support / static_cast<float>(num_samples);
+
+    struct results {
+        std::vector<float> q;
+        std::vector<float> values;
+    };
+    results res;
+
+    // setup the radial coordinate from [-support, +support] and the corresponding kernel values
+    for (int i = 0; i < num_samples; ++i) {
+        float q_current = -support + i * dq;
+        float kernel_value = kernel->sigma() * kernel->evaluate(std::abs(q_current));
+        res.q.push_back(q_current);
+        res.values.push_back(kernel_value);
+    } 
+    return {res.q, res.values};
 }

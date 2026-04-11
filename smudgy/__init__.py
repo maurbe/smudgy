@@ -26,5 +26,11 @@ def check_kernel_integral(
         kernel_name, dim, min_kernel_evaluations_per_axis
     )
 
+def get_kernel_shapes_1D(kernel_name: str) -> tuple[list[float], list[float]]:
+    """Get the 1D kernel shapes (q values and kernel values)."""
+    from .core import _cpp_functions as cppfunc
 
-__all__ = ["PointCloud", "check_openmp", "check_kernel_integral"]
+    return cppfunc.get_kernel_values_1D(kernel_name)
+
+
+__all__ = ["PointCloud", "check_openmp", "check_kernel_integral", "get_kernel_shapes_1D"]

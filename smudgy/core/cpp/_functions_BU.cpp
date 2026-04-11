@@ -1044,117 +1044,7 @@ void tsc_3d_adaptive_cpp(
 
 
 // =============================================================================
-// Separable kernel deposition (2D)
-// =============================================================================
-
-void separable_kernel_deposition_2d_cpp(
-    const float* positions,           // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* smoothing_lengths,           // (num_particles)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
-    bool periodic,
-    const std::string& kernel_name,
-    const std::string& integration_method,
-    //int min_kernel_evaluations_per_axis,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,             // (gridnum_x, gridnum_y, num_fields)
-    float* weights             // (gridnum_x, gridnum_y)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // set up the kernel and cache integral samples
-    auto kernel = create_separable_kernel(kernel_name, 2);
-    SeparableKernel* kernel_ptr = kernel.get();
-    const float kernel_support = kernel->support();
-    //const auto kernel_samples = build_kernel_sample_grid(*kernel_ptr, min_kernel_evaluations_per_axis);
-    //const int min_kernel_evaluations = kernel_samples.count;
-
-    // extract boxsize parameters
-    const float boxsize_x = boxsizes[0];
-    const float boxsize_y = boxsizes[1];
-
-    // extract grid parameters
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-
-    // compute cell sizes and related parameters
-    const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
-    const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
-
-    // compute strides for fields/weights and set up output arrays
-    const int stride_x = gridnum_y * num_fields;
-    const int stride_y = num_fields;
-    const int weight_stride_x = gridnum_y;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
-
-    // perform for loop over particles
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // gather relevant particle data and precompute kernel prefactor
-        float hsm_current = smoothing_lengths[n];
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current);
-        
-        // convert particle position to cell units
-        float x_cell = positions[2 * n + 0] / cellSize_x;
-        float y_cell = positions[2 * n + 1] / cellSize_y;
-
-        // compute kernel support in physical and cell units
-        float support_x_cell = kernel_support * hsm_current / cellSize_x;
-        float support_y_cell = kernel_support * hsm_current / cellSize_y;
-
-        // compute inclusive index bounds within the kernel support
-        int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
-        int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
-        const float* particle = quantities + n * num_fields;
-
-        /* compute total number of cells in the kernel support
-        int num_cells_x = i_max - i_min;
-        int num_cells_y = j_max - j_min;
-        int total_cells = num_cells_x * num_cells_y;
-        */
-
-        // for separable kernels, typically the integrals are known analytically,
-        // so we can compute them exactly for each cell without needing to cache samples on a grid
-        for (int i = i_min; i <= i_max; ++i) {
-            for (int j = j_min; j <= j_max; ++j) {
-
-                // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                int ii = apply_pbc(i, gridnum_x, periodic);
-                int jj = apply_pbc(j, gridnum_y, periodic);
-                if (is_outside_domain(ii, gridnum_x) || is_outside_domain(jj, gridnum_y)) continue;
-
-                // prepare bounds of current cell
-                float x_left = i * cellSize_x;
-                float y_left = j * cellSize_y;
-                float x_right = (i + 1) * cellSize_x;
-                float y_right = (j + 1) * cellSize_y;
-                std::vector<float> bounds = {x_left, x_right, y_left, y_right};
-
-                // compute total integral over the current cell
-                float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(bounds);
-                integral *= cellSize_x * cellSize_y;
-            
-                // deposit to grid
-                int base_idx = ii * stride_x + jj * stride_y;
-                int weight_idx = ii * weight_stride_x + jj;
-                accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                accumulate_weight(weights, weight_idx, integral, parallel);
-            }
-        }
-    });
-}
-
-// =============================================================================
-// Isotropic kernel deposition (2D)
+// SPH isotropic kernel deposition (2D)
 // =============================================================================
 
 void isotropic_kernel_deposition_2d_cpp(
@@ -1326,7 +1216,7 @@ void isotropic_kernel_deposition_2d_cpp(
 
 
 // =============================================================================
-// Isotropic kernel deposition (3D)
+// SPH isotropic kernel deposition (3D)
 // =============================================================================
 
 void isotropic_kernel_deposition_3d_cpp(
@@ -1525,7 +1415,7 @@ void isotropic_kernel_deposition_3d_cpp(
 
 
 // =============================================================================
-// Anisotropic kernel deposition (2D)
+// SPH anisotropic kernel deposition (2D)
 // =============================================================================
 
 void anisotropic_kernel_deposition_2d_cpp(
@@ -1707,7 +1597,7 @@ void anisotropic_kernel_deposition_2d_cpp(
 
 
 // =============================================================================
-// Anisotropic kernel deposition (3D)
+// SPH anisotropic kernel deposition (3D)
 // =============================================================================
 
 void anisotropic_kernel_deposition_3d_cpp(

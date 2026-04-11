@@ -1,9 +1,7 @@
 """Functions for creating regular grids of cell centers in 1D, 2D, and 3D domains."""
 
 from __future__ import annotations
-
 from collections.abc import Sequence
-
 import numpy as np
 import numpy.typing as npt
 

@@ -47,7 +47,12 @@ class PointCloud:
             self.dim == 2 or self.dim == 3
         ), f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
         self.positions = positions
+
         self.weights = weights
+        assert (
+            self.weights.shape[0] == self.positions.shape[0]
+        ), f"Shape mismatch: length of weights and positions must be the same but found: {self.weights.shape} and {self.positions.shape}"
+
         self.verbose = verbose
 
         if boxsize is None:
@@ -66,12 +71,12 @@ class PointCloud:
 
         if self.verbose:
             periodic_str = (
-                f" with boxsize={self.boxsize}"
+                f"in periodic box of size={self.boxsize}"
                 if self.periodic
-                else " without periodicity"
+                else "without periodicity"
             )
             print(
-                f"[smudgy] Initialized PointCloud with {self.positions.shape[0]} particles in {self.dim}D{periodic_str}"
+                f"[smudgy] Initialized {self.dim}D PointCloud with {self.positions.shape[0]} particles {periodic_str}"
             )
 
     def setup(
@@ -236,6 +241,45 @@ class PointCloud:
                 raise IndexError(
                     f"Neighbor index {max_idx} is out of bounds for {self.positions.shape[0]} particles. This indicates a bug in the neighbor search or input setup."
                 )
+
+    def set_smoothing_lengths(
+            self,
+            hsm: npt.ArrayLike | None = None,
+            h_tensor: npt.ArrayLike | None = None,
+            h_eigvals: npt.ArrayLike | None = None,
+            h_eigvecs: npt.ArrayLike | None = None,
+        ):
+        """
+        Manually assign smoothing lengths or tensors to particles.
+
+        Parameters
+        ----------
+        hsm
+            Array of shape ``(N,)`` with isotropic smoothing lengths.
+        h_tensor
+            Array of shape ``(N, D, D)`` with anisotropic smoothing tensors.
+        h_eigvals
+            Array of shape ``(N, D)`` with eigenvalues of the smoothing tensors.
+        h_eigvecs
+            Array of shape ``(N, D, D)`` with eigenvectors of the smoothing tensors.
+
+        Returns
+        -------
+        None
+            Results are stored on the instance.
+        """
+        if hsm is not None:
+            assert len(hsm) == self.positions.shape[0], f"Length of 'hsm' ({len(hsm)}) must match number of particles ({self.positions.shape[0]})"
+            self.hsm = np.asarray(hsm, dtype=np.float32)
+        if h_tensor is not None:
+            assert len(h_tensor) == self.positions.shape[0], f"Length of 'h_tensor' ({len(h_tensor)}) must match number of particles ({self.positions.shape[0]})"
+            self.h_tensor = np.asarray(h_tensor, dtype=np.float32)
+        if h_eigvals is not None:
+            assert len(h_eigvals) == self.positions.shape[0], f"Length of 'h_eigvals' ({len(h_eigvals)}) must match number of particles ({self.positions.shape[0]})"
+            self.h_eigvals = np.asarray(h_eigvals, dtype=np.float32)
+        if h_eigvecs is not None:
+            assert len(h_eigvecs) == self.positions.shape[0], f"Length of 'h_eigvecs' ({len(h_eigvecs)}) must match number of particles ({self.positions.shape[0]})"
+            self.h_eigvecs = np.asarray(h_eigvecs, dtype=np.float32)
 
     def compute_density(self, kernel_name: str = None) -> None:
         """Compute particle densities using SPH kernels.

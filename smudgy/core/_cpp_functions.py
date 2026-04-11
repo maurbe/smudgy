@@ -27,6 +27,8 @@ if hasattr(_ext, "_tsc_2d_adaptive_cpp"):
     _tsc_2d_adaptive = _ext._tsc_2d_adaptive_cpp
 if hasattr(_ext, "_tsc_3d_adaptive_cpp"):
     _tsc_3d_adaptive = _ext._tsc_3d_adaptive_cpp
+if hasattr(_ext, "_separable_2d_cpp"):
+    _separable_2d = _ext._separable_2d_cpp
 if hasattr(_ext, "_isotropic_2d_cpp"):
     _isotropic_2d = _ext._isotropic_2d_cpp
 if hasattr(_ext, "_isotropic_3d_cpp"):

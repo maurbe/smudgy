@@ -146,6 +146,23 @@ void tsc_3d_adaptive_cpp(
     float* weights
 );
 
+void separable_kernel_deposition_2d_cpp(
+    const float* positions,
+    const float* quantities,
+    const float* smoothing_lengths,
+    int num_particles,
+    int num_fields,
+    const float* boxsizes,
+    const int* gridnums,
+    bool periodic,
+    const std::string& kernel_name,
+    const std::string& integration_method,
+    bool use_openmp,
+    int omp_threads,
+    float* fields,
+    float* weights
+);
+
 void isotropic_kernel_deposition_2d_cpp(
     const float* positions,
     const float* quantities,
