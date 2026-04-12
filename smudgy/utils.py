@@ -63,8 +63,7 @@ def query_kdtree(
     return tree.query(points, k=k, workers=-1)
 
 
-def shift_coordinates(
-        coordinates: npt.ArrayLike) -> FloatArray:
+def shift_coordinates(coordinates: npt.ArrayLike) -> FloatArray:
     """Shift coordinates so the minimum per-axis value is at zero.
 
     Parameters
@@ -472,7 +471,7 @@ def _deposit_to_grid(
             "Python backend does not implement adaptive or SPH deposition methods. "
             "Set use_python=False to use the C++ backend."
         )
-    
+
     # for (adaptive) cic, tsc, (gaussian), use the separable_deposition_nD function
     if method in ["cic_adaptive", "tsc_adaptive"]:
         method = "separable"

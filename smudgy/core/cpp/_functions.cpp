@@ -68,9 +68,9 @@ inline float wrap_distance_if_periodic(float delta, float boxsize, bool periodic
     return delta;
 }
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // OpenMP helpers
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 inline bool allow_openmp(bool requested) {
 #if defined(_OPENMP)
@@ -848,18 +848,18 @@ inline float tsc_integrated_weight_1d(float x_center, float cell_left, float cel
 }
 
 void tsc_2d_adaptive_cpp(
-    const float* positions,           // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* smoothing_lengths,// (num_particles)
+    const float* positions,             // (num_particles, 2)
+    const float* quantities,            // (num_particles, num_fields)
+    const float* smoothing_lengths,     // (num_particles)
     int num_particles,
     int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
+    const float* boxsizes,              // (2,)
+    const int* gridnums,                // (2,)
     bool periodic,              
     bool use_openmp,
     int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, num_fields)
-    float* weights              // (gridnum_x, gridnum_y)
+    float* fields,                      // (gridnum_x, gridnum_y, num_fields)
+    float* weights                      // (gridnum_x, gridnum_y)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -935,18 +935,18 @@ void tsc_2d_adaptive_cpp(
 }
 
 void tsc_3d_adaptive_cpp(
-    const float* positions,           // (num_particles,3)
-    const float* quantities,    // (num_particles,num_fields)
-    const float* smoothing_lengths,// (num_particles)
+    const float* positions,             // (num_particles,3)
+    const float* quantities,            // (num_particles,num_fields)
+    const float* smoothing_lengths,     // (num_particles)
     int num_particles,
     int num_fields,
-    const float* boxsizes,      // (3,)
-    const int* gridnums,        // (3,)
+    const float* boxsizes,              // (3,)
+    const int* gridnums,                // (3,)
     bool periodic,
     bool use_openmp,
     int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights              // (gridnum_x, gridnum_y, gridnum_z)
+    float* fields,                      // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights                      // (gridnum_x, gridnum_y, gridnum_z)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -1048,21 +1048,20 @@ void tsc_3d_adaptive_cpp(
 // =============================================================================
 
 void separable_kernel_deposition_2d_cpp(
-    const float* positions,           // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* smoothing_lengths,           // (num_particles)
+    const float* positions,             // (num_particles, 2)
+    const float* quantities,            // (num_particles, num_fields)
+    const float* smoothing_lengths,     // (num_particles)
     int num_particles,
     int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
+    const float* boxsizes,              // (2,)
+    const int* gridnums,                // (2,)
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    //int min_kernel_evaluations_per_axis,
     bool use_openmp,
     int omp_threads,
-    float* fields,             // (gridnum_x, gridnum_y, num_fields)
-    float* weights             // (gridnum_x, gridnum_y)
+    float* fields,                      // (gridnum_x, gridnum_y, num_fields)
+    float* weights                      // (gridnum_x, gridnum_y)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -1072,8 +1071,6 @@ void separable_kernel_deposition_2d_cpp(
     auto kernel = create_separable_kernel(kernel_name, 2);
     SeparableKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    //const auto kernel_samples = build_kernel_sample_grid(*kernel_ptr, min_kernel_evaluations_per_axis);
-    //const int min_kernel_evaluations = kernel_samples.count;
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1148,6 +1145,123 @@ void separable_kernel_deposition_2d_cpp(
                 int weight_idx = ii * weight_stride_x + jj;
                 accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
                 accumulate_weight(weights, weight_idx, integral, parallel);
+            }
+        }
+    });
+}
+
+// =============================================================================
+// Separable kernel deposition (3D)
+// =============================================================================
+
+void separable_kernel_deposition_3d_cpp(
+    const float* positions,           // (num_particles, 3)
+    const float* quantities,    // (num_particles, num_fields)
+    const float* smoothing_lengths,           // (num_particles)
+    int num_particles,
+    int num_fields,
+    const float* boxsizes,      // (3,)
+    const int* gridnums,        // (3,)
+    bool periodic,
+    const std::string& kernel_name,
+    const std::string& integration_method,
+    //int min_kernel_evaluations_per_axis,
+    bool use_openmp,
+    int omp_threads,
+    float* fields,             // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights             // (gridnum_x, gridnum_y, gridnum_z)
+) {
+    // resolve openMP settings
+    const bool parallel = allow_openmp(use_openmp);
+    const int threads = resolve_openmp_threads(parallel, omp_threads);
+
+    // set up the kernel and cache integral samples
+    auto kernel = create_separable_kernel(kernel_name, 3);
+    SeparableKernel* kernel_ptr = kernel.get();
+    const float kernel_support = kernel->support();
+
+    // extract boxsize parameters
+    const float boxsize_x = boxsizes[0];
+    const float boxsize_y = boxsizes[1];
+    const float boxsize_z = boxsizes[2];
+
+    // extract grid parameters
+    const int gridnum_x = gridnums[0];
+    const int gridnum_y = gridnums[1];
+    const int gridnum_z = gridnums[2];
+
+    // compute cell sizes and related parameters
+    const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
+    const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
+    const float cellSize_z = boxsize_z / static_cast<float>(gridnum_z);
+
+    // compute strides for fields/weights and set up output arrays
+    const int stride_x = gridnum_y * gridnum_z * num_fields;
+    const int stride_y = gridnum_z * num_fields;
+    const int stride_z = num_fields;
+    const int weight_stride_x = gridnum_y * gridnum_z;
+    const int weight_stride_y = gridnum_z;
+    const int weight_stride_z = 1;
+    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
+    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
+
+    // perform for loop over particles
+    for_each_particle(num_particles, parallel, threads, [&](int n) {
+
+        // gather relevant particle data and precompute kernel prefactor
+        float hsm_current = smoothing_lengths[n];
+        float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current);
+        
+        // convert particle position to cell units
+        float x_cell = positions[3 * n + 0] / cellSize_x;
+        float y_cell = positions[3 * n + 1] / cellSize_y;
+        float z_cell = positions[3 * n + 2] / cellSize_z;
+
+        // compute kernel support in physical and cell units
+        float support_x_cell = kernel_support * hsm_current / cellSize_x;
+        float support_y_cell = kernel_support * hsm_current / cellSize_y;
+        float support_z_cell = kernel_support * hsm_current / cellSize_z;
+
+        // compute inclusive index bounds within the kernel support
+        int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
+        int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
+        int k_min = static_cast<int>(std::floor(z_cell - support_z_cell));
+        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
+        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
+        int k_max = static_cast<int>(std::ceil(z_cell + support_z_cell));
+        const float* particle = quantities + n * num_fields;
+
+        // for separable kernels, typically the integrals are known analytically,
+        // so we can compute them exactly for each cell without needing to cache samples on a grid
+        for (int i = i_min; i <= i_max; ++i) {
+            for (int j = j_min; j <= j_max; ++j) {
+                for (int k = k_min; k <= k_max; ++k) {
+
+                    // check periodicity and apply PBC if needed, otherwise early-out if outside domain
+                    int ii = apply_pbc(i, gridnum_x, periodic);
+                    int jj = apply_pbc(j, gridnum_y, periodic);
+                    int kk = apply_pbc(k, gridnum_z, periodic);
+                    if (is_outside_domain(ii, gridnum_x) || is_outside_domain(jj, gridnum_y) || is_outside_domain(kk, gridnum_z)) continue;
+
+                    // prepare bounds of current cell
+                    float x_left = i * cellSize_x;
+                    float y_left = j * cellSize_y;
+                    float z_left = k * cellSize_z;
+                    float x_right = (i + 1) * cellSize_x;
+                    float y_right = (j + 1) * cellSize_y;
+                    float z_right = (k + 1) * cellSize_z;
+                    std::vector<float> bounds = {x_left, x_right, y_left, y_right, z_left, z_right};
+
+                    // compute total integral over the current cell
+                    float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(bounds);
+                    integral *= cellSize_x * cellSize_y * cellSize_z;
+
+                    // deposit to grid
+                    int base_idx = ii * stride_x + jj * stride_y + kk * stride_z;
+                    int weight_idx = ii * weight_stride_x + jj * weight_stride_y + kk * weight_stride_z;
+                    accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
+                    accumulate_weight(weights, weight_idx, integral, parallel);
+                }
             }
         }
     });

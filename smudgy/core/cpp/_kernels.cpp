@@ -9,10 +9,10 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 }
 
-class TophatRect : public SeparableKernel {
+class TophatSep : public SeparableKernel {
     // Rectangular Tophat (NGP equivalent)
     public:
-    explicit TophatRect(int dim) : SeparableKernel(dim) {}
+    explicit TophatSep(int dim) : SeparableKernel(dim) {}
     
     const float SUPPORT = 0.5f;
     
@@ -28,21 +28,18 @@ class TophatRect : public SeparableKernel {
         return 1.0f;
     }
     
-    float F(float q) const override {
+    // this is the 1D integral of the kernel, as evaluate_integral for separable kernels is just the product of 1D integrals along each axis
+    float F_1d(float q) const override {
         if (q < 0.0f) return 0.0f;
         if (q > SUPPORT) q = SUPPORT;
-        
-        if (dim_ == 1) return q;
-        if (dim_ == 2) return q * q;
-        if (dim_ == 3) return q * q * q;
-        throw std::invalid_argument("Unsupported dimension for TophatRect");
+        return q;
     }
 };
 
-class TSCRect : public SeparableKernel {
+class TSCSep : public SeparableKernel {
     // Rectangular TSC
     public:
-    explicit TSCRect(int dim) : SeparableKernel(dim) {}
+    explicit TSCSep(int dim) : SeparableKernel(dim) {}
 
     const float SUPPORT = 1.5f;
     
@@ -65,7 +62,7 @@ class TSCRect : public SeparableKernel {
         return 1.0f;
     }
     
-    float F(float q) const override {
+    float F_1d(float q) const override {
         if (q < 0.0f) return 0.0f;
         if (q > SUPPORT) q = SUPPORT;
         
@@ -77,10 +74,38 @@ class TSCRect : public SeparableKernel {
         }
         
         // For rectangular kernels, F(q) returns the integral from 0 to q along each dimension
-        if (dim_ == 1) return f1d;
-        if (dim_ == 2) return f1d * f1d;
-        if (dim_ == 3) return f1d * f1d * f1d;
-        throw std::invalid_argument("Unsupported dimension for TSCRect");
+        return f1d;
+    }
+};
+
+class GaussianSep : public SeparableKernel {
+    // Rectangular Gaussian
+    public:
+    explicit GaussianSep(int dim) : SeparableKernel(dim) {}
+
+     const float SUPPORT = 3.0f;
+
+    float evaluate_1d(float q) const override {
+        q = std::abs(q);
+        if (q >= SUPPORT) return 0.0f;
+        return std::exp(-q * q);
+    }
+    
+    float support() const override { return SUPPORT; }
+    
+    float sigma() const override {
+        if (dim_ == 1) return 1.0f / std::sqrt(kPi);
+        if (dim_ == 2) return 1.0f / kPi;
+        if (dim_ == 3) return 1.0f / std::pow(kPi, 1.5f);
+    }
+    
+    float F_1d(float q) const override {
+        if (q < 0.0f) return 0.0f;
+        if (q > SUPPORT) q = SUPPORT;
+
+        // For rectangular kernels, F(q) returns the integral from 0 to q along each dimension
+        float f1d = 0.5f * std::sqrt(kPi) * std::erf(q);
+        return f1d;
     }
 };
 
@@ -89,7 +114,7 @@ class Tophat : public SphericalKernel {
 public:
     explicit Tophat(int dim) : SphericalKernel(dim) {}
 
-    const float SUPPORT = 1.0f;
+    const float SUPPORT = 0.5f;
 
     float evaluate(float q) const override {
         if (q > SUPPORT) return 0.0f;
@@ -99,10 +124,9 @@ public:
     float support() const override { return SUPPORT; }
 
     float sigma() const override {
-        if (dim_ == 1) return 0.5f;
-        if (dim_ == 2) return 1.0f / kPi;
-        if (dim_ == 3) return 3.0f / (4.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for Tophat");
+        if (dim_ == 1) return 1.0f;
+        if (dim_ == 2) return 4.0f / kPi; // TODO: DOUBLE CHECK DIM=2, 3
+        if (dim_ == 3) return 6.0f / kPi; // same here
     }
 
     float F(float q) const override {
@@ -120,7 +144,6 @@ public:
         if (dim_ == 3) {
             return (1.0f / 3.0f) * q * q * q;
         }
-        throw std::invalid_argument("Unsupported dimension");
     }
 };
 
@@ -149,7 +172,6 @@ public:
         if (dim_ == 1) return 1.0f;
         if (dim_ == 2) return 1.0f / 1.27627f;
         if (dim_ == 3) return 1.0f / 1.5708f;
-        throw std::invalid_argument("Unsupported dimension");
     }
 
     float F(float q) const override {
@@ -179,7 +201,6 @@ public:
                 return std::pow(q, 3) * (0.375f - 0.375f * q + 0.1 * q * q);
             }
         }
-        throw std::invalid_argument("Unsupported dimension");
     }
 
     float evaluate_integral(float q1, float q2) const override {
@@ -212,7 +233,6 @@ public:
         if (dim_ == 1) return 5.0f / (4.0f);
         if (dim_ == 2) return 5.0f / (kPi);
         if (dim_ == 3) return 105.0f / (16.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for Lucy");
     }
 
     float F(float q) const override {
@@ -242,9 +262,7 @@ public:
                 + (4.0f/3.0f) * std::pow(q, 6)
                 - (3.0f/7.0f) * std::pow(q, 7);
         }
-
-        throw std::invalid_argument("Unsupported dimension");
-        }
+    }
 };
 
 class Gaussian : public SphericalKernel {
@@ -254,7 +272,7 @@ public:
     const float SUPPORT = 3.0f;
 
     float evaluate(float q) const override {
-        if (q >= support()) return 0.0f;
+        if (q >= SUPPORT) return 0.0f;
         return std::exp(-q * q);
     }
 
@@ -264,7 +282,6 @@ public:
         if (dim_ == 1) return 1.0f / std::sqrt(kPi);
         if (dim_ == 2) return 1.0f / kPi;
         if (dim_ == 3) return 1.0f / std::pow(kPi, 1.5f);
-        throw std::invalid_argument("Unsupported dimension for Gaussian");
     }
 
     float F(float q) const override {
@@ -282,8 +299,6 @@ public:
         if (dim_ == 3) {
             return 0.25f * (std::sqrt(kPi) * std::erf(q) - 2.0f * q * std::exp(-q * q));
         }
-
-        throw std::invalid_argument("Unsupported dimension");
     }
 };
 
@@ -315,7 +330,6 @@ public:
         if (dim_ == 1) return 1.0f / (6.0f);
         if (dim_ == 2) return 15.0f / (14.0f * 3.0f * kPi); // ??? differs from monaghan definition
         if (dim_ == 3) return 1.0f / (4.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for CubicSpline");
     }
 
     float F(float q) const override {
@@ -376,8 +390,6 @@ public:
                     );
             }
         }
-
-        throw std::invalid_argument("Unsupported dimension");
     }
 
     float evaluate_integral(float q1, float q2) const override {
@@ -430,7 +442,6 @@ public:
         if (dim_ == 1) return 1.0f / (120.0f);
         if (dim_ == 2) return 7.0f / (478.0f * kPi);
         if (dim_ == 3) return 1.0f / (120.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for QuinticSpline");
     }
 
     float F(float q) const override {
@@ -508,8 +519,6 @@ public:
                                     );
             }
         }
-
-        throw std::invalid_argument("Unsupported dimension");
     }
 
     float evaluate_integral(float q1, float q2) const override {
@@ -557,7 +566,6 @@ public:
         if (dim_ == 1) return 5.0f / (8.0f);
         if (dim_ == 2) return 7.0f / (4.0f * kPi);
         if (dim_ == 3) return 21.0f / (16.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for WendlandC2");
     }
 
     float F(float q) const override {
@@ -591,8 +599,6 @@ public:
                                             + 0.25f * std::pow(q, 5)
                                             );
         }
-
-        throw std::invalid_argument("Unsupported dimension");
     }
 };
 
@@ -618,7 +624,6 @@ public:
         if (dim_ == 1) return 3.0f / (4.0f);
         if (dim_ == 2) return 9.0f / (4.0f * kPi);
         if (dim_ == 3) return 495.0f / (256.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for WendlandC4");
     }
 
     float F(float q) const override {
@@ -656,8 +661,6 @@ public:
                                              + 35.0f / 11.0f * std::pow(q, 8)                                             
                                     );
         }
-
-        throw std::invalid_argument("Unsupported dimension");
     }
 };
 
@@ -683,7 +686,6 @@ public:
         if (dim_ == 1) return 55.0f / (64.0f);
         if (dim_ == 2) return 39.0f / (14.0f * kPi);
         if (dim_ == 3) return 1365.0f / (512.0f * kPi);
-        throw std::invalid_argument("Unsupported dimension for WendlandC6");
     }
 
     float F(float q) const override {
@@ -731,13 +733,58 @@ public:
                 + 1.0f / 896.0f * std::pow(q, 11)
             );
         }
-
-        throw std::invalid_argument("Unsupported dimension");
     }
 };
 
 
-KernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel,
+std::shared_ptr<SeparableKernel> create_separable_kernel(const std::string& name, int dim) 
+{
+    if (name == "tophat_separable") {
+        return std::make_shared<TophatSep>(dim);
+    }
+    else if (name == "tsc_separable") {
+        return std::make_shared<TSCSep>(dim);
+    }
+    else if (name == "gaussian_separable") {
+        return std::make_shared<GaussianSep>(dim);
+    }
+    throw std::invalid_argument("Unknown kernel: " + name);
+}
+
+std::shared_ptr<SphericalKernel> create_spherical_kernel(const std::string& name, int dim) {
+
+    if (name == "tophat") {
+        return std::make_shared<Tophat>(dim);
+    }
+    else if (name == "tsc") {
+        return std::make_shared<TSC>(dim);
+    }
+    else if (name == "lucy") {
+        return std::make_shared<Lucy>(dim);
+    } 
+    else if (name == "gaussian") {
+        return std::make_shared<Gaussian>(dim);
+    } 
+    else if (name == "cubic_spline") {
+        return std::make_shared<CubicSpline>(dim);
+    }
+    else if (name == "quintic_spline") {
+        return std::make_shared<QuinticSpline>(dim);
+    } 
+    else if (name == "wendland_c2") {
+        return std::make_shared<WendlandC2>(dim);
+    } 
+    else if (name == "wendland_c4") {
+        return std::make_shared<WendlandC4>(dim);
+    } 
+    else if (name == "wendland_c6") {
+        return std::make_shared<WendlandC6>(dim);
+    } 
+    throw std::invalid_argument("Unknown kernel: " + name);
+}
+
+
+SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel,
                                           int min_kernel_evaluations_per_axis
                                         ){
     if (min_kernel_evaluations_per_axis <= 0) {
@@ -747,7 +794,7 @@ KernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel,
     // compute total number of kernel evaluations
     const int total_number_o = static_cast<int>(std::pow(min_kernel_evaluations_per_axis, kernel.dim()));
 
-    KernelSampleGrid grid;
+    SphericalKernelSampleGrid grid;
     grid.dim = kernel.dim();
     grid.count = total_number_o;
     grid.coords.reserve(static_cast<size_t>(total_number_o) * grid.dim);
@@ -849,56 +896,25 @@ KernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel,
         return grid;
     }
 
-    throw std::invalid_argument("[smudgy] KernelSampleGrid supports only dim=2 or dim=3");
+    throw std::invalid_argument("SphericalKernelSampleGrid supports only dim = 1, 2 or 3");
 }
 
 
-std::shared_ptr<SeparableKernel> create_separable_kernel(const std::string& name, int dim) 
-{
-    if (name == "tophat_rect") {
-        return std::make_shared<TophatRect>(dim);
+float compute_total_integral_separable(const std::string& kernel_name, int dim) {
+    
+    auto kernel = create_separable_kernel(kernel_name, dim);
+    auto support = kernel->support();
+    
+    std::vector<float> bounds;
+    for (int d = 0; d < dim; ++d) {
+        bounds.push_back(-support);
+        bounds.push_back(support);
     }
-    else if (name == "tsc_rect") {
-        return std::make_shared<TSCRect>(dim);
-    }
-    throw std::invalid_argument("Unknown kernel: " + name);
+    float total_integral = kernel->sigma() * kernel->evaluate_integral(bounds);
+    return total_integral;
 }
 
-std::shared_ptr<SphericalKernel> create_spherical_kernel(const std::string& name, int dim) {
-
-    if (name == "tophat") {
-        return std::make_shared<Tophat>(dim);
-    }
-    else if (name == "tsc") {
-        return std::make_shared<TSC>(dim);
-    }
-    else if (name == "lucy") {
-        return std::make_shared<Lucy>(dim);
-    } 
-    else if (name == "gaussian") {
-        return std::make_shared<Gaussian>(dim);
-    } 
-    else if (name == "cubic_spline") {
-        return std::make_shared<CubicSpline>(dim);
-    }
-    else if (name == "quintic_spline") {
-        return std::make_shared<QuinticSpline>(dim);
-    } 
-    else if (name == "wendland_c2") {
-        return std::make_shared<WendlandC2>(dim);
-    } 
-    else if (name == "wendland_c4") {
-        return std::make_shared<WendlandC4>(dim);
-    } 
-    else if (name == "wendland_c6") {
-        return std::make_shared<WendlandC6>(dim);
-    } 
-    throw std::invalid_argument("Unknown kernel: " + name);
-}
-
-
-// Computes the total integral of the kernel over its sample grid
-float compute_kernel_total_integral(const std::string& kernel_name, int dim, int min_kernel_evaluations_per_axis) {
+float compute_total_integral_spherical(const std::string& kernel_name, int dim, int min_kernel_evaluations_per_axis) {
     auto kernel = create_spherical_kernel(kernel_name, dim);
     const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
     float total_integral = 0.0f;
@@ -908,7 +924,30 @@ float compute_kernel_total_integral(const std::string& kernel_name, int dim, int
     return total_integral;
 }
 
-std::tuple<std::vector<float>, std::vector<float>> get_kernel_values_1D(const std::string& kernel_name) 
+std::tuple<std::vector<float>, std::vector<float>> get_separable_kernel_values_1D(const std::string& kernel_name) 
+{    
+    auto kernel = create_separable_kernel(kernel_name, 1);
+    float support = kernel->support();
+    int num_samples = 100;
+    float dq = 2.0f * support / static_cast<float>(num_samples);
+
+    struct results {
+        std::vector<float> q;
+        std::vector<float> values;
+    };
+    results res;
+
+    // setup the 1D cartesian coordinate from [-support, +support] and the corresponding kernel values
+    for (int i = 0; i < num_samples; ++i) {
+        float q_current = -support + i * dq;
+        float kernel_value = kernel->sigma() * kernel->evaluate_1d(std::abs(q_current));
+        res.q.push_back(q_current);
+        res.values.push_back(kernel_value);
+    } 
+    return {res.q, res.values};
+}
+
+std::tuple<std::vector<float>, std::vector<float>> get_spherical_kernel_values_1D(const std::string& kernel_name) 
 {    
     auto kernel = create_spherical_kernel(kernel_name, 1);
     float support = kernel->support();

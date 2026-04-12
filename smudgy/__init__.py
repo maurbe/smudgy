@@ -16,21 +16,35 @@ def check_openmp() -> bool:
     return bool(getattr(cppfunc, "has_openmp", False))
 
 
-def check_kernel_integral(
-    kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int
+def compute_kernel_integral(
+    kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int = None
 ) -> bool:
-    """Check whether the kernel integrals are correct."""
+    """Check whether the kernel integral sums to 1."""
     from .core import _cpp_functions as cppfunc
 
-    return cppfunc.compute_total_kernel_integral(
-        kernel_name, dim, min_kernel_evaluations_per_axis
-    )
+    if "separable" in kernel_name:
+        return cppfunc.compute_total_integral_separable(kernel_name, dim)
+    else:
+        return cppfunc.compute_total_integral_spherical(
+            kernel_name, dim, min_kernel_evaluations_per_axis
+        )
+
 
 def get_kernel_shapes_1D(kernel_name: str) -> tuple[list[float], list[float]]:
     """Get the 1D kernel shapes (q values and kernel values)."""
     from .core import _cpp_functions as cppfunc
 
-    return cppfunc.get_kernel_values_1D(kernel_name)
+    if "separable" in kernel_name:
+        return cppfunc.get_separable_kernel_values_1D(kernel_name)
+    else:
+        return cppfunc.get_spherical_kernel_values_1D(kernel_name)
 
 
-__all__ = ["PointCloud", "check_openmp", "check_kernel_integral", "get_kernel_shapes_1D"]
+__all__ = [
+    "PointCloud",
+    "check_openmp",
+    "compute_total_integral_separable",
+    "compute_total_integral_spherical",
+    "get_separable_kernel_shapes_1D",
+    "get_spherical_kernel_shapes_1D",
+]

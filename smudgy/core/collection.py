@@ -1,10 +1,8 @@
 """Backend-agnostic deposition function wrappers."""
 
 from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from typing import Any
-
 import numpy.typing as npt
 
 from . import _cpp_functions as _cpp_backend
@@ -15,6 +13,8 @@ _PYTHON_UNSUPPORTED = {
     "cic_3d_adaptive",
     "tsc_2d_adaptive",
     "tsc_3d_adaptive",
+    "separable_2d",
+    "separable_3d",
     "isotropic_2d",
     "isotropic_3d",
     "anisotropic_2d",
@@ -631,6 +631,140 @@ def tsc_adaptive_3d(
         boxsizes,
         gridnums,
         periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+
+def separable_2d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    kernel_name: str,
+    integration_method: str,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    """Deposit particle quantities onto a 2D grid using a separable SPH kernel (C++ backend).
+
+    Parameters
+    ----------
+    positions : numpy.ndarray, shape (N, 2)
+        Particle positions.
+    quantities : numpy.ndarray, shape (N, F)
+        Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
+    boxsizes : array_like, shape (2,)
+        Domain size per axis.
+    gridnums : array_like, shape (2,)
+        Number of grid cells per axis.
+    periodic : bool
+        Global periodic boundaries.
+    kernel_name : str
+        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+    integration_method : str
+        Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+    *args : Any
+        Additional positional arguments (unused).
+    use_python : bool, optional
+        Use the Python backend if True, else C++ backend.
+    use_openmp : bool, optional
+        Enable OpenMP parallelism.
+    omp_threads : int, optional
+        Number of OpenMP threads (0 uses the default).
+
+    Returns
+    -------
+    fields : numpy.ndarray, shape (Gx, Gy, F)
+        Deposited field values.
+    weights : numpy.ndarray, shape (Gx, Gy)
+        Weight sum per cell.
+
+    """
+    return _call_backend(
+        "separable_2d",
+        use_python,
+        positions,
+        quantities,
+        smoothing_lengths,
+        boxsizes,
+        gridnums,
+        periodic,
+        kernel_name,
+        integration_method,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+
+def separable_3d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    kernel_name: str,
+    integration_method: str,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    """Deposit particle quantities onto a 3D grid using a separable SPH kernel (C++ backend).
+
+    Parameters
+    ----------
+    positions : numpy.ndarray, shape (N, 3)
+        Particle positions.
+    quantities : numpy.ndarray, shape (N, F)
+        Per-particle fields to deposit.
+    smoothing_lengths : numpy.ndarray, shape (N,)
+        Smoothing lengths per particle.
+    boxsizes : array_like, shape (3,)
+        Domain size per axis.
+    gridnums : array_like, shape (3,)
+        Number of grid cells per axis.
+    periodic : bool
+        Global periodic boundaries.
+    kernel_name : str
+        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+    integration_method : str
+        Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+    *args : Any
+        Additional positional arguments (unused).
+    use_python : bool, optional
+        Use the Python backend if True, else C++ backend.
+    use_openmp : bool, optional
+        Enable OpenMP parallelism.
+    omp_threads : int, optional
+        Number of OpenMP threads (0 uses the default).
+
+    Returns
+    -------
+    fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
+        Deposited field values.
+    weights : numpy.ndarray, shape (Gx, Gy, Gz)
+        Weight sum per cell.
+
+    """
+    return _call_backend(
+        "separable_3d",
+        use_python,
+        positions,
+        quantities,
+        smoothing_lengths,
+        boxsizes,
+        gridnums,
+        periodic,
+        kernel_name,
+        integration_method,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )

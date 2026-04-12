@@ -195,7 +195,9 @@ class TophatKernel(BaseClassKernel):
     def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
         return np.where(q <= 1.0, 1.0, 0.0)
 
-    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
         # Gradient of Tophat is a delta function at q=1, numerically problematic.
         return np.zeros_like(q)
 
@@ -210,7 +212,9 @@ class TophatRectKernel(BaseClassKernel):
         # For TophatRect, support is 0.5 in each dimension.
         return np.where(q <= 0.5, 1.0, 0.0)
 
-    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
         return np.zeros_like(q)
 
 
@@ -233,7 +237,9 @@ class TSCKernel(BaseClassKernel):
         val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
         return val
 
-    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
         grad = np.zeros_like(q)
         mask1 = q <= 0.5
         mask2 = (q > 0.5) & (q <= 1.5)
@@ -256,7 +262,9 @@ class TSCRectKernel(BaseClassKernel):
         val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
         return val
 
-    def _kernel_gradient_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
         grad = np.zeros_like(q)
         mask1 = q <= 0.5
         mask2 = (q > 0.5) & (q <= 1.5)

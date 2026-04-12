@@ -243,12 +243,12 @@ class PointCloud:
                 )
 
     def set_smoothing_lengths(
-            self,
-            hsm: npt.ArrayLike | None = None,
-            h_tensor: npt.ArrayLike | None = None,
-            h_eigvals: npt.ArrayLike | None = None,
-            h_eigvecs: npt.ArrayLike | None = None,
-        ):
+        self,
+        hsm: npt.ArrayLike | None = None,
+        h_tensor: npt.ArrayLike | None = None,
+        h_eigvals: npt.ArrayLike | None = None,
+        h_eigvecs: npt.ArrayLike | None = None,
+    ):
         """
         Manually assign smoothing lengths or tensors to particles.
 
@@ -269,16 +269,24 @@ class PointCloud:
             Results are stored on the instance.
         """
         if hsm is not None:
-            assert len(hsm) == self.positions.shape[0], f"Length of 'hsm' ({len(hsm)}) must match number of particles ({self.positions.shape[0]})"
+            assert (
+                len(hsm) == self.positions.shape[0]
+            ), f"Length of 'hsm' ({len(hsm)}) must match number of particles ({self.positions.shape[0]})"
             self.hsm = np.asarray(hsm, dtype=np.float32)
         if h_tensor is not None:
-            assert len(h_tensor) == self.positions.shape[0], f"Length of 'h_tensor' ({len(h_tensor)}) must match number of particles ({self.positions.shape[0]})"
+            assert (
+                len(h_tensor) == self.positions.shape[0]
+            ), f"Length of 'h_tensor' ({len(h_tensor)}) must match number of particles ({self.positions.shape[0]})"
             self.h_tensor = np.asarray(h_tensor, dtype=np.float32)
         if h_eigvals is not None:
-            assert len(h_eigvals) == self.positions.shape[0], f"Length of 'h_eigvals' ({len(h_eigvals)}) must match number of particles ({self.positions.shape[0]})"
+            assert (
+                len(h_eigvals) == self.positions.shape[0]
+            ), f"Length of 'h_eigvals' ({len(h_eigvals)}) must match number of particles ({self.positions.shape[0]})"
             self.h_eigvals = np.asarray(h_eigvals, dtype=np.float32)
         if h_eigvecs is not None:
-            assert len(h_eigvecs) == self.positions.shape[0], f"Length of 'h_eigvecs' ({len(h_eigvecs)}) must match number of particles ({self.positions.shape[0]})"
+            assert (
+                len(h_eigvecs) == self.positions.shape[0]
+            ), f"Length of 'h_eigvecs' ({len(h_eigvecs)}) must match number of particles ({self.positions.shape[0]})"
             self.h_eigvecs = np.asarray(h_eigvecs, dtype=np.float32)
 
     def compute_density(self, kernel_name: str = None) -> None:

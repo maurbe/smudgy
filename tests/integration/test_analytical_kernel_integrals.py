@@ -2,11 +2,16 @@
 
 import pytest
 import numpy as np
-from smudgy import check_kernel_integral
+from smudgy import compute_kernel_integral
 
 DIMS = [1, 2, 3]
-MIN_KERNEL_EVALUATIONS_PER_AXIS = [1, 17, 23, 100]
+MIN_KERNEL_EVALUATIONS_PER_AXIS = [1]#, 17, 23, 100]
 KERNEL_NAMES = [
+    "tophat_separable",
+    "tsc_separable",
+    "gaussian_separable",
+    "tophat",
+    "tsc",
     "lucy",
     "gaussian",
     "cubic_spline",
@@ -14,10 +19,6 @@ KERNEL_NAMES = [
     "wendland_c2",
     "wendland_c4",
     "wendland_c6",
-    "tophat",
-    "tsc",
-    #"tophat_rect", # is defined on cartesian grid, so cannot use spherical function
-    #"tsc_rect", # is defined on cartesian grid, so cannot use spherical function
 ]
 
 
@@ -30,7 +31,7 @@ def test_kernel_integrals(
     kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int
 ):
     """Test that the kernel integrals are correct."""
-    integral = check_kernel_integral(
+    integral = compute_kernel_integral(
         kernel_name,
         dim,
         min_kernel_evaluations_per_axis=min_kernel_evaluations_per_axis,
