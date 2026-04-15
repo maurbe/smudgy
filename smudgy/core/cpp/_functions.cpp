@@ -1051,15 +1051,15 @@ void separable_kernel_deposition_2d_cpp(
     const float* positions,             // (num_particles, 2)
     const float* quantities,            // (num_particles, num_fields)
     const float* smoothing_lengths,     // (num_particles)
-    int num_particles,
-    int num_fields,
+    const int num_particles,
+    const int num_fields,
     const float* boxsizes,              // (2,)
     const int* gridnums,                // (2,)
-    bool periodic,
+    const bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    bool use_openmp,
-    int omp_threads,
+    const bool use_openmp,
+    const int omp_threads,
     float* fields,                      // (gridnum_x, gridnum_y, num_fields)
     float* weights                      // (gridnum_x, gridnum_y)
 ) {
@@ -1113,12 +1113,6 @@ void separable_kernel_deposition_2d_cpp(
         int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
         const float* particle = quantities + n * num_fields;
 
-        /* compute total number of cells in the kernel support
-        int num_cells_x = i_max - i_min;
-        int num_cells_y = j_max - j_min;
-        int total_cells = num_cells_x * num_cells_y;
-        */
-
         // for separable kernels, typically the integrals are known analytically,
         // so we can compute them exactly for each cell without needing to cache samples on a grid
         for (int i = i_min; i <= i_max; ++i) {
@@ -1158,16 +1152,16 @@ void separable_kernel_deposition_3d_cpp(
     const float* positions,           // (num_particles, 3)
     const float* quantities,    // (num_particles, num_fields)
     const float* smoothing_lengths,           // (num_particles)
-    int num_particles,
-    int num_fields,
+    const int num_particles,
+    const int num_fields,
     const float* boxsizes,      // (3,)
     const int* gridnums,        // (3,)
-    bool periodic,
+    const bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     //int min_kernel_evaluations_per_axis,
-    bool use_openmp,
-    int omp_threads,
+    const bool use_openmp,
+    const int omp_threads,
     float* fields,             // (gridnum_x, gridnum_y, gridnum_z, num_fields)
     float* weights             // (gridnum_x, gridnum_y, gridnum_z)
 ) {

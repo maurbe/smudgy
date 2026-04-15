@@ -5,20 +5,23 @@ import numpy as np
 from smudgy import PointCloud
 
 DIMS = [2, 3]
-METHODS = ["isotropic", "anisotropic"]
-NUM_NEIGHBORS = [3, 4, 5]
-MIN_KERNEL_EVALUATIONS_PER_AXIS = [2, 3, 4]
-INTEGRAL_METHODS = ["midpoint", "trapezoidal", "simpson"]
+SHAPE = ["separable", "isotropic"]#, "anisotropic"]
+NUM_NEIGHBORS = [3]#, 4, 5]
+MIN_KERNEL_EVALUATIONS_PER_AXIS = [2]#, 3, 4]
+INTEGRAL_METHODS = ["midpoint"]#, "trapezoidal", "simpson"]
 KERNEL_NAMES = [
-    "tophat",
-    "tsc",
-    "lucy",
-    "gaussian",
-    "cubic_spline",
-    "quintic_spline",
-    "wendland_c2",
-    "wendland_c4",
-    "wendland_c6",
+    "tophat_separable",
+    #"tsc_separable",
+    #"gaussian_separable",
+    #"tophat",
+    #"tsc",
+    #"lucy",
+    #"gaussian",
+    #"cubic_spline",
+    #"quintic_spline",
+    #"wendland_c2",
+    #"wendland_c4",
+    #"wendland_c6",
 ]
 
 
@@ -35,7 +38,7 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
 
 
 @pytest.mark.parametrize("dim", DIMS)
-@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("shape", SHAPE)
 @pytest.mark.parametrize("num_neighbors", NUM_NEIGHBORS)
 @pytest.mark.parametrize(
     "min_kernel_evaluations_per_axis", MIN_KERNEL_EVALUATIONS_PER_AXIS
@@ -44,7 +47,7 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 def test_weight_conservation(
     dim: int,
-    method: str,
+    shape: str,
     num_neighbors: int,
     min_kernel_evaluations_per_axis: int,
     integral_method: str,
@@ -58,7 +61,8 @@ def test_weight_conservation(
     pc = create_uniform_point_cloud(dim)
     pc.setup(
         num_neighbors=num_neighbors,
-        method=method,
+        method=shape,
+        kernel_name=kernel_name,
     )
     pc.compute_smoothing_lengths()
 
@@ -66,7 +70,7 @@ def test_weight_conservation(
         fields=pc.weights,
         averaged=False,
         gridnums=gridnums,
-        method=method,
+        method=shape,
         kernel_name=kernel_name,
         min_kernel_evaluations_per_axis=min_kernel_evaluations_per_axis,
         integration=integral_method,

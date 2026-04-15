@@ -9,10 +9,10 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 }
 
-class TophatSep : public SeparableKernel {
+class TophatRect : public SeparableKernel {
     // Rectangular Tophat (NGP equivalent)
     public:
-    explicit TophatSep(int dim) : SeparableKernel(dim) {}
+    explicit TophatRect(int dim) : SeparableKernel(dim) {}
     
     const float SUPPORT = 0.5f;
     
@@ -24,9 +24,7 @@ class TophatSep : public SeparableKernel {
     
     float support() const override { return SUPPORT; }
     
-    float sigma() const override {
-        return 1.0f;
-    }
+    float sigma() const override { return 1.0f; }
     
     // this is the 1D integral of the kernel, as evaluate_integral for separable kernels is just the product of 1D integrals along each axis
     float F_1d(float q) const override {
@@ -36,19 +34,20 @@ class TophatSep : public SeparableKernel {
     }
 };
 
-class TSCSep : public SeparableKernel {
+class TSCRect : public SeparableKernel {
     // Rectangular TSC
     public:
-    explicit TSCSep(int dim) : SeparableKernel(dim) {}
+    explicit TSCRect(int dim) : SeparableKernel(dim) {}
 
     const float SUPPORT = 1.5f;
+    const float NODE_1 = 0.5f;
     
     float evaluate_1d(float q) const override {
         // 1D TSC kernel on support [-1.5, 1.5]
         q = std::abs(q);
 
         if (q >= SUPPORT) return 0.0f;
-        if (q <= 0.5f) {
+        if (q <= NODE_1) {
             return 0.75f - q * q;
         } else {
             float val = SUPPORT - q;
@@ -58,16 +57,14 @@ class TSCSep : public SeparableKernel {
     
     float support() const override { return SUPPORT; }
     
-    float sigma() const override {
-        return 1.0f;
-    }
+    float sigma() const override { return 1.0f; }
     
     float F_1d(float q) const override {
         if (q < 0.0f) return 0.0f;
         if (q > SUPPORT) q = SUPPORT;
         
         float f1d;
-        if (q <= 0.5f) {
+        if (q <= NODE_1) {
             f1d = 0.75f * q - (1.0f / 3.0f) * q * q * q;
         } else {
             f1d = (1.0f / 3.0f) - (1.0f / 6.0f) * (std::pow(SUPPORT - q, 3) - 1.0f);
@@ -78,10 +75,10 @@ class TSCSep : public SeparableKernel {
     }
 };
 
-class GaussianSep : public SeparableKernel {
+class GaussianRect : public SeparableKernel {
     // Rectangular Gaussian
     public:
-    explicit GaussianSep(int dim) : SeparableKernel(dim) {}
+    explicit GaussianRect(int dim) : SeparableKernel(dim) {}
 
      const float SUPPORT = 3.0f;
 
@@ -97,6 +94,7 @@ class GaussianSep : public SeparableKernel {
         if (dim_ == 1) return 1.0f / std::sqrt(kPi);
         if (dim_ == 2) return 1.0f / kPi;
         if (dim_ == 3) return 1.0f / std::pow(kPi, 1.5f);
+        return 0.0f; // should never reach here
     }
     
     float F_1d(float q) const override {
@@ -127,23 +125,17 @@ public:
         if (dim_ == 1) return 1.0f;
         if (dim_ == 2) return 4.0f / kPi; // TODO: DOUBLE CHECK DIM=2, 3
         if (dim_ == 3) return 6.0f / kPi; // same here
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
         if (q < 0.0f) return 0.0f;
         if (q > SUPPORT) q = SUPPORT;
 
-        if (dim_ == 1) {
-            return q;
-        }
-
-        if (dim_ == 2) {
-            return 0.5f * q * q;
-        }
-
-        if (dim_ == 3) {
-            return (1.0f / 3.0f) * q * q * q;
-        }
+        if (dim_ == 1) return q;
+        if (dim_ == 2) return 0.5f * q * q;
+        if (dim_ == 3) return (1.0f / 3.0f) * q * q * q;
+        return 0.0f; // should never reach here
     }
 };
 
@@ -170,8 +162,9 @@ public:
 
     float sigma() const override {
         if (dim_ == 1) return 1.0f;
-        if (dim_ == 2) return 1.0f / 1.27627f;
-        if (dim_ == 3) return 1.0f / 1.5708f;
+        if (dim_ == 2) return 32.0f / (13.0f * kPi);
+        if (dim_ == 3) return 2.0f / kPi;
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -201,6 +194,7 @@ public:
                 return std::pow(q, 3) * (0.375f - 0.375f * q + 0.1 * q * q);
             }
         }
+        return 0.0f; // should never reach here
     }
 
     float evaluate_integral(float q1, float q2) const override {
@@ -233,6 +227,7 @@ public:
         if (dim_ == 1) return 5.0f / (4.0f);
         if (dim_ == 2) return 5.0f / (kPi);
         if (dim_ == 3) return 105.0f / (16.0f * kPi);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -262,6 +257,7 @@ public:
                 + (4.0f/3.0f) * std::pow(q, 6)
                 - (3.0f/7.0f) * std::pow(q, 7);
         }
+        return 0.0f; // should never reach here
     }
 };
 
@@ -282,6 +278,7 @@ public:
         if (dim_ == 1) return 1.0f / std::sqrt(kPi);
         if (dim_ == 2) return 1.0f / kPi;
         if (dim_ == 3) return 1.0f / std::pow(kPi, 1.5f);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -299,6 +296,7 @@ public:
         if (dim_ == 3) {
             return 0.25f * (std::sqrt(kPi) * std::erf(q) - 2.0f * q * std::exp(-q * q));
         }
+        return 0.0f; // should never reach here
     }
 };
 
@@ -330,6 +328,7 @@ public:
         if (dim_ == 1) return 1.0f / (6.0f);
         if (dim_ == 2) return 15.0f / (14.0f * 3.0f * kPi); // ??? differs from monaghan definition
         if (dim_ == 3) return 1.0f / (4.0f * kPi);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -390,6 +389,7 @@ public:
                     );
             }
         }
+        return 0.0f; // should never reach here
     }
 
     float evaluate_integral(float q1, float q2) const override {
@@ -442,6 +442,7 @@ public:
         if (dim_ == 1) return 1.0f / (120.0f);
         if (dim_ == 2) return 7.0f / (478.0f * kPi);
         if (dim_ == 3) return 1.0f / (120.0f * kPi);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -519,6 +520,7 @@ public:
                                     );
             }
         }
+        return 0.0f; // should never reach here
     }
 
     float evaluate_integral(float q1, float q2) const override {
@@ -566,6 +568,7 @@ public:
         if (dim_ == 1) return 5.0f / (8.0f);
         if (dim_ == 2) return 7.0f / (4.0f * kPi);
         if (dim_ == 3) return 21.0f / (16.0f * kPi);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -599,6 +602,7 @@ public:
                                             + 0.25f * std::pow(q, 5)
                                             );
         }
+        return 0.0f; // should never reach here
     }
 };
 
@@ -624,6 +628,7 @@ public:
         if (dim_ == 1) return 3.0f / (4.0f);
         if (dim_ == 2) return 9.0f / (4.0f * kPi);
         if (dim_ == 3) return 495.0f / (256.0f * kPi);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -661,6 +666,7 @@ public:
                                              + 35.0f / 11.0f * std::pow(q, 8)                                             
                                     );
         }
+        return 0.0f; // should never reach here
     }
 };
 
@@ -686,6 +692,7 @@ public:
         if (dim_ == 1) return 55.0f / (64.0f);
         if (dim_ == 2) return 39.0f / (14.0f * kPi);
         if (dim_ == 3) return 1365.0f / (512.0f * kPi);
+        return 0.0f; // should never reach here
     }
 
     float F(float q) const override {
@@ -733,6 +740,7 @@ public:
                 + 1.0f / 896.0f * std::pow(q, 11)
             );
         }
+        return 0.0f; // should never reach here
     }
 };
 
@@ -740,13 +748,13 @@ public:
 std::shared_ptr<SeparableKernel> create_separable_kernel(const std::string& name, int dim) 
 {
     if (name == "tophat_separable") {
-        return std::make_shared<TophatSep>(dim);
+        return std::make_shared<TophatRect>(dim);
     }
     else if (name == "tsc_separable") {
-        return std::make_shared<TSCSep>(dim);
+        return std::make_shared<TSCRect>(dim);
     }
     else if (name == "gaussian_separable") {
-        return std::make_shared<GaussianSep>(dim);
+        return std::make_shared<GaussianRect>(dim);
     }
     throw std::invalid_argument("Unknown kernel: " + name);
 }

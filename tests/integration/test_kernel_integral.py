@@ -5,7 +5,7 @@ import numpy as np
 from smudgy import compute_kernel_integral
 
 DIMS = [1, 2, 3]
-MIN_KERNEL_EVALUATIONS_PER_AXIS = [1]#, 17, 23, 100]
+MIN_KERNEL_EVALUATIONS_PER_AXIS = [1, 17, 23, 100]
 KERNEL_NAMES = [
     "tophat_separable",
     "tsc_separable",
@@ -30,7 +30,6 @@ KERNEL_NAMES = [
 def test_kernel_integrals(
     kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int
 ):
-    """Test that the kernel integrals are correct."""
     integral = compute_kernel_integral(
         kernel_name,
         dim,

@@ -605,8 +605,7 @@ py::tuple _isotropic_2d_cpp(
     const std::string& integration_method,
     int min_kernel_evaluations_per_axis,
     bool use_openmp, 
-    int omp_threads
-)
+    int omp_threads)
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
@@ -836,33 +835,25 @@ py::tuple _anisotropic_3d_cpp(
 
 py::float_ _compute_total_integral_separable(
     const std::string& kernel_name,
-    const int dim
-)
-{
+    const int dim){
     return compute_total_integral_separable(kernel_name, dim);
 }
 
 py::float_ _compute_total_integral_spherical(
     const std::string& kernel_name,
     const int dim,
-    const int min_kernel_evaluations_per_axis
-)
-{
+    const int min_kernel_evaluations_per_axis){
     return compute_total_integral_spherical(kernel_name, dim, min_kernel_evaluations_per_axis);
 }
 
 py::tuple _get_separable_kernel_values_1D(
-    const std::string& kernel_name
-)
-{
+    const std::string& kernel_name){
     auto [positions, values] = get_separable_kernel_values_1D(kernel_name);
     return py::make_tuple(positions, values);
 }
 
 py::tuple _get_spherical_kernel_values_1D(
-    const std::string& kernel_name
-)
-{
+    const std::string& kernel_name){
     auto [positions, values] = get_spherical_kernel_values_1D(kernel_name);
     return py::make_tuple(positions, values);
 }

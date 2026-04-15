@@ -5,18 +5,18 @@ import numpy as np
 import numpy.typing as npt
 
 
-class BaseClassKernel:
+class BaseKernelClass:
     """Base class for SPH kernels."""
 
-    def __init__(self, dim: int) -> None:
+    def __init__(self,
+                 dim: int = None, 
+                 support: float = None) -> None:
 
-        assert isinstance(dim, int) and dim in (
-            1,
-            2,
-            3,
-        ), "`dim` must be an integer and one of 1, 2, or 3"
+        assert isinstance(dim, int) and dim in (1, 2, 3,), "`dim` must be an integer and one of 1, 2, or 3"
         self.dim = dim
+        self.support = support
         self.eps = 1e-7
+        self.name = "base_kernel"
 
     def evaluate(self, r_ij, h) -> npt.NDArray[np.floating]:
 
@@ -142,24 +142,181 @@ class BaseClassKernel:
         pass
 
 
-class LucyKernel(BaseClassKernel):
+class TophatKernel(BaseKernelClass):
+    """Spherically symmetric Tophat kernel."""
+
+    def __init__(self, dim):
+        super().__init__(dim, support=0.5)
+        self.name = "tophat"
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 1.0
+        elif self.dim == 2:
+            return 4.0 / math.pi
+        elif self.dim == 3:
+            return 6.0 / math.pi
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        mask = q <= self.support
+        return np.where(mask, 1.0, 0.0)
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        # Gradient of Tophat is a delta function at q=1, numerically problematic.
+        return np.zeros_like(q)
+
+
+class TophatSepKernel(BaseKernelClass):
+    """Rectangular Tophat kernel (Product of 1D Tophats)."""
+
+    def __init__(self, dim):
+        super().__init__(dim, support=0.5)
+        self.name = "tophat_separable"
+
+    def _kernel_sigma(self) -> float:
+        return 1.0
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        # For TophatRect, support is 0.5 in each dimension.
+        q = np.abs(q)
+        mask = q <= self.support
+        return np.where(mask, 1.0, 0.0)
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        return np.zeros_like(q)
+
+
+class TSCKernel(BaseKernelClass):
+    """Spherically symmetric Triangular-Shaped Cloud (TSC) kernel."""
+
+    def __init__(self, dim):
+        super().__init__(dim, support=1.5)
+        self.name = "tsc"
+        self.node_1 = self.support / 3
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 1.0
+        elif self.dim == 2:
+            return 32.0 / (13.0 * math.pi)
+        elif self.dim == 3:
+            return 2.0 / math.pi
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        val = np.zeros_like(q)
+        mask1 = q <= self.node_1
+        mask2 = (q > self.node_1) & (q <= self.support)
+        val[mask1] = 0.75 - q[mask1] ** 2
+        val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
+        return val
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        grad = np.zeros_like(q)
+        mask1 = q <= self.node_1
+        mask2 = (q > self.node_1) & (q <= self.support)
+        grad[mask1] = -2.0 * q[mask1]
+        grad[mask2] = -(self.support - q[mask2])
+        return grad
+
+
+class TSCSepKernel(BaseKernelClass):
+    """Rectangular TSC kernel (Product of 1D TSCs)."""
+
+    def __init__(self, dim):
+        super().__init__(dim, support=1.5)
+        self.name = "tsc_separable"
+        self.node_1 = self.support / 3
+
+    def _kernel_sigma(self) -> float:
+        return 1.0
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        q = np.abs(q)
+        val = np.zeros_like(q)
+        mask1 = q <= self.node_1
+        mask2 = (q > self.node_1) & (q <= self.support)
+        val[mask1] = 0.75 - q[mask1] ** 2
+        val[mask2] = 0.5 * (self.support - q[mask2]) ** 2
+        return val
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        q = np.abs(q)
+        grad = np.zeros_like(q)
+        mask1 = q <= self.node_1
+        mask2 = (q > self.node_1) & (q <= self.support)
+        grad[mask1] = -2.0 * q[mask1]
+        grad[mask2] = -(self.support - q[mask2])
+        return grad
+
+
+class GaussianKernel(BaseKernelClass):
+    """Gaussian kernel implementation for SPH."""
+
+    def __init__(self, dim: int) -> None:
+        super().__init__(dim=dim, support=3.0)
+        self.name = "gaussian"
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 1.0 / math.pi**0.5
+        elif self.dim == 2:
+            return 1.0 / math.pi
+        elif self.dim == 3:
+            return 1.0 / math.pi**1.5
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        mask = q <= self.support
+        return np.where(mask, np.exp(-(q**2)), 0.0)
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        mask = q <= self.support
+        return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
+
+
+class GaussianSepKernel(BaseKernelClass):
+    """Gaussian kernel implementation for SPH."""
+
+    def __init__(self, dim: int) -> None:
+        super().__init__(dim=dim, support=3.0)
+        self.name = "gaussian_separable"
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 1.0 / math.pi**0.5
+        elif self.dim == 2:
+            return 1.0 / math.pi
+        elif self.dim == 3:
+            return 1.0 / math.pi**1.5
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        q = np.abs(q)
+        mask = q <= self.support
+        return np.where(mask, np.exp(-(q**2)), 0.0)
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        q = np.abs(q)
+        mask = q <= self.support
+        return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
+    
+
+class LucyKernel(BaseKernelClass):
     """Lucy kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
-        """Initialize the Lucy kernel.
-
-        Parameters
-        ----------
-        dim : int
-                Spatial dimension (1, 2, or 3).
-
-        Raises
-        ------
-        AssertionError
-                If ``dim`` is not 1, 2, or 3.
-
-        """
-        super().__init__(dim=dim)
+        super().__init__(dim=dim, support=1.0)
+        self.name = "lucy"
 
     def _kernel_sigma(self) -> float:
         """Compute the normalization constant for the Lucy kernel."""
@@ -171,138 +328,22 @@ class LucyKernel(BaseClassKernel):
             return 105.0 / (16.0 * math.pi)
 
     def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        mask = q <= 1
+        mask = q <= self.support
         return np.where(mask, (1 + 3 * q) * (1 - q) ** 3, 0.0)
 
     def _kernel_gradient_values(
         self, q: npt.NDArray[np.floating]
     ) -> npt.NDArray[np.floating]:
-        mask = q <= 1
+        mask = q <= self.support
         return np.where(mask, -12 * q * (1 - q) ** 2, 0.0)
 
 
-class TophatKernel(BaseClassKernel):
-    """Spherically symmetric Tophat kernel."""
-
-    def _kernel_sigma(self) -> float:
-        if self.dim == 1:
-            return 0.5
-        elif self.dim == 2:
-            return 1.0 / math.pi
-        elif self.dim == 3:
-            return 3.0 / (4.0 * math.pi)
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        return np.where(q <= 1.0, 1.0, 0.0)
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        # Gradient of Tophat is a delta function at q=1, numerically problematic.
-        return np.zeros_like(q)
-
-
-class TophatRectKernel(BaseClassKernel):
-    """Rectangular Tophat kernel (Product of 1D Tophats)."""
-
-    def _kernel_sigma(self) -> float:
-        return 1.0
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        # For TophatRect, support is 0.5 in each dimension.
-        return np.where(q <= 0.5, 1.0, 0.0)
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        return np.zeros_like(q)
-
-
-class TSCKernel(BaseClassKernel):
-    """Spherically symmetric Triangular-Shaped Cloud (TSC) kernel."""
-
-    def _kernel_sigma(self) -> float:
-        if self.dim == 1:
-            return 1.0
-        elif self.dim == 2:
-            return 2.0 / math.pi
-        elif self.dim == 3:
-            return 1.5 / math.pi
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        val = np.zeros_like(q)
-        mask1 = q <= 0.5
-        mask2 = (q > 0.5) & (q <= 1.5)
-        val[mask1] = 0.75 - q[mask1] ** 2
-        val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
-        return val
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        grad = np.zeros_like(q)
-        mask1 = q <= 0.5
-        mask2 = (q > 0.5) & (q <= 1.5)
-        grad[mask1] = -2.0 * q[mask1]
-        grad[mask2] = -(1.5 - q[mask2])
-        return grad
-
-
-class TSCRectKernel(BaseClassKernel):
-    """Rectangular TSC kernel (Product of 1D TSCs)."""
-
-    def _kernel_sigma(self) -> float:
-        return 1.0
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        val = np.zeros_like(q)
-        mask1 = q <= 0.5
-        mask2 = (q > 0.5) & (q <= 1.5)
-        val[mask1] = 0.75 - q[mask1] ** 2
-        val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
-        return val
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        grad = np.zeros_like(q)
-        mask1 = q <= 0.5
-        mask2 = (q > 0.5) & (q <= 1.5)
-        grad[mask1] = -2.0 * q[mask1]
-        grad[mask2] = -(1.5 - q[mask2])
-        return grad
-
-
-class GaussianKernel(BaseClassKernel):
-    """Gaussian kernel implementation for SPH."""
-
-    def __init__(self, dim: int) -> None:
-        super().__init__(dim=dim)
-
-    def _kernel_sigma(self) -> float:
-        if self.dim == 1:
-            return 1.0 / math.pi**0.5
-        elif self.dim == 2:
-            return 1.0 / math.pi
-        elif self.dim == 3:
-            return 1.0 / math.pi**1.5
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        mask = q <= 3
-        return np.where(mask, np.exp(-(q**2)), 0.0)
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        mask = q <= 3
-        return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
-
-
-class CubicSplineKernel(BaseClassKernel):
+class CubicSplineKernel(BaseKernelClass):
     """Cubic spline kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
         super().__init__(dim=dim)
+        self.name = "cubic_spline"
 
     def _kernel_sigma(self) -> float:
         if self.dim == 1:
@@ -329,11 +370,12 @@ class CubicSplineKernel(BaseClassKernel):
         return dW_dq
 
 
-class QuinticSplineKernel(BaseClassKernel):
+class QuinticSplineKernel(BaseKernelClass):
     """Quintic spline kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
         super().__init__(dim=dim)
+        self.name = "quintic_spline"
 
     def _kernel_sigma(self) -> float:
         if self.dim == 1:
@@ -366,11 +408,12 @@ class QuinticSplineKernel(BaseClassKernel):
         return dW_dq
 
 
-class WendlandC2Kernel(BaseClassKernel):
+class WendlandC2Kernel(BaseKernelClass):
     """Wendland C2 kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
         super().__init__(dim=dim)
+        self.name = "wendland_c2"
 
     def _kernel_sigma(self) -> float:
         if self.dim == 1:
@@ -398,11 +441,13 @@ class WendlandC2Kernel(BaseClassKernel):
             return np.where(mask, -2 * z**3 * (2 * q + 1) + 2 * z**4, 0.0)
 
 
-class WendlandC4Kernel(BaseClassKernel):
+class WendlandC4Kernel(BaseKernelClass):
     """Wendland C4 kernel implementation for SPH."""
 
-    def __init__(self, dim: int) -> None:
+    def __init__(self,
+                 dim: int) -> None:
         super().__init__(dim=dim)
+        self.name = "wendland_c4"
 
     def _kernel_sigma(self) -> float:
         if self.dim == 1:
@@ -435,11 +480,13 @@ class WendlandC4Kernel(BaseClassKernel):
         return np.where(mask, df * g + f * dg, 0.0)
 
 
-class WendlandC6Kernel(BaseClassKernel):
+class WendlandC6Kernel(BaseKernelClass):
     """Wendland C6 kernel implementation for SPH."""
 
-    def __init__(self, dim: int) -> None:
+    def __init__(self,
+                 dim: int) -> None:
         super().__init__(dim=dim)
+        self.name = "wendland_c6"
 
     def _kernel_sigma(self) -> float:
         if self.dim == 1:
@@ -484,6 +531,9 @@ class WendlandC6Kernel(BaseClassKernel):
 
 
 KERNEL_CLASSES = {
+    "tophat_separable": TophatSepKernel,
+    "tsc_separable": TSCSepKernel,
+    "gaussian_separable": GaussianSepKernel,
     "lucy": LucyKernel,
     "gaussian": GaussianKernel,
     "cubic_spline": CubicSplineKernel,
@@ -492,13 +542,12 @@ KERNEL_CLASSES = {
     "wendland_c4": WendlandC4Kernel,
     "wendland_c6": WendlandC6Kernel,
     "tophat": TophatKernel,
-    "tophat_rect": TophatRectKernel,
     "tsc": TSCKernel,
-    "tsc_rect": TSCRectKernel,
+
 }
 
 
-def get_kernel(kernel_name: str, dim: int) -> BaseClassKernel:
+def get_kernel(kernel_name: str, dim: int) -> BaseKernelClass:
     """Factory function to create kernel instances based on name and dimension.
 
     Parameters
@@ -510,12 +559,11 @@ def get_kernel(kernel_name: str, dim: int) -> BaseClassKernel:
 
     Returns
     -------
-    BaseClassKernel
+    BaseKernelClass
             An instance of the specified kernel class.
 
     Raises
     ------
-    AssertionError
             If ``kernel_name`` is not recognized or if ``dim`` is not valid.
 
     """
@@ -524,4 +572,4 @@ def get_kernel(kernel_name: str, dim: int) -> BaseClassKernel:
     ), f"Invalid kernel_name '{kernel_name}'. Must be one of {list(KERNEL_CLASSES.keys())}."
     assert dim in (1, 2, 3), f"Invalid dim '{dim}'. Must be 1, 2, or 3."
 
-    return KERNEL_CLASSES[kernel_name](dim)
+    return KERNEL_CLASSES[kernel_name](dim=dim)

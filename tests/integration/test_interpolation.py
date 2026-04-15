@@ -5,14 +5,14 @@ import numpy as np
 from smudgy import PointCloud
 
 PBCS = [False, True]
-METHODS = ["isotropic", "anisotropic"]
+GEOMETRY = ["isotropic", "anisotropic"]
 QUANTITIES = ["field", "gradient"]
 
 
 @pytest.mark.parametrize("pbc", PBCS)
-@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("geometry", GEOMETRY)
 @pytest.mark.parametrize("quantity", QUANTITIES)
-def test_interpolation_modes(pbc, method, quantity):
+def test_interpolation_modes(pbc, geometry, quantity):
     """Test interpolation workflow for different PBC, methods, and quantities."""
     np.random.seed(42)
     N = 1000
@@ -25,20 +25,22 @@ def test_interpolation_modes(pbc, method, quantity):
     weights = np.ones(N)
 
     pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
-    pc.setup(num_neighbors=8, method=method, kernel_name=kernel_name)
-    pc.compute_smoothing_lengths()
+    pc.global_setup(geometry=geometry, num_neighbors=8, kernel_name=kernel_name)
+
+    pc.compute_smoothing()
     pc.compute_density()
 
     # Interpolation
     if quantity == "field":
         result = pc.interpolate_fields(
-            values, positions, kernel_name=kernel_name, compute_gradients=False
+            values, positions, compute_gradients=False
         )
         assert result.shape[0] == N
         assert np.all(np.isfinite(result))
+
     else:  # gradient
-        result = pc.interpolate_fields(
-            values, positions, kernel_name=kernel_name, compute_gradients=True
+        result = pc.interpolate_gradient_fields(
+            values, positions
         )
         assert result.shape[0] == N
         assert result.shape[-1] == D
