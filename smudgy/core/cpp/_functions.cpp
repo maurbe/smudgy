@@ -1050,7 +1050,7 @@ void tsc_3d_adaptive_cpp(
 void separable_kernel_deposition_2d_cpp(
     const float* positions,             // (num_particles, 2)
     const float* quantities,            // (num_particles, num_fields)
-    const float* smoothing_lengths,     // (num_particles)
+    const float* smoothing_lengths,     // (num_particles, 2)
     const int num_particles,
     const int num_fields,
     const float* boxsizes,              // (2,)
@@ -1095,16 +1095,17 @@ void separable_kernel_deposition_2d_cpp(
     for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // gather relevant particle data and precompute kernel prefactor
-        float hsm_current = smoothing_lengths[n];
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current);
+        float hsm_x_current = smoothing_lengths[2 * n + 0];
+        float hsm_y_current = smoothing_lengths[2 * n + 1];
+        float kernel_prefactor = kernel_ptr->sigma() / (hsm_x_current * hsm_y_current);
         
         // convert particle position to cell units
         float x_cell = positions[2 * n + 0] / cellSize_x;
         float y_cell = positions[2 * n + 1] / cellSize_y;
 
         // compute kernel support in physical and cell units
-        float support_x_cell = kernel_support * hsm_current / cellSize_x;
-        float support_y_cell = kernel_support * hsm_current / cellSize_y;
+        float support_x_cell = kernel_support * hsm_x_current / cellSize_x;
+        float support_y_cell = kernel_support * hsm_y_current / cellSize_y;
 
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
@@ -1123,16 +1124,16 @@ void separable_kernel_deposition_2d_cpp(
                 int jj = apply_pbc(j, gridnum_y, periodic);
                 if (is_outside_domain(ii, gridnum_x) || is_outside_domain(jj, gridnum_y)) continue;
 
-                // prepare bounds of current cell
-                float x_left = i * cellSize_x;
-                float y_left = j * cellSize_y;
-                float x_right = (i + 1) * cellSize_x;
-                float y_right = (j + 1) * cellSize_y;
-                std::vector<float> bounds = {x_left, x_right, y_left, y_right};
+                // compute cell bounds in "q" units ( (box_edge - particle_pos) / hsm )
+                float qx_left  = (i * cellSize_x - positions[2 * n + 0]) / hsm_x_current;
+                float qy_left  = (j * cellSize_y - positions[2 * n + 1]) / hsm_y_current;
+                float qx_right = ((i + 1) * cellSize_x - positions[2 * n + 0]) / hsm_x_current;
+                float qy_right = ((j + 1) * cellSize_y - positions[2 * n + 1]) / hsm_y_current;
 
-                // compute total integral over the current cell
-                float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(bounds);
-                integral *= cellSize_x * cellSize_y;
+                std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right};
+
+                // compute total integral over the current cell using q-space bounds
+                float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(q_bounds);
             
                 // deposit to grid
                 int base_idx = ii * stride_x + jj * stride_y;
@@ -1149,21 +1150,21 @@ void separable_kernel_deposition_2d_cpp(
 // =============================================================================
 
 void separable_kernel_deposition_3d_cpp(
-    const float* positions,           // (num_particles, 3)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* smoothing_lengths,           // (num_particles)
+    const float* positions,                 // (num_particles, 3)
+    const float* quantities,                // (num_particles, num_fields)
+    const float* smoothing_lengths,         // (num_particles, 3)
     const int num_particles,
     const int num_fields,
-    const float* boxsizes,      // (3,)
-    const int* gridnums,        // (3,)
+    const float* boxsizes,                  // (3,)
+    const int* gridnums,                    // (3,)
     const bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
     //int min_kernel_evaluations_per_axis,
     const bool use_openmp,
     const int omp_threads,
-    float* fields,             // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights             // (gridnum_x, gridnum_y, gridnum_z)
+    float* fields,                          // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights                          // (gridnum_x, gridnum_y, gridnum_z)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -1203,18 +1204,25 @@ void separable_kernel_deposition_3d_cpp(
     for_each_particle(num_particles, parallel, threads, [&](int n) {
 
         // gather relevant particle data and precompute kernel prefactor
-        float hsm_current = smoothing_lengths[n];
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current);
-        
+        float hsm_x_current = smoothing_lengths[3 * n + 0];
+        float hsm_y_current = smoothing_lengths[3 * n + 1];
+        float hsm_z_current = smoothing_lengths[3 * n + 2];
+
+        float hx = std::max(hsm_x_current, 1e-12f);
+        float hy = std::max(hsm_y_current, 1e-12f);
+        float hz = std::max(hsm_z_current, 1e-12f);
+
+        float kernel_prefactor = kernel_ptr->sigma() / (hsm_x_current * hsm_y_current * hsm_z_current);
+
         // convert particle position to cell units
         float x_cell = positions[3 * n + 0] / cellSize_x;
         float y_cell = positions[3 * n + 1] / cellSize_y;
         float z_cell = positions[3 * n + 2] / cellSize_z;
 
-        // compute kernel support in physical and cell units
-        float support_x_cell = kernel_support * hsm_current / cellSize_x;
-        float support_y_cell = kernel_support * hsm_current / cellSize_y;
-        float support_z_cell = kernel_support * hsm_current / cellSize_z;
+        // compute kernel support in cell units
+        float support_x_cell = kernel_support * hsm_x_current / cellSize_x;
+        float support_y_cell = kernel_support * hsm_y_current / cellSize_y;
+        float support_z_cell = kernel_support * hsm_z_current / cellSize_z;
 
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
@@ -1237,18 +1245,18 @@ void separable_kernel_deposition_3d_cpp(
                     int kk = apply_pbc(k, gridnum_z, periodic);
                     if (is_outside_domain(ii, gridnum_x) || is_outside_domain(jj, gridnum_y) || is_outside_domain(kk, gridnum_z)) continue;
 
-                    // prepare bounds of current cell
-                    float x_left = i * cellSize_x;
-                    float y_left = j * cellSize_y;
-                    float z_left = k * cellSize_z;
-                    float x_right = (i + 1) * cellSize_x;
-                    float y_right = (j + 1) * cellSize_y;
-                    float z_right = (k + 1) * cellSize_z;
-                    std::vector<float> bounds = {x_left, x_right, y_left, y_right, z_left, z_right};
+                    // compute cell bounds in "q" units ( (box_edge - particle_pos) / hsm )
+                    float qx_left  = (i * cellSize_x - positions[3 * n + 0]) / hsm_x_current;
+                    float qy_left  = (j * cellSize_y - positions[3 * n + 1]) / hsm_y_current;
+                    float qz_left  = (k * cellSize_z - positions[3 * n + 2]) / hsm_z_current;
+                    float qx_right = ((i + 1) * cellSize_x - positions[3 * n + 0]) / hsm_x_current;
+                    float qy_right = ((j + 1) * cellSize_y - positions[3 * n + 1]) / hsm_y_current;
+                    float qz_right = ((k + 1) * cellSize_z - positions[3 * n + 2]) / hsm_z_current;
 
-                    // compute total integral over the current cell
-                    float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(bounds);
-                    integral *= cellSize_x * cellSize_y * cellSize_z;
+                    std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right, qz_left, qz_right};
+
+                    // compute total integral over the current cell using q-space bounds
+                    float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(q_bounds);
 
                     // deposit to grid
                     int base_idx = ii * stride_x + jj * stride_y + kk * stride_z;
@@ -1495,7 +1503,6 @@ void isotropic_kernel_deposition_3d_cpp(
         // gather relevant values for the current particle
         float hsm_current = smoothing_lengths[n];
         float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current * hsm_current);
-        //float detH = hsm_current * hsm_current * hsm_current;
 
         // convert particle position to cell units
         float x_pos = positions[3 * n + 0];
@@ -1514,10 +1521,10 @@ void isotropic_kernel_deposition_3d_cpp(
 
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
         int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
         int k_min = static_cast<int>(std::floor(z_cell - support_z_cell));
+        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
+        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
         int k_max = static_cast<int>(std::ceil(z_cell + support_z_cell));
         const float* particle = quantities + n * num_fields;
 

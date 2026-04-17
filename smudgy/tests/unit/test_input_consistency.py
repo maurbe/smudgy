@@ -21,7 +21,7 @@ def test_fields_length_mismatch():
     sim = PointCloud(positions=pos, weights=weigh, boxsize=1.0, verbose=False)
     fields = np.ones((9, 1), dtype=np.float32)
     with pytest.raises(ValueError):
-        sim.deposit_to_grid(fields=fields, averaged=[False], gridnums=8, method="ngp")
+        sim.deposit_to_grid(fields=fields, averaged=[False], gridnums=8, kernel_name="ngp")
 
 
 def test_gridnums_dim_mismatch():
@@ -31,7 +31,7 @@ def test_gridnums_dim_mismatch():
     sim = PointCloud(positions=pos, weights=weigh, boxsize=1.0, verbose=False)
     with pytest.raises(ValueError):
         sim.deposit_to_grid(
-            fields=weigh[:, None], averaged=[False], gridnums=[8, 8, 8], method="ngp"
+            fields=weigh[:, None], averaged=[False], gridnums=[8, 8, 8], kernel_name="ngp"
         )
 
 
@@ -45,6 +45,6 @@ def test_omp_threads_validation():
             fields=weigh[:, None],
             averaged=[False],
             gridnums=8,
-            method="ngp",
+            kernel_name="ngp",
             omp_threads=0,
         )

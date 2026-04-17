@@ -9,8 +9,8 @@ from . import _cpp_functions as _cpp_backend
 from . import _py_functions as _py_backend
 
 _PYTHON_UNSUPPORTED = {
-    "cic_2d_adaptive",
-    "cic_3d_adaptive",
+    "tophat_2d_adaptive",
+    "tophat_3d_adaptive",
     "tsc_2d_adaptive",
     "tsc_3d_adaptive",
     "separable_2d",
@@ -180,7 +180,7 @@ def ngp_3d(
     )
 
 
-def cic_2d(
+def tophat_2d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
     boxsizes: Sequence[float],
@@ -223,7 +223,7 @@ def cic_2d(
 
     """
     return _call_backend(
-        "cic_2d",
+        "tophat_2d",
         use_python,
         positions,
         quantities,
@@ -235,7 +235,7 @@ def cic_2d(
     )
 
 
-def cic_3d(
+def tophat_3d(
     positions: npt.ArrayLike,
     quantities: npt.ArrayLike,
     boxsizes: Sequence[float],
@@ -278,7 +278,7 @@ def cic_3d(
 
     """
     return _call_backend(
-        "cic_3d",
+        "tophat_3d",
         use_python,
         positions,
         quantities,
@@ -658,7 +658,7 @@ def separable_2d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
-    smoothing_lengths : numpy.ndarray, shape (N,)
+    smoothing_lengths : numpy.ndarray, shape (N, 2), one smoothing length per axis
         Smoothing lengths per particle.
     boxsizes : array_like, shape (2,)
         Domain size per axis.
@@ -725,7 +725,7 @@ def separable_3d(
         Particle positions.
     quantities : numpy.ndarray, shape (N, F)
         Per-particle fields to deposit.
-    smoothing_lengths : numpy.ndarray, shape (N,)
+    smoothing_lengths : numpy.ndarray, shape (N, 3), one smoothing length per axis
         Smoothing lengths per particle.
     boxsizes : array_like, shape (3,)
         Domain size per axis.

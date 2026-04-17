@@ -161,7 +161,7 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
     return fields, weights
 
 
-def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
+def _tophat_2d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit 2D particle quantities using bilinear Cloud-In-Cell weights.
 
     Parameters
@@ -237,7 +237,7 @@ def _cic_2d(positions, quantities, boxsizes, gridnums, periodic):
     return fields, weights
 
 
-def _cic_3d(positions, quantities, boxsizes, gridnums, periodic):
+def _tophat_3d(positions, quantities, boxsizes, gridnums, periodic):
     """Deposit 3D particle quantities using trilinear Cloud-In-Cell weights.
 
     Parameters

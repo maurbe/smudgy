@@ -5,14 +5,14 @@ import numpy as np
 from smudgy import PointCloud
 
 PBCS = [False, True]
-GEOMETRY = ["isotropic", "anisotropic"]
+STRUCTURES  = ["isotropic", "anisotropic"]
 QUANTITIES = ["field", "gradient"]
 
 
 @pytest.mark.parametrize("pbc", PBCS)
-@pytest.mark.parametrize("geometry", GEOMETRY)
+@pytest.mark.parametrize("structure", STRUCTURES)
 @pytest.mark.parametrize("quantity", QUANTITIES)
-def test_interpolation_modes(pbc, geometry, quantity):
+def test_interpolation_modes(pbc, structure, quantity):
     """Test interpolation workflow for different PBC, methods, and quantities."""
     np.random.seed(42)
     N = 1000
@@ -25,7 +25,11 @@ def test_interpolation_modes(pbc, geometry, quantity):
     weights = np.ones(N)
 
     pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
-    pc.global_setup(geometry=geometry, num_neighbors=8, kernel_name=kernel_name)
+    pc.global_setup(
+        kernel_name=kernel_name,
+        structure=structure, 
+        num_neighbors=8, 
+        )
 
     pc.compute_smoothing()
     pc.compute_density()

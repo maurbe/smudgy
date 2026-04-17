@@ -1334,8 +1334,8 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             Particle positions.
         quantities : numpy.ndarray, shape (N, F)
             Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N,)
-            Smoothing lengths per particle.
+        smoothing_lengths : numpy.ndarray, shape (N, 2)
+            Smoothing lengths per particle and axis.
         boxsizes : array_like, shape (2,)
             Domain size per axis.
         gridnums : array_like, shape (2,)
@@ -1379,8 +1379,8 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             Particle positions.
         quantities : numpy.ndarray, shape (N, F)
             Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N,)
-            Smoothing lengths per particle.
+        smoothing_lengths : numpy.ndarray, shape (N, 3)
+            Smoothing lengths per particle and axis.
         boxsizes : array_like, shape (3,)
             Domain size per axis.
         gridnums : array_like, shape (3,)

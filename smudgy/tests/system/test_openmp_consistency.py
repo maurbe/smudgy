@@ -8,7 +8,8 @@ import pytest
 from smudgy import PointCloud, check_openmp
 
 DATASETS = ["random"]
-METHODS = ["ngp", "cic", "tsc"]
+STRUCTURES = ["separable"]
+KERNEL_NAMES = ["ngp", "tophat", "tsc"]
 GRIDNUM = 64
 
 
@@ -27,7 +28,7 @@ def _generate_dataset(dim: int):
     positions = np.random.uniform(0, 1, size=(N, dim))
     weights = np.ones(N, dtype=np.float32)
     boxsize = np.ones(dim, dtype=np.float32)
-    return {"pos": positions, "weigh": weights, "boxsize": boxsize}
+    return {"positions": positions, "weights": weights, "boxsize": boxsize}
 
 
 def _get_openmp_max_threads():
@@ -55,17 +56,18 @@ def _require_openmp():
 
 
 @pytest.mark.parametrize("dim", [2, 3])
-@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("structure", STRUCTURES)
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 @pytest.mark.parametrize("dataset", DATASETS)
-def test_openmp_toggle_consistency(dim, method, dataset):
+def test_openmp_toggle_consistency(dim, structure, kernel_name, dataset):
     """Test OpenMP toggle consistency for deposition results."""
     max_threads = _require_openmp()
 
     data = _generate_dataset(dim)
-    positions = np.asarray(data["pos"], dtype=np.float32)
-    weights = np.asarray(data["weigh"], dtype=np.float32)
+    positions = np.asarray(data["positions"], dtype=np.float32)
+    weights = np.asarray(data["weights"], dtype=np.float32)
     boxsize = np.asarray(data["boxsize"], dtype=np.float32)
-    fields = weights[:, np.newaxis]
+    fields = weights
 
     sim = PointCloud(
         positions=positions,
@@ -76,17 +78,25 @@ def test_openmp_toggle_consistency(dim, method, dataset):
 
     fields_serial = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * fields.shape[1],
+        averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-        method=method,
+        
+        kernel_name=kernel_name,
+        structure=structure,
+        adaptive=False,
+
         use_openmp=False,
     )
 
     fields_omp = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * fields.shape[1],
+        averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-        method=method,
+
+        kernel_name=kernel_name,
+        structure=structure,
+        adaptive=False,
+
         use_openmp=True,
         omp_threads=min(2, max_threads),
     )
@@ -96,9 +106,10 @@ def test_openmp_toggle_consistency(dim, method, dataset):
 
 
 @pytest.mark.parametrize("dim", [2, 3])
-@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("structure", STRUCTURES)
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 @pytest.mark.parametrize("dataset", DATASETS)
-def test_openmp_thread_counts_consistency(dim, method, dataset):
+def test_openmp_thread_counts_consistency(dim, structure, kernel_name, dataset):
     """Test consistency of deposition with different OpenMP thread counts."""
     max_threads = _require_openmp()
     thread_counts = [t for t in (2, 4, 8) if t <= max_threads]
@@ -106,10 +117,10 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
         pytest.skip("Not enough OpenMP threads available for comparison")
 
     data = _generate_dataset(dim)
-    positions = np.asarray(data["pos"], dtype=np.float32)
-    weights = np.asarray(data["weigh"], dtype=np.float32)
+    positions = np.asarray(data["positions"], dtype=np.float32)
+    weights = np.asarray(data["weights"], dtype=np.float32)
     boxsize = np.asarray(data["boxsize"], dtype=np.float32)
-    fields = weights[:, np.newaxis]
+    fields = weights
 
     sim = PointCloud(
         positions=positions,
@@ -120,9 +131,13 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
 
     fields_ref = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * fields.shape[1],
+        averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-        method=method,
+
+        kernel_name=kernel_name,
+        structure=structure,
+        adaptive=False,
+
         use_openmp=True,
         omp_threads=thread_counts[0],
     )
@@ -130,9 +145,13 @@ def test_openmp_thread_counts_consistency(dim, method, dataset):
     for threads in thread_counts[1:]:
         fields_test = sim.deposit_to_grid(
             fields=fields,
-            averaged=[False] * fields.shape[1],
+            averaged=[False] * len(fields),
             gridnums=GRIDNUM,
-            method=method,
+
+            kernel_name=kernel_name,
+            structure=structure,
+            adaptive=False,
+
             use_openmp=True,
             omp_threads=threads,
         )

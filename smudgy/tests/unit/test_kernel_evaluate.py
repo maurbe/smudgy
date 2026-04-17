@@ -9,8 +9,9 @@ from smudgy.core.kernels import get_kernel
 def get_all_kernel_names():
     # Extract allowed kernels from Kernel class
     return [
-        "tophat_rect",
-        "tsc_rect",
+        "tophat_separable",
+        "tsc_separable",
+        "gaussian_separable",
         "tophat",
         "tsc",
         "lucy",
