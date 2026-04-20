@@ -1,8 +1,10 @@
 """Backend-agnostic deposition function wrappers."""
 
 from __future__ import annotations
+
 from collections.abc import Callable, Sequence
 from typing import Any
+
 import numpy.typing as npt
 
 from . import _cpp_functions as _cpp_backend
@@ -58,10 +60,27 @@ def _call_backend(
         NotImplementedError: If the Python backend does not implement the requested function.
 
     """
+
+    # legacy redirection for python backend functions [tophat, tsc, ngp]
+    if use_python and func_name in ["separable_2d", "separable_3d"]:
+        # Inspect kernel_name at index 6 in the arguments for separable_*d
+        # (pos, quant, smooth, boxsize, gridnums, periodic, kn_res, integration)
+        kernel_name_raw = args[6] if len(args) > 6 else ""
+        kernel_name = kernel_name_raw.replace("_separable", "")
+        
+        if kernel_name in ["ngp", "tophat", "tsc"]:
+            # Redirect to specialized legacy Python functions
+            # Target signature: (positions, quantities, boxsize, gridnums, periodic)
+            # Map indices: 0:pos, 1:quant, 3:boxsize, 4:gridnums, 5:periodic
+            func_name = f"{kernel_name}_{func_name[-2:]}"
+            args = (args[0], args[1], args[3], args[4], args[5])
+
     if use_python and func_name in _PYTHON_UNSUPPORTED:
         raise NotImplementedError(
             f"Python backend does not implement '{func_name}'. Set use_python=False to use the C++ backend."
         )
+    
+    print(f"Calling : {func_name}")
     backend = _select_backend(use_python)
     backend_func_name = f"_{func_name}"
     func: Callable[..., Any] = getattr(backend, backend_func_name)
@@ -172,462 +191,6 @@ def ngp_3d(
         use_python,
         positions,
         quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tophat_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 2D grid using CIC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 2)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    boxsizes : array_like, shape (2,)
-        Domain size per axis.
-    gridnums : array_like, shape (2,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "tophat_2d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tophat_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 3D grid using CIC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 3)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    boxsizes : array_like, shape (3,)
-        Domain size per axis.
-    gridnums : array_like, shape (3,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy, Gz)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "tophat_3d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def cic_adaptive_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 2D grid using adaptive CIC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 2)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    smoothing_lengths : numpy.ndarray, shape (N,)
-        Smoothing lengths per particle.
-    boxsizes : array_like, shape (2,)
-        Domain size per axis.
-    gridnums : array_like, shape (2,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "cic_2d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def cic_adaptive_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 3D grid using adaptive CIC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 3)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    smoothing_lengths : numpy.ndarray, shape (N,)
-        Smoothing lengths per particle.
-    boxsizes : array_like, shape (3,)
-        Domain size per axis.
-    gridnums : array_like, shape (3,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy, Gz)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "cic_3d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tsc_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 2D grid using TSC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 2)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    boxsizes : array_like, shape (2,)
-        Domain size per axis.
-    gridnums : array_like, shape (2,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "tsc_2d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tsc_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 3D grid using TSC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 3)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    boxsizes : array_like, shape (3,)
-        Domain size per axis.
-    gridnums : array_like, shape (3,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy, Gz)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "tsc_3d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tsc_adaptive_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 2D grid using adaptive TSC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 2)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    smoothing_lengths : numpy.ndarray, shape (N,)
-        Smoothing lengths per particle.
-    boxsizes : array_like, shape (2,)
-        Domain size per axis.
-    gridnums : array_like, shape (2,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "tsc_2d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tsc_adaptive_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    """Deposit particle quantities onto a 3D grid using adaptive TSC (C++ backend).
-
-    Parameters
-    ----------
-    positions : numpy.ndarray, shape (N, 3)
-        Particle positions.
-    quantities : numpy.ndarray, shape (N, F)
-        Per-particle fields to deposit.
-    smoothing_lengths : numpy.ndarray, shape (N,)
-        Smoothing lengths per particle (adaptive support).
-    boxsizes : array_like, shape (3,)
-        Domain size per axis.
-    gridnums : array_like, shape (3,)
-        Number of grid cells per axis.
-    periodic : bool
-        Global periodic boundaries.
-    *args : Any
-        Additional positional arguments (unused).
-    use_python : bool, optional
-        Use the Python backend if True, else C++ backend.
-    use_openmp : bool, optional
-        Enable OpenMP parallelism.
-    omp_threads : int, optional
-        Number of OpenMP threads (0 uses the default).
-
-    Returns
-    -------
-    fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-        Deposited field values.
-    weights : numpy.ndarray, shape (Gx, Gy, Gz)
-        Weight sum per cell.
-
-    """
-    return _call_backend(
-        "tsc_3d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
         boxsizes,
         gridnums,
         periodic,
@@ -1060,3 +623,210 @@ def anisotropic_3d(
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
+
+
+
+"""
+def cic_adaptive_2d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "cic_2d_adaptive",
+        use_python,
+        positions,
+        quantities,
+        smoothing_lengths,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+def cic_adaptive_3d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "cic_3d_adaptive",
+        use_python,
+        positions,
+        quantities,
+        smoothing_lengths,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+def tsc_adaptive_2d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "tsc_2d_adaptive",
+        use_python,
+        positions,
+        quantities,
+        smoothing_lengths,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+def tsc_adaptive_3d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    smoothing_lengths: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "tsc_3d_adaptive",
+        use_python,
+        positions,
+        quantities,
+        smoothing_lengths,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+def tophat_2d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "tophat_2d",
+        use_python,
+        positions,
+        quantities,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+
+def tophat_3d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "tophat_3d",
+        use_python,
+        positions,
+        quantities,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+
+def tsc_2d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+    
+    return _call_backend(
+        "tsc_2d",
+        use_python,
+        positions,
+        quantities,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+
+
+def tsc_3d(
+    positions: npt.ArrayLike,
+    quantities: npt.ArrayLike,
+    boxsizes: Sequence[float],
+    gridnums: Sequence[int],
+    periodic: bool,
+    *args: Any,
+    use_python: bool = False,
+    use_openmp: bool = True,
+    omp_threads: int = 0,
+):
+  
+    return _call_backend(
+        "tsc_3d",
+        use_python,
+        positions,
+        quantities,
+        boxsizes,
+        gridnums,
+        periodic,
+        use_openmp=use_openmp,
+        omp_threads=omp_threads,
+    )
+"""

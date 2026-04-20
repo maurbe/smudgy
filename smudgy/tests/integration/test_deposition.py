@@ -1,10 +1,12 @@
 """Test suite for deposition operations in SPH library."""
 
-import pytest
 import numpy as np
+import pytest
+
 from smudgy import PointCloud
 
 STRUCTURES = ["separable", "isotropic", "anisotropic"]
+
 
 @pytest.mark.parametrize("structure", STRUCTURES)
 def test_deposition_grid_adaptive(structure):
@@ -28,9 +30,7 @@ def test_deposition_grid_adaptive(structure):
         fields=values,
         averaged=averaged,
         gridnums=gridnums,
-        
         kernel_name="gaussian",
-
         integration="midpoint",
         min_kernel_evaluations_per_axis=4,
         return_weights=True,

@@ -1,13 +1,14 @@
 """Tests cross-backend consistency between Python and C++ deposition."""
 
-import pytest
 import numpy as np
+import pytest
+
 from smudgy import PointCloud
 
 GRIDNUM = 64
 DATASETS = ["random"]
 STRUCTURES = ["separable"]
-KERNEL_NAMES = ["ngp", "tophat", "tsc"] 
+KERNEL_NAMES = ["ngp", "tophat", "tsc"]
 
 
 def _generate_dataset(dim: int):
@@ -48,7 +49,7 @@ def test_python_cpp_backend_consistency(dim, structure, kernel_name, dataset):
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-
+        
         use_python=True,
     )
 

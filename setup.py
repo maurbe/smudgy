@@ -2,8 +2,8 @@
 Automatically falls back to serial build if OpenMP is unavailable.
 """
 
-import platform
 import os
+import platform
 from distutils.errors import CompileError, LinkError
 
 import numpy as np

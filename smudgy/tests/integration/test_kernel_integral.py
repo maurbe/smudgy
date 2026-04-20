@@ -1,7 +1,8 @@
 """Test the analytical integrals of the kernels (all expected = 1.0)."""
 
-import pytest
 import numpy as np
+import pytest
+
 from smudgy import compute_kernel_integral
 
 DIMS = [1, 2, 3]

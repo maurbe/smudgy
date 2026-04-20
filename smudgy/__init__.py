@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from .grid import *
 from .pointcloud import *
 from .utils import *
-from .grid import *
 
 
 def check_openmp() -> bool:
@@ -17,9 +17,7 @@ def check_openmp() -> bool:
 
 
 def compute_kernel_integral(
-    kernel_name: str, 
-    dim: int, 
-    min_kernel_evaluations_per_axis: int = None
+    kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int = None
 ) -> bool:
     """Check whether the kernel integral sums to 1."""
     from .core import _cpp_functions as cppfunc
@@ -27,7 +25,9 @@ def compute_kernel_integral(
     if "separable" in kernel_name:
         return cppfunc.compute_total_integral_separable(kernel_name, dim)
     else:
-        return cppfunc.compute_total_integral_spherical(kernel_name, dim, min_kernel_evaluations_per_axis)
+        return cppfunc.compute_total_integral_spherical(
+            kernel_name, dim, min_kernel_evaluations_per_axis
+        )
 
 
 def get_kernel_shapes_1D(kernel_name: str) -> tuple[list[float], list[float]]:

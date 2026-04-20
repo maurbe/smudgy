@@ -1,7 +1,9 @@
 """Functions for creating regular grids of cell centers in 1D, 2D, and 3D domains."""
 
 from __future__ import annotations
+
 from collections.abc import Sequence
+
 import numpy as np
 import numpy.typing as npt
 
@@ -54,6 +56,7 @@ def _normalize_cells(n_cells: CellInput, dim: int) -> IntArray:
     ------
     ValueError
         If ``n_cells`` is not either a single positive integer or an array-like of positive integers with length ``dim``.
+
     """
     # Convert input to array, allow float but require integer values
     n_cells = np.asarray(n_cells)

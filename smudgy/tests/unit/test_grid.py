@@ -1,4 +1,5 @@
 import numpy as np
+
 from smudgy.grid import create_grid_1d, create_grid_2d, create_grid_3d
 
 

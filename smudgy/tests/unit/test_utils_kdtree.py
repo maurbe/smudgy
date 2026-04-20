@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from smudgy.utils import build_kdtree, query_kdtree
 
 

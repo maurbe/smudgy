@@ -7,7 +7,7 @@ from smudgy import PointCloud
 
 
 def test_invalid_positions_shape():
-    """Test invalid positions shape raises AssertionError."""
+    """Test invalid positions shape raises ValueError."""
     pos = np.zeros((10, 4), dtype=np.float32)
     weigh = np.ones(10, dtype=np.float32)
     with pytest.raises(AssertionError):
@@ -21,7 +21,12 @@ def test_fields_length_mismatch():
     sim = PointCloud(positions=pos, weights=weigh, boxsize=1.0, verbose=False)
     fields = np.ones((9, 1), dtype=np.float32)
     with pytest.raises(ValueError):
-        sim.deposit_to_grid(fields=fields, averaged=[False], gridnums=8, kernel_name="ngp")
+        sim.deposit_to_grid(
+            fields=fields, 
+            averaged=False, 
+            gridnums=8, 
+            kernel_name="ngp"
+        )
 
 
 def test_gridnums_dim_mismatch():
@@ -31,7 +36,10 @@ def test_gridnums_dim_mismatch():
     sim = PointCloud(positions=pos, weights=weigh, boxsize=1.0, verbose=False)
     with pytest.raises(ValueError):
         sim.deposit_to_grid(
-            fields=weigh[:, None], averaged=[False], gridnums=[8, 8, 8], kernel_name="ngp"
+            fields=weigh[:, None],
+            averaged=False,
+            gridnums=[8, 8, 8],
+            kernel_name="ngp",
         )
 
 
@@ -43,7 +51,7 @@ def test_omp_threads_validation():
     with pytest.raises(ValueError):
         sim.deposit_to_grid(
             fields=weigh[:, None],
-            averaged=[False],
+            averaged=False,
             gridnums=8,
             kernel_name="ngp",
             omp_threads=0,

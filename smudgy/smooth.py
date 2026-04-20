@@ -1,11 +1,13 @@
 """SmoothingInfo dataclass to store smoothing-related information"""
 
-import numpy as np
 from dataclasses import dataclass
+
+import numpy as np
+
 
 @dataclass
 class SmoothingInfo:
-    
+
     tree: object = None
     num_neighbors: int = None
     nn_inds: np.ndarray = None

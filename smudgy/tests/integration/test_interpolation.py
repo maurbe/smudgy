@@ -1,11 +1,12 @@
 """Test interpolation functionality for different modes and quantities."""
 
-import pytest
 import numpy as np
+import pytest
+
 from smudgy import PointCloud
 
 PBCS = [False, True]
-STRUCTURES  = ["isotropic", "anisotropic"]
+STRUCTURES = ["isotropic", "anisotropic"]
 QUANTITIES = ["field", "gradient"]
 
 
@@ -27,25 +28,21 @@ def test_interpolation_modes(pbc, structure, quantity):
     pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
     pc.global_setup(
         kernel_name=kernel_name,
-        structure=structure, 
-        num_neighbors=8, 
-        )
+        structure=structure,
+        num_neighbors=8,
+    )
 
     pc.compute_smoothing()
     pc.compute_density()
 
     # Interpolation
     if quantity == "field":
-        result = pc.interpolate_fields(
-            values, positions, compute_gradients=False
-        )
+        result = pc.interpolate_fields(values, positions, compute_gradients=False)
         assert result.shape[0] == N
         assert np.all(np.isfinite(result))
 
     else:  # gradient
-        result = pc.interpolate_gradient_fields(
-            values, positions
-        )
+        result = pc.interpolate_gradient_fields(values, positions)
         assert result.shape[0] == N
         assert result.shape[-1] == D
         assert np.all(np.isfinite(result))

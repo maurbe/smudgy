@@ -1,27 +1,19 @@
 """Test the total integrals of the kernels (all expected = 1.0)."""
 
-import pytest
 import numpy as np
+import pytest
+
 from smudgy import PointCloud
 
 DIMS = [2, 3]
-SHAPE = ["separable", "isotropic"]#, "anisotropic"]
-NUM_NEIGHBORS = [3]#, 4, 5]
-MIN_KERNEL_EVALUATIONS_PER_AXIS = [2]#, 3, 4]
-INTEGRAL_METHODS = ["midpoint"]#, "trapezoidal", "simpson"]
+STRUCTURE = ["separable"]
+NUM_NEIGHBORS = [3]  # , 4, 5]
+MIN_KERNEL_EVALUATIONS_PER_AXIS = [2]  # , 3, 4]
+INTEGRAL_METHODS = ["midpoint"]  # , "trapezoidal", "simpson"]
 KERNEL_NAMES = [
-    "tophat_separable",
-    #"tsc_separable",
-    #"gaussian_separable",
-    #"tophat",
-    #"tsc",
-    #"lucy",
-    #"gaussian",
-    #"cubic_spline",
-    #"quintic_spline",
-    #"wendland_c2",
-    #"wendland_c4",
-    #"wendland_c6",
+     "tophat",
+     "tsc",
+     "gaussian",
 ]
 
 
@@ -38,7 +30,7 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
 
 
 @pytest.mark.parametrize("dim", DIMS)
-@pytest.mark.parametrize("shape", SHAPE)
+@pytest.mark.parametrize("structure", STRUCTURE)
 @pytest.mark.parametrize("num_neighbors", NUM_NEIGHBORS)
 @pytest.mark.parametrize(
     "min_kernel_evaluations_per_axis", MIN_KERNEL_EVALUATIONS_PER_AXIS
@@ -47,31 +39,33 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 def test_weight_conservation(
     dim: int,
-    shape: str,
+    structure: str,
     num_neighbors: int,
     min_kernel_evaluations_per_axis: int,
     integral_method: str,
     kernel_name: str,
 ):
     """Test that the deposited weights are conserved (i.e., sum to 1.0)."""
-
     gridnums = 32
 
     # set up the point cloud and kernel
     pc = create_uniform_point_cloud(dim)
-    pc.setup(
+    pc.global_setup(
         num_neighbors=num_neighbors,
-        method=shape,
+        structure=structure,
         kernel_name=kernel_name,
     )
-    pc.compute_smoothing_lengths()
+    pc.compute_smoothing()
 
     _, weights_sph = pc.deposit_to_grid(
         fields=pc.weights,
         averaged=False,
         gridnums=gridnums,
-        method=shape,
+        
         kernel_name=kernel_name,
+        structure=structure,
+        adaptive=False,
+
         min_kernel_evaluations_per_axis=min_kernel_evaluations_per_axis,
         integration=integral_method,
         return_weights=True,

@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from smudgy.utils import shift_coordinates, coordinate_difference_with_pbc
+
+from smudgy.utils import coordinate_difference_with_pbc, shift_coordinates
 
 
 def test_shift_coordinates_basic():

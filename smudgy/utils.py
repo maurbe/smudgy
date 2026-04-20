@@ -1,15 +1,12 @@
 """Utility functions for SPH operations."""
 
 from __future__ import annotations
+
 from collections.abc import Sequence
-from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
-
 from scipy import spatial
-from .core import collection as backend
-from .core.kernels import get_kernel
 
 FloatArray = npt.NDArray[np.floating]
 IntArray = npt.NDArray[np.int_]
@@ -80,6 +77,7 @@ def shift_coordinates(coordinates: npt.ArrayLike) -> FloatArray:
     ------
     AssertionError
             If the input array is not 2D.
+
     """
     coordinates_array = np.asarray(coordinates)
     assert (
@@ -113,6 +111,7 @@ def coordinate_difference_with_pbc(
     AssertionError
             If the input coordinate arrays do not have the same spatial dimension.
             If ``boxsize`` is an array, if it is not 1D or if its length does not match the coordinate dimension.
+
     """
     shape_x = x.shape
     shape_y = y.shape
@@ -283,6 +282,7 @@ def project_smoTens_to_2d(
             If neither or both of ``plane`` and ``basis`` are provided.
             If ``plane`` is not one of the allowed values.
             If ``basis`` is not a 2-tuple of 3D vectors.
+
     """
     # Validate inputs
     if plane is None and basis is None:
@@ -320,4 +320,3 @@ def project_smoTens_to_2d(
     # Compute eigendecomposition of 2D tensors
     eigvals, eigvecs = np.linalg.eigh(h_tensor_2d)
     return h_tensor_2d, eigvals, eigvecs
-

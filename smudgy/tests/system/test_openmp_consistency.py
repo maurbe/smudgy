@@ -80,11 +80,9 @@ def test_openmp_toggle_consistency(dim, structure, kernel_name, dataset):
         fields=fields,
         averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-        
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-
         use_openmp=False,
     )
 
@@ -92,11 +90,9 @@ def test_openmp_toggle_consistency(dim, structure, kernel_name, dataset):
         fields=fields,
         averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-
         use_openmp=True,
         omp_threads=min(2, max_threads),
     )
@@ -133,11 +129,9 @@ def test_openmp_thread_counts_consistency(dim, structure, kernel_name, dataset):
         fields=fields,
         averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-
         use_openmp=True,
         omp_threads=thread_counts[0],
     )
@@ -147,11 +141,9 @@ def test_openmp_thread_counts_consistency(dim, structure, kernel_name, dataset):
             fields=fields,
             averaged=[False] * len(fields),
             gridnums=GRIDNUM,
-
             kernel_name=kernel_name,
             structure=structure,
             adaptive=False,
-
             use_openmp=True,
             omp_threads=threads,
         )

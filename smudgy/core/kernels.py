@@ -1,6 +1,7 @@
 """SPH kernel functions and their gradients for isotropic and anisotropic smoothing."""
 
 import math
+
 import numpy as np
 import numpy.typing as npt
 
@@ -8,11 +9,10 @@ import numpy.typing as npt
 class BaseKernelClass:
     """Base class for SPH kernels."""
 
-    def __init__(self,
-                 dim: int = None, 
-                 support: float = None) -> None:
+    def __init__(self, dim: int = None, support: float = None) -> None:
 
-        assert isinstance(dim, int) and dim in (1, 2, 3,), "`dim` must be an integer and one of 1, 2, or 3"
+        if not isinstance(dim, int) or dim not in (1, 2, 3):
+            raise ValueError(f"`dim` must be an integer and one of 1, 2, or 3, but found {dim} of type {type(dim)}")
         self.dim = dim
         self.support = support
         self.eps = 1e-7
@@ -20,8 +20,10 @@ class BaseKernelClass:
 
     def evaluate(self, r_ij, h) -> npt.NDArray[np.floating]:
 
-        assert isinstance(r_ij, np.ndarray), "r_ij must be a numpy array"
-        assert isinstance(h, np.ndarray), "smoothing lengths must be a numpy array"
+        if not isinstance(r_ij, np.ndarray):
+            raise ValueError("r_ij must be a numpy array")
+        if not isinstance(h, np.ndarray):
+            raise ValueError("smoothing lengths must be a numpy array")
 
         if h.ndim < 3:
             return self._evaluate_isotropic(r_ij, h).astype(h.dtype)
@@ -30,8 +32,10 @@ class BaseKernelClass:
 
     def evaluate_gradient(self, r_ij_vec, h) -> npt.NDArray[np.floating]:
 
-        assert isinstance(r_ij_vec, np.ndarray), "r_ij_vec must be a numpy array"
-        assert isinstance(h, np.ndarray), "smoothing lengths must be a numpy array"
+        if not isinstance(r_ij_vec, np.ndarray):
+            raise ValueError("r_ij_vec must be a numpy array")
+        if not isinstance(h, np.ndarray):
+            raise ValueError("smoothing lengths must be a numpy array")
 
         if h.ndim < 3:
             return self._evaluate_gradient_isotropic(r_ij_vec, h).astype(h.dtype)
@@ -42,14 +46,14 @@ class BaseKernelClass:
         self, r_ij: npt.NDArray[np.floating], h: npt.NDArray[np.floating]
     ) -> npt.NDArray[np.floating]:
 
-        assert r_ij.ndim in (
-            1,
-            2,
-        ), f"`r_ij` must be of shape (N,) or (N, 1) for isotropic case but found shape {r_ij.shape}"
-        assert h.ndim in (
-            1,
-            2,
-        ), f"`h` must be of shape (N,) or (N, 1) for isotropic case but found shape {h.shape}"
+        if r_ij.ndim not in (1, 2):
+            raise ValueError(
+                f"`r_ij` must be of shape (N,) or (N, 1) for isotropic case but found shape {r_ij.shape}"
+            )
+        if h.ndim not in (1, 2):
+            raise ValueError(
+                f"`h` must be of shape (N,) or (N, 1) for isotropic case but found shape {h.shape}"
+            )
 
         h = h[..., None] if h.ndim == 1 else h
         q = np.abs(r_ij) / h
@@ -60,15 +64,18 @@ class BaseKernelClass:
         self, r_ij: npt.NDArray[np.floating], H: npt.NDArray[np.floating]
     ) -> npt.NDArray[np.floating]:
 
-        assert (
-            r_ij.ndim == 3
-        ), f"`r_ij` must be of shape (N, M, d) for anisotropic kernels but found shape {r_ij.shape}"
-        assert (
-            H.ndim == 3
-        ), f"`H` must be a 3D array of shape (N, D, D) but found shape {H.shape}"
-        assert (
-            H.shape[1] == H.shape[2] == self.dim
-        ), f"`H` must be (N, D, D) with D=dim but found shape {H.shape}"
+        if r_ij.ndim != 3:
+            raise ValueError(
+                f"`r_ij` must be of shape (N, M, d) for anisotropic kernels but found shape {r_ij.shape}"
+            )
+        if H.ndim != 3:
+            raise ValueError(
+                f"`H` must be a 3D array of shape (N, D, D) but found shape {H.shape}"
+            )
+        if H.shape[1] != self.dim or H.shape[2] != self.dim:
+            raise ValueError(
+                f"`H` must be (N, D, D) with D=dim but found shape {H.shape}"
+            )
 
         H_inv = np.linalg.inv(H)  # (N, d, d)
         norm = np.linalg.det(H)  # (N,)
@@ -81,14 +88,12 @@ class BaseKernelClass:
         r_ij_vec: npt.NDArray[np.floating],
         h: npt.NDArray[np.floating],
     ) -> npt.NDArray[np.floating]:
-        assert isinstance(
-            h, np.ndarray
-        ), "smoothing_lengths must be a numpy array if provided"
-        assert h.ndim in (
-            1,
-            2,
-        ), "smoothing_lengths must be 1D or 2D array"
-        assert r_ij_vec.ndim == 3, "r_ij_vec must be 3D (N, M, d) for isotropic case"
+        if not isinstance(h, np.ndarray):
+            raise ValueError("smoothing_lengths must be a numpy array if provided")
+        if h.ndim not in (1, 2):
+            raise ValueError("smoothing_lengths must be 1D or 2D array")
+        if r_ij_vec.ndim != 3:
+            raise ValueError("r_ij_vec must be 3D (N, M, d) for isotropic case")
 
         h = np.asarray(h)[:, None, None] if h.ndim == 1 else h  # (N, 1, 1)
         r_ij_mag = np.linalg.norm(r_ij_vec, axis=-1)[..., None]  # (N, M, 1)
@@ -309,7 +314,7 @@ class GaussianSepKernel(BaseKernelClass):
         q = np.abs(q)
         mask = q <= self.support
         return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
-    
+
 
 class LucyKernel(BaseKernelClass):
     """Lucy kernel implementation for SPH."""
@@ -444,8 +449,7 @@ class WendlandC2Kernel(BaseKernelClass):
 class WendlandC4Kernel(BaseKernelClass):
     """Wendland C4 kernel implementation for SPH."""
 
-    def __init__(self,
-                 dim: int) -> None:
+    def __init__(self, dim: int) -> None:
         super().__init__(dim=dim)
         self.name = "wendland_c4"
 
@@ -483,8 +487,7 @@ class WendlandC4Kernel(BaseKernelClass):
 class WendlandC6Kernel(BaseKernelClass):
     """Wendland C6 kernel implementation for SPH."""
 
-    def __init__(self,
-                 dim: int) -> None:
+    def __init__(self, dim: int) -> None:
         super().__init__(dim=dim)
         self.name = "wendland_c6"
 
@@ -534,16 +537,15 @@ KERNEL_CLASSES = {
     "tophat_separable": TophatSepKernel,
     "tsc_separable": TSCSepKernel,
     "gaussian_separable": GaussianSepKernel,
-    "lucy": LucyKernel,
+    "tophat": TophatKernel,
+    "tsc": TSCKernel,
     "gaussian": GaussianKernel,
+    "lucy": LucyKernel,
     "cubic_spline": CubicSplineKernel,
     "quintic_spline": QuinticSplineKernel,
     "wendland_c2": WendlandC2Kernel,
     "wendland_c4": WendlandC4Kernel,
     "wendland_c6": WendlandC6Kernel,
-    "tophat": TophatKernel,
-    "tsc": TSCKernel,
-
 }
 
 
