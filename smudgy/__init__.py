@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from .grid import *
-from .pointcloud import *
-from .utils import *
+from .core._cpp_functions import (
+    compute_total_integral_separable,
+    compute_total_integral_spherical,
+    get_separable_kernel_values_1D,
+    get_spherical_kernel_values_1D,
+)
+from .pointcloud import PointCloud
 
 
 def check_openmp() -> bool:
@@ -42,9 +46,11 @@ def get_kernel_shapes_1D(kernel_name: str) -> tuple[list[float], list[float]]:
 
 __all__ = [
     "PointCloud",
-    "check_openmp",
     "compute_total_integral_separable",
     "compute_total_integral_spherical",
-    "get_separable_kernel_shapes_1D",
-    "get_spherical_kernel_shapes_1D",
+    "get_separable_kernel_values_1D",
+    "get_spherical_kernel_values_1D",
+    "check_openmp",
+    "compute_kernel_integral",
+    "get_kernel_shapes_1D",
 ]

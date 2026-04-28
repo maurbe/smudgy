@@ -29,9 +29,11 @@ extensions = [
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 
-autodoc_typehints = "description"
+autodoc_member_order = "bysource"
+# autodoc_typehints = "description"
 
 source_suffix = {
+    ".rst": "restructuredtext",
     ".md": "markdown",
 }
 
@@ -51,4 +53,4 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_static_path = ["_static"]
-html_logo = "_static/test.png"
+# html_logo = "_static/test.png"

@@ -19,7 +19,8 @@ pip install .
 ```
 
 (openmp-support)=
-## OpenMP Support <img src="_static/test.png" alt="Icon" class="inline-title-icon">
+## OpenMP Support 
+[//]: # (<img src="_static/test.png" alt="Icon" class="inline-title-icon">)
 
 To enable parallelization, you must have OpenMP installed on your system **before** installing `smudgy`.
 If OpenMP is not found, `smudgy` will still work, but parallelization will be disabled.

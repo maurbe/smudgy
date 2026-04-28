@@ -179,7 +179,7 @@ class PointCloud:
         return num_neighbors
 
     def _resolve(self, val: Any, name: str) -> Any:
-        """Generic resolver for global properties (kernel, structure, etc.)."""
+        """Resolve global properties (kernel, structure, etc.)."""
         if val is not None:
             return val
         if not hasattr(self, name):
@@ -676,7 +676,7 @@ class PointCloud:
         gn = np.atleast_1d(gridnums).astype(np.int32)
         if gn.size == 1:
             gn = np.repeat(gn, dep_dim)
-        
+
         if gn.size != dep_dim:
             raise ValueError(
                 f"Length of 'gridnums' ({gn.size}) must match deposition dimension ({dep_dim})"
@@ -706,7 +706,7 @@ class PointCloud:
         npt.NDArray[np.float32] | None,
         npt.NDArray[np.float32] | None,
     ]:
-        """Setup smoothing data (fixed or adaptive) for the deposition call."""
+        """Prepare smoothing data (fixed or adaptive) for the deposition call."""
         if method == "ngp":
             return None, None, None
 
@@ -773,8 +773,15 @@ class PointCloud:
         if method == "separable":
             return common[:2] + (h,) + common[2:] + (kn, integration)
         if method == "isotropic":
-            return common[:2] + (h,) + common[2:] + (kn, integration, min_evals, eta_crit)
-        return common[:2] + (h_vecs, h_vals) + common[2:] + (kn, integration, min_evals, eta_crit)
+            return (
+                common[:2] + (h,) + common[2:] + (kn, integration, min_evals, eta_crit)
+            )
+        return (
+            common[:2]
+            + (h_vecs, h_vals)
+            + common[2:]
+            + (kn, integration, min_evals, eta_crit)
+        )
 
     def deposit_to_grid(
         self,
@@ -793,7 +800,10 @@ class PointCloud:
         use_python: bool = False,
         use_openmp: bool = True,
         omp_threads: int | None = None,
-    ) -> npt.NDArray[np.floating] | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+    ) -> (
+        npt.NDArray[np.floating]
+        | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
+    ):
         """Deposit particle fields onto a structured grid using SPH.
 
         Parameters
@@ -883,14 +893,11 @@ class PointCloud:
             kn_res,
             integration,
             num_kernel_evaluations_per_axis,
-            eta_crit
+            eta_crit,
         )
 
         fields_grid, weights = func(
-            *args, 
-            use_python=use_python, 
-            use_openmp=use_openmp, 
-            omp_threads=threads
+            *args, use_python=use_python, use_openmp=use_openmp, omp_threads=threads
         )
 
         # Post-processing

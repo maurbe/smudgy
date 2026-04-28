@@ -11,15 +11,15 @@ NUM_NEIGHBORS = [3]  # , 4, 5]
 NUM_KERNEL_EVALUATIONS_PER_AXIS = [2]  # , 3, 4]
 INTEGRAL_METHODS = ["midpoint"]  # , "trapezoidal", "simpson"]
 KERNEL_NAMES = [
-     "tophat",
-     "tsc",
-     "gaussian",
+    "tophat",
+    "tsc",
+    "gaussian",
 ]
 
 
 # function that creates a point cloud within [0, 1]^dim with uniform weights
 def create_uniform_point_cloud(dim: int) -> PointCloud:
-
+    """Create a point cloud with uniformly distributed points and unit weights."""
     boxsize = 1.0
     num_points = int(1e4)
     positions = np.random.uniform(0, boxsize - 1e-6, size=(num_points, dim)).astype(
@@ -32,7 +32,9 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
 @pytest.mark.parametrize("dim", DIMS)
 @pytest.mark.parametrize("structure", STRUCTURE)
 @pytest.mark.parametrize("num_neighbors", NUM_NEIGHBORS)
-@pytest.mark.parametrize("num_kernel_evaluations_per_axis", NUM_KERNEL_EVALUATIONS_PER_AXIS)
+@pytest.mark.parametrize(
+    "num_kernel_evaluations_per_axis", NUM_KERNEL_EVALUATIONS_PER_AXIS
+)
 @pytest.mark.parametrize("integral_method", INTEGRAL_METHODS)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 def test_weight_conservation(
@@ -59,11 +61,9 @@ def test_weight_conservation(
         fields=pc.weights,
         averaged=False,
         gridnums=gridnums,
-        
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-
         num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
         integration=integral_method,
         return_weights=True,

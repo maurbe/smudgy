@@ -46,30 +46,13 @@ def _call_backend(
     use_openmp: bool,
     omp_threads: int,
 ) -> Any:
-    """Call the selected backend function with the provided arguments.
-
-    Args:
-        func_name: Name of the backend function (without leading underscore).
-        use_python: If True, use the Python backend; otherwise, use the C++ backend.
-        *args: Positional arguments to pass to the backend function.
-        use_openmp: Enable OpenMP parallelism (C++ backend only).
-        omp_threads: Number of OpenMP threads (C++ backend only).
-
-    Returns:
-        The result of the backend function call.
-
-    Raises:
-        NotImplementedError: If the Python backend does not implement the requested function.
-
-    """
-
     # legacy redirection for python backend functions [tophat, tsc, ngp]
     if use_python and func_name in ["separable_2d", "separable_3d"]:
         # Inspect kernel_name at index 6 in the arguments for separable_*d
         # (pos, quant, smooth, boxsize, gridnums, periodic, kn_res, integration)
         kernel_name_raw = args[6] if len(args) > 6 else ""
         kernel_name = kernel_name_raw.replace("_separable", "")
-        
+
         if kernel_name in ["ngp", "tophat", "tsc"]:
             # Redirect to specialized legacy Python functions
             # Target signature: (positions, quantities, boxsize, gridnums, periodic)
@@ -81,7 +64,7 @@ def _call_backend(
         raise NotImplementedError(
             f"Python backend does not implement '{func_name}'. Set use_python=False to use the C++ backend."
         )
-    
+
     print(f"Calling : {func_name}")
     backend = _select_backend(use_python)
     backend_func_name = f"_{func_name}"
@@ -232,7 +215,7 @@ def separable_2d(
     periodic : bool
         Global periodic boundaries.
     kernel_name : str
-        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+        Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
     integration_method : str
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     *args : Any
@@ -299,7 +282,7 @@ def separable_3d(
     periodic : bool
         Global periodic boundaries.
     kernel_name : str
-        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+        Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
     integration_method : str
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     *args : Any
@@ -368,7 +351,7 @@ def isotropic_2d(
     periodic : bool
         Global periodic boundaries.
     kernel_name : str
-        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+        Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
     integration_method : str
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
@@ -443,7 +426,7 @@ def isotropic_3d(
     periodic : bool
         Global periodic boundaries.
     kernel_name : str
-        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+        Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
     integration_method : str
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
@@ -521,7 +504,7 @@ def anisotropic_2d(
     periodic : bool
         Global periodic boundaries.
     kernel_name : str
-        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+        Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
     integration_method : str
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
@@ -600,7 +583,7 @@ def anisotropic_3d(
     periodic : bool
         Global periodic boundaries.
     kernel_name : str
-        Kernel name (e.g., ``"gaussian"``, ``"cubic"``, ``"quintic"``, ``"wendland_c2"``).
+        Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
     integration_method : str
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
@@ -641,210 +624,3 @@ def anisotropic_3d(
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
-
-
-
-"""
-def cic_adaptive_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "cic_2d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-def cic_adaptive_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "cic_3d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-def tsc_adaptive_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "tsc_2d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-def tsc_adaptive_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    smoothing_lengths: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "tsc_3d_adaptive",
-        use_python,
-        positions,
-        quantities,
-        smoothing_lengths,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-def tophat_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "tophat_2d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tophat_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "tophat_3d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tsc_2d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-    
-    return _call_backend(
-        "tsc_2d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-
-
-def tsc_3d(
-    positions: npt.ArrayLike,
-    quantities: npt.ArrayLike,
-    boxsizes: Sequence[float],
-    gridnums: Sequence[int],
-    periodic: bool,
-    *args: Any,
-    use_python: bool = False,
-    use_openmp: bool = True,
-    omp_threads: int = 0,
-):
-  
-    return _call_backend(
-        "tsc_3d",
-        use_python,
-        positions,
-        quantities,
-        boxsizes,
-        gridnums,
-        periodic,
-        use_openmp=use_openmp,
-        omp_threads=omp_threads,
-    )
-"""

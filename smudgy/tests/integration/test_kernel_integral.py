@@ -31,6 +31,7 @@ KERNEL_NAMES = [
 def test_kernel_integrals(
     kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int
 ):
+    """Test that the integrals of the kernels are close to 1.0."""
     integral = compute_kernel_integral(
         kernel_name,
         dim,

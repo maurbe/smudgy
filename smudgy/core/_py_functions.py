@@ -163,7 +163,6 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
 
 def _tophat_2d(positions, quantities, boxsizes, gridnums, periodic):
     """2D Cloud-In-Cell (cell-centered grid convention)."""
-
     positions = _as_float32(positions)
     quantities = _as_float32(quantities)
     boxsizes = _as_float32(boxsizes)
@@ -305,4 +304,3 @@ def _tophat_3d(positions, quantities, boxsizes, gridnums, periodic):
         np.add.at(weights, (xi, yi, zi), wv)
 
     return fields, weights
-

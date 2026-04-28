@@ -22,10 +22,7 @@ def test_fields_length_mismatch():
     fields = np.ones((9, 1), dtype=np.float32)
     with pytest.raises(ValueError):
         sim.deposit_to_grid(
-            fields=fields, 
-            averaged=False, 
-            gridnums=8, 
-            kernel_name="ngp"
+            fields=fields, averaged=False, gridnums=8, kernel_name="ngp"
         )
 
 

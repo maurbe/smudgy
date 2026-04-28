@@ -1,3 +1,5 @@
+"""Unit tests for HSM utilities in smudgy.utils."""
+
 import numpy as np
 import pytest
 
@@ -10,6 +12,7 @@ from smudgy.utils import (
 
 
 def test_compute_smoLens_basic():
+    """Test that compute_smoLens can compute smoothness lengths for 2D data."""
     points = np.random.rand(10, 2)
     tree = build_kdtree(points=points)
     # Corrected unpacking to match (hsm, nn_inds, nn_dists)
@@ -21,6 +24,7 @@ def test_compute_smoLens_basic():
 
 
 def test_compute_smoTens_3d():
+    """Test that compute_smoTens can compute tensors for 3D data."""
     points = np.random.rand(10, 3)
     weights = np.random.rand(10)
     tree = build_kdtree(points=points)
@@ -37,6 +41,7 @@ def test_compute_smoTens_3d():
 
 
 def test_compute_smoTens_query_positions():
+    """Test that compute_smoTens can compute tensors at specified query positions."""
     points = np.random.rand(10, 2)
     weights = np.random.rand(10)
     tree = build_kdtree(points=points)
@@ -54,6 +59,7 @@ def test_compute_smoTens_query_positions():
 
 
 def test_compute_smoTens_2d():
+    """Test that compute_smoTens works correctly for 2D data."""
     points = np.random.rand(10, 2)
     weights = np.random.rand(10)
     tree = build_kdtree(points=points)
@@ -70,6 +76,7 @@ def test_compute_smoTens_2d():
 
 
 def test_project_smoTens_to_2d_plane():
+    """Test projecting 3D tensors to 2D using standard planes."""
     h_tensor = np.random.rand(5, 3, 3)
     h_tensor_2d, eigvals, eigvecs = project_smoTens_to_2d(h_tensor=h_tensor, plane="xy")
     assert h_tensor_2d.shape == (5, 2, 2)
@@ -78,19 +85,25 @@ def test_project_smoTens_to_2d_plane():
 
 
 def test_project_smoTens_to_2d_basis():
+    """Test projecting 3D tensors to 2D using a custom basis."""
     h_tensor = np.random.rand(3, 3, 3)
     basis = ([1, 0, 0], [0, 1, 0])
-    h_tensor_2d, eigvals, eigvecs = project_smoTens_to_2d(h_tensor=h_tensor, basis=basis)
+    h_tensor_2d, eigvals, eigvecs = project_smoTens_to_2d(
+        h_tensor=h_tensor, basis=basis
+    )
     assert h_tensor_2d.shape == (3, 2, 2)
     assert eigvals.shape == (3, 2)
     assert eigvecs.shape == (3, 2, 2)
 
 
 def test_project_smoTens_to_2d_error():
+    """Test that invalid inputs to project_smoTens_to_2d raise appropriate errors."""
     h_tensor = np.random.rand(2, 3, 3)
     with pytest.raises(ValueError):
         project_smoTens_to_2d(h_tensor=h_tensor)
     with pytest.raises(ValueError):
         project_smoTens_to_2d(h_tensor=h_tensor, plane="abc")
     with pytest.raises(ValueError):
-        project_smoTens_to_2d(h_tensor=h_tensor, plane="xy", basis=([1, 0, 0], [0, 1, 0]))
+        project_smoTens_to_2d(
+            h_tensor=h_tensor, plane="xy", basis=([1, 0, 0], [0, 1, 0])
+        )

@@ -44,11 +44,9 @@ def test_python_cpp_backend_consistency(dim, structure, kernel_name):
         fields=fields,
         averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-        
         use_python=True,
     )
 
@@ -56,11 +54,9 @@ def test_python_cpp_backend_consistency(dim, structure, kernel_name):
         fields=fields,
         averaged=[False] * len(fields),
         gridnums=GRIDNUM,
-
         kernel_name=kernel_name,
         structure=structure,
         adaptive=False,
-        
         use_python=False,
         use_openmp=False,
     )

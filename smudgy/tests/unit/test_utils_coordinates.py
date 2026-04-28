@@ -1,3 +1,5 @@
+"""Unit tests for coordinate utility functions in smudgy.utils."""
+
 import numpy as np
 import pytest
 
@@ -5,6 +7,7 @@ from smudgy.utils import coordinate_difference_with_pbc, shift_coordinates
 
 
 def test_shift_coordinates_basic():
+    """Test that the function correctly shifts coordinates to start at zero."""
     coords = np.array([[2, 3], [5, 7], [1, 9]])
     shifted = shift_coordinates(coords)
     assert np.allclose(shifted.min(axis=0), 0)
@@ -12,12 +15,14 @@ def test_shift_coordinates_basic():
 
 
 def test_shift_coordinates_error():
+    """Test that the function raises an error when input is not 2D."""
     coords = np.array([1, 2, 3])
     with pytest.raises(AssertionError):
         shift_coordinates(coords)
 
 
 def test_coordinate_difference_with_pbc_none():
+    """Test that the function correctly computes differences without PBC."""
     x = np.array([[1, 2], [3, 4]])
     y = np.array([[0, 1], [1, 2]])
     diff = coordinate_difference_with_pbc(x, y, boxsize=None)
@@ -25,6 +30,7 @@ def test_coordinate_difference_with_pbc_none():
 
 
 def test_coordinate_difference_with_pbc_scalar():
+    """Test that the function correctly handles scalar boxsize."""
     x = np.array([[0.9, 0.1], [0.2, 0.8]])
     y = np.array([[0.1, 0.9], [0.8, 0.2]])
     diff = coordinate_difference_with_pbc(x, y, boxsize=1.0)
@@ -32,6 +38,7 @@ def test_coordinate_difference_with_pbc_scalar():
 
 
 def test_coordinate_difference_with_pbc_array():
+    """Test that the function correctly handles array boxsize."""
     x = np.array([[0.9, 0.1], [0.2, 0.8]])
     y = np.array([[0.1, 0.9], [0.8, 0.2]])
     diff = coordinate_difference_with_pbc(x, y, boxsize=[1.0, 1.0])
@@ -39,6 +46,7 @@ def test_coordinate_difference_with_pbc_array():
 
 
 def test_coordinate_difference_with_pbc_dim_error():
+    """Test that an error is raised when input arrays have incorrect dimensions."""
     x = np.array([[1, 2, 3]])
     y = np.array([[4, 5]])
     with pytest.raises(AssertionError):
@@ -46,6 +54,7 @@ def test_coordinate_difference_with_pbc_dim_error():
 
 
 def test_coordinate_difference_with_pbc_boxsize_error():
+    """Test that an error is raised when boxsize has incorrect dimensions."""
     x = np.array([[1, 2]])
     y = np.array([[3, 4]])
     with pytest.raises(AssertionError):

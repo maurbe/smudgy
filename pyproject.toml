@@ -4,13 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smudgy"
-version = "0.1.2"
-description = "Point Cloud smoothing and interpolation package using C++ and (optionally) OpenMP backend."
+version = "0.1.4"
+description = "Point Cloud smoothing and interpolation package using C++ and OpenMP backend."
 authors = [
-    { name = "Mauro Bernardini", email = "mauro.bernardini1313@gmail.com" }
+    { name = "Mauro Bernardini"}, 
+    { email = "mauro.bernardini1313@gmail.com" }
     ]
+maintainers = [
+  { name = "Mauro Bernardini" },
+  { email = "mauro.bernardini1313@gmail.com" }
+]
 dependencies = ["numpy", "scipy", "pybind11"]
 requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://github.com/maurbe/smudgy"
+Repository = "https://github.com/maurbe/smudgy"
+Documentation = "https://smudgy.readthedocs.io/en/latest/quickstart.html"
 
 [project.optional-dependencies]
 test = ["pytest"]

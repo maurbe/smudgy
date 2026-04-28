@@ -17,6 +17,7 @@ def build_kdtree(
     points: npt.ArrayLike, boxsize: BoxInput | None = None
 ) -> spatial.cKDTree:
     """Construct a cKDTree with optional periodic box sizes.
+
     If ``boxsize`` is provided, the tree will use periodic boundary conditions.
 
     Parameters
@@ -33,7 +34,7 @@ def build_kdtree(
             Tree built from ``points``.
 
     """
-    print('boxsize in build_kdtree:', boxsize)
+    print("boxsize in build_kdtree:", boxsize)
     return spatial.cKDTree(points, boxsize=boxsize)
 
 

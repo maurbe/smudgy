@@ -1,9 +1,16 @@
+"""Unit tests for the grid creation functions in smudgy.grid."""
+
 import numpy as np
 
-from smudgy.grid import create_grid_1d, create_grid_2d, create_grid_3d
+from smudgy.grid import (
+    create_grid_1d,
+    create_grid_2d,
+    create_grid_3d,
+)
 
 
 def test_create_grid_1d():
+    """Test create_grid_1d with various input types and shapes."""
     # int inputs
     arr = create_grid_1d(4, 8)
     assert arr.shape == (4, 1)
@@ -16,6 +23,7 @@ def test_create_grid_1d():
 
 
 def test_create_grid_2d():
+    """Test create_grid_2d with various input types and shapes."""
     # scalar n_cells, scalar boxsize
     arr = create_grid_2d(3, 6)
     assert arr.shape == (3 * 3, 2)
@@ -34,6 +42,7 @@ def test_create_grid_2d():
 
 
 def test_create_grid_3d():
+    """Test create_grid_3d with various input types and shapes."""
     # scalar n_cells, scalar boxsize
     arr = create_grid_3d(2, 6)
     assert arr.shape == (2 * 2 * 2, 3)

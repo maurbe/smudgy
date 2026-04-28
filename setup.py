@@ -1,14 +1,12 @@
-"""Setup script for building smudgy with C++17 and optional OpenMP support.
-Automatically falls back to serial build if OpenMP is unavailable.
-"""
+"""Setup script for building smudgy with C++17 and optional OpenMP support; automatically falls back to serial build if OpenMP is unavailable."""
 
 import os
 import platform
-from distutils.errors import CompileError, LinkError
 
 import numpy as np
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import find_packages, setup
+from setuptools.errors import CompileError, LinkError
 
 system = platform.system()
 
@@ -23,6 +21,7 @@ def _env_flag_is_true(name: str) -> bool:
 
 
 def get_openmp_flags():
+    """Return compiler and linker flags for OpenMP support based on the current platform."""
     if system == "Darwin":
         return (
             ["-std=c++17", "-O3", "-Xpreprocessor", "-fopenmp"],
@@ -43,6 +42,7 @@ def get_openmp_flags():
 
 
 def get_serial_flags():
+    """Return compiler and linker flags for a serial (non-OpenMP) build."""
     if system == "Windows":
         return (["/std:c++17", "/O2"], [])
     else:
@@ -55,8 +55,10 @@ def get_serial_flags():
 
 
 class BuildExtWithFallback(build_ext):
+    """Custom build_ext command that tries to build with OpenMP support first, and falls back to a serial build if it fails."""
 
     def build_extensions(self):
+        """Attempt to build with OpenMP support, falling back to serial if it fails."""
         openmp_compile, openmp_link = get_openmp_flags()
         serial_compile, serial_link = get_serial_flags()
 
@@ -118,7 +120,7 @@ ext_modules = [
 
 setup(
     name="smudgy",
-    version="0.1.2",
+    version="0.1.4",
     packages=find_packages(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtWithFallback},

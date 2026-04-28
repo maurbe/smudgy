@@ -10,16 +10,18 @@ class BaseKernelClass:
     """Base class for SPH kernels."""
 
     def __init__(self, dim: int = None, support: float = None) -> None:
-
+        """Initialize the kernel with spatial dimension and support radius."""
         if not isinstance(dim, int) or dim not in (1, 2, 3):
-            raise ValueError(f"`dim` must be an integer and one of 1, 2, or 3, but found {dim} of type {type(dim)}")
+            raise ValueError(
+                f"`dim` must be an integer and one of 1, 2, or 3, but found {dim} of type {type(dim)}"
+            )
         self.dim = dim
         self.support = support
         self.eps = 1e-7
         self.name = "base_kernel"
 
     def evaluate(self, r_ij, h) -> npt.NDArray[np.floating]:
-
+        """Evaluate the kernel function for given pairwise distances and smoothing lengths."""
         if not isinstance(r_ij, np.ndarray):
             raise ValueError("r_ij must be a numpy array")
         if not isinstance(h, np.ndarray):
@@ -31,7 +33,7 @@ class BaseKernelClass:
             return self._evaluate_anisotropic(r_ij, h).astype(h.dtype)
 
     def evaluate_gradient(self, r_ij_vec, h) -> npt.NDArray[np.floating]:
-
+        """Evaluate the kernel gradient for given pairwise vector distances and smoothing lengths."""
         if not isinstance(r_ij_vec, np.ndarray):
             raise ValueError("r_ij_vec must be a numpy array")
         if not isinstance(h, np.ndarray):
@@ -151,6 +153,7 @@ class TophatKernel(BaseKernelClass):
     """Spherically symmetric Tophat kernel."""
 
     def __init__(self, dim):
+        """Initialize the Tophat kernel for the given spatial dimension."""
         super().__init__(dim, support=0.5)
         self.name = "tophat"
 
@@ -177,6 +180,7 @@ class TophatSepKernel(BaseKernelClass):
     """Rectangular Tophat kernel (Product of 1D Tophats)."""
 
     def __init__(self, dim):
+        """Initialize the Tophat separable kernel for the given spatial dimension."""
         super().__init__(dim, support=0.5)
         self.name = "tophat_separable"
 
@@ -199,6 +203,7 @@ class TSCKernel(BaseKernelClass):
     """Spherically symmetric Triangular-Shaped Cloud (TSC) kernel."""
 
     def __init__(self, dim):
+        """Initialize the TSC kernel for the given spatial dimension."""
         super().__init__(dim, support=1.5)
         self.name = "tsc"
         self.node_1 = self.support / 3
@@ -234,6 +239,7 @@ class TSCSepKernel(BaseKernelClass):
     """Rectangular TSC kernel (Product of 1D TSCs)."""
 
     def __init__(self, dim):
+        """Initialize the TSC separable kernel for the given spatial dimension."""
         super().__init__(dim, support=1.5)
         self.name = "tsc_separable"
         self.node_1 = self.support / 3
@@ -266,6 +272,7 @@ class GaussianKernel(BaseKernelClass):
     """Gaussian kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Gaussian kernel for the given spatial dimension."""
         super().__init__(dim=dim, support=3.0)
         self.name = "gaussian"
 
@@ -292,6 +299,7 @@ class GaussianSepKernel(BaseKernelClass):
     """Gaussian kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Gaussian separable kernel for the given spatial dimension."""
         super().__init__(dim=dim, support=3.0)
         self.name = "gaussian_separable"
 
@@ -320,6 +328,7 @@ class LucyKernel(BaseKernelClass):
     """Lucy kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Lucy kernel for the given spatial dimension."""
         super().__init__(dim=dim, support=1.0)
         self.name = "lucy"
 
@@ -347,6 +356,7 @@ class CubicSplineKernel(BaseKernelClass):
     """Cubic spline kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Cubic spline kernel for the given spatial dimension."""
         super().__init__(dim=dim)
         self.name = "cubic_spline"
 
@@ -379,6 +389,7 @@ class QuinticSplineKernel(BaseKernelClass):
     """Quintic spline kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Quintic spline kernel for the given spatial dimension."""
         super().__init__(dim=dim)
         self.name = "quintic_spline"
 
@@ -417,6 +428,7 @@ class WendlandC2Kernel(BaseKernelClass):
     """Wendland C2 kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Wendland C2 kernel for the given spatial dimension."""
         super().__init__(dim=dim)
         self.name = "wendland_c2"
 
@@ -450,6 +462,7 @@ class WendlandC4Kernel(BaseKernelClass):
     """Wendland C4 kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Wendland C4 kernel for the given spatial dimension."""
         super().__init__(dim=dim)
         self.name = "wendland_c4"
 
@@ -488,6 +501,7 @@ class WendlandC6Kernel(BaseKernelClass):
     """Wendland C6 kernel implementation for SPH."""
 
     def __init__(self, dim: int) -> None:
+        """Initialize the Wendland C6 kernel for the given spatial dimension."""
         super().__init__(dim=dim)
         self.name = "wendland_c6"
 
@@ -550,7 +564,7 @@ KERNEL_CLASSES = {
 
 
 def get_kernel(kernel_name: str, dim: int) -> BaseKernelClass:
-    """Factory function to create kernel instances based on name and dimension.
+    """Return a kernel instance for the given kernel name and spatial dimension.
 
     Parameters
     ----------

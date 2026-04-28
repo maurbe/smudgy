@@ -7,7 +7,7 @@ from smudgy.core.kernels import get_kernel
 
 
 def get_all_kernel_names():
-    # Extract allowed kernels from Kernel class
+    """Return a list of all kernel names available in the Kernel class."""
     return [
         "tophat_separable",
         "tsc_separable",
@@ -25,13 +25,14 @@ def get_all_kernel_names():
 
 
 def random_posdef_tensors(N, D):
-    # Generate N random positive-definite (D, D) tensors
+    """Generate N random positive-definite (D, D) tensors."""
     A = np.random.randn(N, D, D)
     return np.matmul(A, np.transpose(A, (0, 2, 1))) + D * np.eye(D)[None, :, :]
 
 
 @pytest.mark.parametrize("dim", [1, 2, 3])
 def test_kernel_anisotropic_output_shape_and_type(dim):
+    """Test that evaluate returns correct shape and dtype for anisotropic kernels."""
     kernel_names = get_all_kernel_names()
     for name in kernel_names:
         k = get_kernel(name, dim)
@@ -45,6 +46,7 @@ def test_kernel_anisotropic_output_shape_and_type(dim):
 
 @pytest.mark.parametrize("dim", [1, 2, 3])
 def test_kernel_anisotropic_output_nonnegative(dim):
+    """Test that all anisotropic kernel evaluations are >= 0 for all kernels and dims."""
     kernel_names = get_all_kernel_names()
     for name in kernel_names:
         k = get_kernel(name, dim)
@@ -57,6 +59,7 @@ def test_kernel_anisotropic_output_nonnegative(dim):
 
 @pytest.mark.parametrize("dim", [1, 2, 3])
 def test_kernel_anisotropic_dtype_preserved(dim):
+    """Test that output dtype matches input dtype (float32/float64) for anisotropic kernels."""
     kernel_names = get_all_kernel_names()
     for name in kernel_names:
         k = get_kernel(name, dim)
@@ -70,6 +73,7 @@ def test_kernel_anisotropic_dtype_preserved(dim):
 
 @pytest.mark.parametrize("dim", [1, 2, 3])
 def test_kernel_anisotropic_symmetry(dim):
+    """Test that anisotropic kernel is symmetric: W(r, H) == W(-r, H) for all kernels."""
     kernel_names = get_all_kernel_names()
     for name in kernel_names:
         k = get_kernel(name, dim)
