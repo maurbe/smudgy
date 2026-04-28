@@ -13,6 +13,8 @@ from . import _py_functions as _py_backend
 _PYTHON_UNSUPPORTED = {
     "tophat_2d_adaptive",
     "tophat_3d_adaptive",
+    "tsc_2d",
+    "tsc_3d",
     "tsc_2d_adaptive",
     "tsc_3d_adaptive",
     "separable_2d",
@@ -343,6 +345,7 @@ def isotropic_2d(
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
+    eta_crit: float,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -370,6 +373,8 @@ def isotropic_2d(
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
         Minimum kernel samples per particle.
+    eta_crit : float
+        Anti-aliasing threshold to switch from sampled to full numerical quadrature.
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -399,6 +404,7 @@ def isotropic_2d(
         kernel_name,
         integration_method,
         min_kernel_evaluations,
+        eta_crit,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
@@ -414,6 +420,7 @@ def isotropic_3d(
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
+    eta_crit: float,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -441,6 +448,8 @@ def isotropic_3d(
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
         Minimum kernel samples per particle.
+    eta_crit : float
+        Anti-aliasing threshold to switch from sampled to full numerical quadrature.
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -470,6 +479,7 @@ def isotropic_3d(
         kernel_name,
         integration_method,
         min_kernel_evaluations,
+        eta_crit,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
@@ -486,6 +496,7 @@ def anisotropic_2d(
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
+    eta_crit: float,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -515,6 +526,8 @@ def anisotropic_2d(
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
         Minimum kernel samples per particle.
+    eta_crit : float
+        Anti-aliasing threshold to switch from sampled to full numerical quadrature.
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -545,6 +558,7 @@ def anisotropic_2d(
         kernel_name,
         integration_method,
         min_kernel_evaluations,
+        eta_crit,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )
@@ -561,6 +575,7 @@ def anisotropic_3d(
     kernel_name: str,
     integration_method: str,
     min_kernel_evaluations: int,
+    eta_crit: float,
     *args: Any,
     use_python: bool = False,
     use_openmp: bool = True,
@@ -590,6 +605,8 @@ def anisotropic_3d(
         Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
     min_kernel_evaluations : int
         Minimum kernel samples per particle.
+    eta_crit : float
+        Anti-aliasing threshold to switch from sampled to full numerical quadrature.
     *args : Any
         Additional positional arguments (unused).
     use_python : bool, optional
@@ -620,6 +637,7 @@ def anisotropic_3d(
         kernel_name,
         integration_method,
         min_kernel_evaluations,
+        eta_crit,
         use_openmp=use_openmp,
         omp_threads=omp_threads,
     )

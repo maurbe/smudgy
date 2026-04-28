@@ -132,14 +132,14 @@ struct SphericalKernelSampleGrid {
     std::vector<float> integrals;
 };
 
-SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel, int min_kernel_evaluations_per_axis);
+SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel, int num_kernel_evaluations_per_axis);
 
 
 // =============================================================================
 // Utility functions (mainly for debugging and testing)
 // =============================================================================
 float compute_total_integral_separable(const std::string& kernel_name, int dim);
-float compute_total_integral_spherical(const std::string& kernel_name, int dim, int min_kernel_evaluations_per_axis);
+float compute_total_integral_spherical(const std::string& kernel_name, int dim, int num_kernel_evaluations_per_axis);
 
 std::tuple<std::vector<float>, std::vector<float>> get_spherical_kernel_values_1D(const std::string& kernel_name);
 std::tuple<std::vector<float>, std::vector<float>> get_separable_kernel_values_1D(const std::string& kernel_name);

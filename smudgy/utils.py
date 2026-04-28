@@ -33,6 +33,7 @@ def build_kdtree(
             Tree built from ``points``.
 
     """
+    print('boxsize in build_kdtree:', boxsize)
     return spatial.cKDTree(points, boxsize=boxsize)
 
 
@@ -170,6 +171,7 @@ def compute_smoLens(
 
     nn_dists, nn_inds = query_kdtree(tree, query_positions, k=num_neighbors)
     hsm = nn_dists[:, -1] * 0.5
+    print(hsm)
     return hsm, nn_inds, nn_dists
 
 

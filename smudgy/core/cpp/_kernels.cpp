@@ -793,14 +793,14 @@ std::shared_ptr<SphericalKernel> create_spherical_kernel(const std::string& name
 
 
 SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel,
-                                          int min_kernel_evaluations_per_axis
+                                          int num_kernel_evaluations_per_axis
                                         ){
-    if (min_kernel_evaluations_per_axis <= 0) {
-        throw std::invalid_argument("min_kernel_evaluations_per_axis must be > 0");
+    if (num_kernel_evaluations_per_axis <= 0) {
+        throw std::invalid_argument("num_kernel_evaluations_per_axis must be > 0");
     }
 
     // compute total number of kernel evaluations
-    const int total_number_o = static_cast<int>(std::pow(min_kernel_evaluations_per_axis, kernel.dim()));
+    const int total_number_o = static_cast<int>(std::pow(num_kernel_evaluations_per_axis, kernel.dim()));
 
     SphericalKernelSampleGrid grid;
     grid.dim = kernel.dim();
@@ -812,7 +812,7 @@ SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel
     const float support = kernel.support();
 
     if (grid.dim == 1) {
-        int n_q = min_kernel_evaluations_per_axis;
+        int n_q = num_kernel_evaluations_per_axis;
 
         const float dq = support / static_cast<float>(n_q);
 
@@ -834,8 +834,8 @@ SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel
 
     if (grid.dim == 2) {
         
-        int n_q = min_kernel_evaluations_per_axis;
-        int n_phi = min_kernel_evaluations_per_axis;
+        int n_q = num_kernel_evaluations_per_axis;
+        int n_phi = num_kernel_evaluations_per_axis;
 
         const float dq = support / static_cast<float>(n_q);
         const float dphi = 2.0f * kPi / static_cast<float>(n_phi);
@@ -863,9 +863,9 @@ SphericalKernelSampleGrid build_kernel_sample_grid(const SphericalKernel& kernel
     }
 
     if (grid.dim == 3) {
-        int n_q = min_kernel_evaluations_per_axis;
-        int n_theta = min_kernel_evaluations_per_axis;
-        int n_phi = min_kernel_evaluations_per_axis;
+        int n_q = num_kernel_evaluations_per_axis;
+        int n_theta = num_kernel_evaluations_per_axis;
+        int n_phi = num_kernel_evaluations_per_axis;
 
         const float dq = support / static_cast<float>(n_q);
         const float dtheta = kPi / static_cast<float>(n_theta);
@@ -922,9 +922,9 @@ float compute_total_integral_separable(const std::string& kernel_name, int dim) 
     return total_integral;
 }
 
-float compute_total_integral_spherical(const std::string& kernel_name, int dim, int min_kernel_evaluations_per_axis) {
+float compute_total_integral_spherical(const std::string& kernel_name, int dim, int num_kernel_evaluations_per_axis) {
     auto kernel = create_spherical_kernel(kernel_name, dim);
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, num_kernel_evaluations_per_axis);
     float total_integral = 0.0f;
     for (int s = 0; s < kernel_samples.count; ++s) {
         total_integral += kernel_samples.integrals[s];

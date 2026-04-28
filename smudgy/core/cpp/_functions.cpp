@@ -245,804 +245,6 @@ void ngp_3d_cpp(
 }
 
 
-void cic_2d_cpp(
-    const float* positions,     // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
-    bool periodic,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, num_fields)
-    float* weights              // (gridnum_x, gridnum_y)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-
-    // prepare output arrays
-    const int field_stride_x = gridnum_y * num_fields;
-    const int field_stride_y = num_fields;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // identify indices of the 4 surrounding grid cells
-        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
-        int i0 = static_cast<int>(std::floor(x_cell));
-        int j0 = static_cast<int>(std::floor(y_cell));
-        int i1 = i0 + 1;
-        int j1 = j0 + 1;
-
-        // compute overlaps for the 4 surrounding grid cells
-        float dx = x_cell - i0;
-        float dy = y_cell - j0;
-        float dx_ = 1.0f - dx;
-        float dy_ = 1.0f - dy;
-
-        // compute weights for the 4 surrounding grid cells based on overlaps
-        float w00 = dx_ * dy_;
-        float w10 = dx  * dy_;
-        float w01 = dx_ * dy;
-        float w11 = dx  * dy;
-        const float* particle = quantities + n * num_fields;
-
-        // define helper function for deposition
-        auto deposit = [&](int i, int j, float w) {
-            int ii = i;
-            int jj = j;
-
-            // wrap indices if periodic
-            ii = apply_pbc(ii, gridnum_x, periodic);
-            jj = apply_pbc(jj, gridnum_y, periodic);
-
-            // early-out if cell lies outside the grid domain (only relevant for non-periodic case)
-            if (is_outside_domain(ii, gridnum_x)) return;
-            if (is_outside_domain(jj, gridnum_y)) return;
-
-            // deposit to grid
-            int base_idx   = ii * field_stride_x + jj * field_stride_y;
-            int weight_idx = ii * gridnum_y + jj;
-            accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
-            accumulate_weight(weights, weight_idx, w, parallel);
-        };
-
-        // perform deposition to the 4 surrounding grid cells
-        deposit(i0, j0, w00);
-        deposit(i1, j0, w10);
-        deposit(i0, j1, w01);
-        deposit(i1, j1, w11);
-    });
-}
-
-
-void cic_3d_cpp(
-    const float* positions,     // (num_particles, 3)
-    const float* quantities,    // (num_particles, num_fields)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,      // (3,)
-    const int* gridnums,        // (3,)
-    bool periodic,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights              // (gridnum_x, gridnum_y, gridnum_z)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const int gridnum_z = gridnums[2];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
-
-    // prepare output arrays
-    const int field_stride_x = gridnum_y * gridnum_z * num_fields;
-    const int field_stride_y = gridnum_z * num_fields;
-    const int field_stride_z = num_fields;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // identify indices of the 8 surrounding grid cells
-        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
-        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
-        int i0 = static_cast<int>(std::floor(x_cell));
-        int j0 = static_cast<int>(std::floor(y_cell));
-        int k0 = static_cast<int>(std::floor(z_cell));
-        int i1 = i0 + 1;
-        int j1 = j0 + 1;
-        int k1 = k0 + 1;
-
-        // compute overlaps for the 8 surrounding grid cells
-        float dx = x_cell - i0;
-        float dy = y_cell - j0;
-        float dz = z_cell - k0;
-        float dx_ = 1.0f - dx;
-        float dy_ = 1.0f - dy;
-        float dz_ = 1.0f - dz;
-
-        // compute weights for the 8 surrounding grid cells based on overlaps
-        float w000 = dx_ * dy_ * dz_;
-        float w100 = dx  * dy_ * dz_;
-        float w010 = dx_ * dy  * dz_;
-        float w110 = dx  * dy  * dz_;
-        float w001 = dx_ * dy_ * dz;
-        float w101 = dx  * dy_ * dz;
-        float w011 = dx_ * dy  * dz;
-        float w111 = dx  * dy  * dz;
-        const float* particle = quantities + n * num_fields;
-
-        // define helper function for deposition
-        auto deposit = [&](int i, int j, int k, float w) {
-            int ii = i;
-            int jj = j;
-            int kk = k;
-
-            // wrap indices if periodic
-            ii = apply_pbc(ii, gridnum_x, periodic);
-            jj = apply_pbc(jj, gridnum_y, periodic);
-            kk = apply_pbc(kk, gridnum_z, periodic);
-
-            // early-out if particle lies outside the grid domain (only relevant for non-periodic case)
-            if (is_outside_domain(ii, gridnum_x)) return;
-            if (is_outside_domain(jj, gridnum_y)) return;
-            if (is_outside_domain(kk, gridnum_z)) return;
-
-            // deposit to grid
-            int base_idx   = ii * field_stride_x + jj * field_stride_y + kk * field_stride_z;
-            int weight_idx = ii * gridnum_y * gridnum_z + jj * gridnum_z + kk;
-            accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
-            accumulate_weight(weights, weight_idx, w, parallel);
-        };
-
-        // perform deposition to the 8 surrounding grid cells
-        deposit(i0, j0, k0, w000);
-        deposit(i1, j0, k0, w100);
-        deposit(i0, j1, k0, w010);
-        deposit(i1, j1, k0, w110);
-        deposit(i0, j0, k1, w001);
-        deposit(i1, j0, k1, w101);
-        deposit(i0, j1, k1, w011);
-        deposit(i1, j1, k1, w111);
-    });
-}
-
-
-void cic_2d_adaptive_cpp(
-    const float* positions,      // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* smoothing_lengths,// (num_particles)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
-    bool periodic,              // (2,)
-    bool use_openmp,
-    int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, num_fields)
-    float* weights              // (gridnum_x, gridnum_y)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-
-    // prepare output arrays
-    const int stride_x = gridnum_y * num_fields;
-    const int stride_y = num_fields;
-    const int weight_stride_x = gridnum_y;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // compute half cell sizes in grid units and particle volume
-        float pcs_x = smoothing_lengths[n] * inv_cell_size_x;
-        float pcs_y = smoothing_lengths[n] * inv_cell_size_y;
-        float V = (2.0f * pcs_x) * (2.0f * pcs_y);
-
-        // compute mother cell index and bounding box
-        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
-        float c1 = x_cell - pcs_x, c2 = x_cell + pcs_x;
-        float c3 = y_cell - pcs_y, c4 = y_cell + pcs_y;
-
-        // compute inclusive index bounds that the particle overlaps with
-        int i_min = static_cast<int>(std::floor(x_cell - pcs_x));
-        int j_min = static_cast<int>(std::floor(y_cell - pcs_y));
-        int i_max = static_cast<int>(x_cell + pcs_x);
-        int j_max = static_cast<int>(y_cell + pcs_y);
-        const float* particle = quantities + n * num_fields;
-
-        // iterate over all grid cells that the particle overlaps with
-        for (int i = i_min; i <= i_max; ++i) {
-            int ii = i;
-
-            // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic);
-            if (is_outside_domain(ii, gridnum_x)) continue;
-
-            // compute cell edge coordinates for current grid cell
-            float e1 = static_cast<float>(i);
-            float e2 = e1 + 1.0f;
-
-            for (int j = j_min; j <= j_max; ++j) {
-                int jj = j;
-
-                // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic);
-                if (is_outside_domain(jj, gridnum_y)) continue;
-
-                // compute cell edge coordinates for current grid cell
-                float e3 = static_cast<float>(j);
-                float e4 = e3 + 1.0f;
-
-                // compute intersection fraction of total area between particle and current grid cell
-                float intersec_x = std::fmin(e2, c2) - std::fmax(e1, c1);
-                float intersec_y = std::fmin(e4, c4) - std::fmax(e3, c3);
-                float fraction = (intersec_x * intersec_y) / V;
-
-                // skip if no overlap
-                if (fraction <= 0.0f) continue;
-
-                // deposit to grid
-                int base_idx = ii * stride_x + jj * stride_y;
-                int weight_idx = ii * weight_stride_x + jj;
-                accumulate_fields(fields, base_idx, particle, num_fields, fraction, parallel);
-                accumulate_weight(weights, weight_idx, fraction, parallel);
-            }
-        }
-    });
-}
-
-void cic_3d_adaptive_cpp(
-    const float* positions,         // (num_particles,3)
-    const float* quantities,  // (num_particles,num_fields)
-    const float* smoothing_lengths, // (num_particles)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,
-    const int* gridnums,
-    bool periodic,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,            // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights            // (gridnum_x, gridnum_y, gridnum_z)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const int gridnum_z = gridnums[2];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
-    
-    // prepare output arrays
-    const int stride_x = gridnum_y * gridnum_z * num_fields;
-    const int stride_y = gridnum_z * num_fields;
-    const int stride_z = num_fields;
-    const int weight_stride_x = gridnum_y * gridnum_z;
-    const int weight_stride_y = gridnum_z;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // compute half cell sizes in grid units and particle volume
-        float h_x = smoothing_lengths[n] * inv_cell_size_x;
-        float h_y = smoothing_lengths[n] * inv_cell_size_y;
-        float h_z = smoothing_lengths[n] * inv_cell_size_z;
-        float V = (2.0f * h_x) * (2.0f * h_y) * (2.0f * h_z);
-
-        // compute mother cell index and bounding box
-        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
-        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
-        float c1 = x_cell - h_x, c2 = x_cell + h_x;
-        float c3 = y_cell - h_y, c4 = y_cell + h_y;
-        float c5 = z_cell - h_z, c6 = z_cell + h_z;
-
-        // compute inclusive index bounds that the particle overlaps with
-        int i_min = static_cast<int>(std::floor(x_cell - h_x));
-        int j_min = static_cast<int>(std::floor(y_cell - h_y));
-        int k_min = static_cast<int>(std::floor(z_cell - h_z));
-        int i_max = static_cast<int>(x_cell + h_x);
-        int j_max = static_cast<int>(y_cell + h_y);
-        int k_max = static_cast<int>(z_cell + h_z);
-        const float* particle = quantities + n * num_fields;
-
-        // iterate over all grid cells that the particle overlaps with
-        for (int i = i_min; i <= i_max; ++i) {
-            int ii = i;
-
-            // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic);
-            if (is_outside_domain(ii, gridnum_x)) continue;
-
-            // compute cell edge coordinates for current grid cell
-            float e1 = static_cast<float>(i);
-            float e2 = e1 + 1.0f;
-
-            for (int j = j_min; j <= j_max; ++j) {
-                int jj = j;
-
-                // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic);
-                if (is_outside_domain(jj, gridnum_y)) continue;
-
-                // compute cell edge coordinates for current grid cell
-                float e3 = static_cast<float>(j);
-                float e4 = e3 + 1.0f;
-
-                for (int k = k_min; k <= k_max; ++k) {
-                    int kk = k;
-
-                    // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                    kk = apply_pbc(kk, gridnum_z, periodic);
-                    if (is_outside_domain(kk, gridnum_z)) continue;
-
-                    // compute cell edge coordinates for current grid cell
-                    float e5 = static_cast<float>(k);
-                    float e6 = e5 + 1.0f;
-
-                    // compute intersection fraction of total volume between particle and current grid cell
-                    float intersec_x = std::fmin(e2, c2) - std::fmax(e1, c1);
-                    float intersec_y = std::fmin(e4, c4) - std::fmax(e3, c3);
-                    float intersec_z = std::fmin(e6, c6) - std::fmax(e5, c5);
-                    float fraction = (intersec_x * intersec_y * intersec_z) / V;
-
-                     // skip if no overlap
-                    if (fraction <= 0.0f) continue;
-
-                    // deposit to grid
-                    int base_idx = ii * stride_x + jj * stride_y + kk * stride_z;
-                    int weight_idx = ii * weight_stride_x + jj * weight_stride_y + kk;
-                    accumulate_fields(fields, base_idx, particle, num_fields, fraction, parallel);
-                    accumulate_weight(weights, weight_idx, fraction, parallel);
-                }
-            }
-        }
-    });
-}
-
-
-// TSC weight for a single offset distance
-inline std::array<float, 3> tsc_weights(float d) {
-    // weights for neighbor offsets -1,0,+1
-    std::array<float, 3> w;
-    w[0] = 0.5f * (1.5f - d) * (1.5f - d);
-    w[1] = 0.75f - (d - 1.0f) * (d - 1.0f);
-    w[2] = 0.5f * (d - 0.5f) * (d - 0.5f);
-    return w;
-}
-
-// Triangular Shaped Cloud deposition in 2D
-void tsc_2d_cpp(
-    const float* positions,     // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
-    bool periodic,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, num_fields)
-    float* weights              // (gridnum_x, gridnum_y)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    
-    // prepare output arrays
-    const int stride_x = gridnum_y * num_fields;
-    const int stride_y = num_fields;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
-
-    // Neighbor offsets
-    const int offsets[3] = {-1, 0, 1};
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // compute normalized position in grid units
-        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
-        int i_base = static_cast<int>(std::floor(x_cell));
-        int j_base = static_cast<int>(std::floor(y_cell));
-
-        // compute fractional distance within cell
-        float dx = x_cell - i_base;
-        float dy = y_cell - j_base;
-        auto wx = tsc_weights(dx);
-        auto wy = tsc_weights(dy);
-        const float* particle = quantities + n * num_fields;
-
-        // iterate over the 3x3 neighboring grid cells
-        for (int i = 0; i < 3; ++i) {
-            int ix = i_base + offsets[i];
-
-            // check periodicity and apply PBC if needed, early-out if outside domain
-            ix = apply_pbc(ix, gridnum_x, periodic);
-            if (is_outside_domain(ix, gridnum_x)) continue;
-            
-            for (int j = 0; j < 3; ++j) {
-                int iy = j_base + offsets[j];
-
-                // check periodicity and apply PBC if needed, early-out if outside domain
-                iy = apply_pbc(iy, gridnum_y, periodic);
-                if (is_outside_domain(iy, gridnum_y)) continue;
-
-                // compute combined weight for this neighbor cell
-                float w = wx[i] * wy[j];
-
-                // skip if weight is zero
-                if (w == 0.0f) continue;
-
-                // deposit to grid
-                int base_idx   = ix * stride_x + iy * stride_y;
-                int weight_idx = ix * gridnum_y + iy;
-                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
-                accumulate_weight(weights, weight_idx, w, parallel);
-            }
-        }
-    });
-}
-
-void tsc_3d_cpp(
-    const float* positions,           // (num_particles, 3)
-    const float* quantities,    // (num_particles, num_fields)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,      // (3,) 
-    const int* gridnums,        // (3,)
-    bool periodic,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights              // (gridnum_x, gridnum_y, gridnum_z)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const int gridnum_z = gridnums[2];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
-
-    // Strides for C-contiguous layout (x, y, z, f)
-    const int stride_x = gridnum_y * gridnum_z * num_fields;
-    const int stride_y = gridnum_z * num_fields;
-    const int stride_z = num_fields;
-
-    // Zero output arrays
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
-
-    // Neighbor offsets
-    const int offsets[3] = {-1, 0, 1};
-
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // compute normalized position in grid units
-        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
-        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
-
-        // compute base cell index (mother cell)
-        int i_base = static_cast<int>(std::floor(x_cell));
-        int j_base = static_cast<int>(std::floor(y_cell));
-        int k_base = static_cast<int>(std::floor(z_cell));
-
-        // compute fractional distance within cell
-        float dx = x_cell - i_base;
-        float dy = y_cell - j_base;
-        float dz = z_cell - k_base;
-
-        // compute TSC weights for each dimension
-        auto wx = tsc_weights(dx);
-        auto wy = tsc_weights(dy);
-        auto wz = tsc_weights(dz);
-        const float* particle = quantities + n * num_fields;
-
-        // iterate over the 3x3x3 neighboring grid cells
-        for (int i = 0; i < 3; ++i) {
-            int ix = i_base + offsets[i];
-
-            // check periodicity and apply PBC if needed, early-out if outside domain
-            ix = apply_pbc(ix, gridnum_x, periodic);
-            if (is_outside_domain(ix, gridnum_x)) continue;
-            
-            for (int j = 0; j < 3; ++j) {
-                int iy = j_base + offsets[j];
-
-                // check periodicity and apply PBC if needed, early-out if outside domain
-                iy = apply_pbc(iy, gridnum_y, periodic);
-                if (is_outside_domain(iy, gridnum_y)) continue;
-                
-                for (int k = 0; k < 3; ++k) {
-                    int iz = k_base + offsets[k];
-
-                    // check periodicity and apply PBC if needed, early-out if outside domain
-                    iz = apply_pbc(iz, gridnum_z, periodic);
-                    if (is_outside_domain(iz, gridnum_z)) continue;
-
-                    // compute combined weight for this neighbor cell
-                    float w = wx[i] * wy[j] * wz[k];
-                    if (w == 0.0f) continue;
-
-                    // deposit to grid
-                    int base_idx   = ix * stride_x + iy * stride_y + iz * stride_z;
-                    int weight_idx = ix * gridnum_y * gridnum_z + iy * gridnum_z + iz;
-                    accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
-                    accumulate_weight(weights, weight_idx, w, parallel);
-                }
-            }
-        }
-    });
-}
-
-
-// 1D CDF of TSC kernel for adaptive cell size h
-inline float tsc_cdf_1d(float z, float h) {
-    float s = z < 0 ? -1.0f : 1.0f;
-    float x = std::abs(z) / h;
-    float integral = 0.0f;
-
-    if (x < 0.5f) {
-        integral = (0.75f * x - x*x*x/3.0f) * h;
-    } else if (x < 1.5f) {
-        float a = 1.5f - x;
-        integral = 0.5f * h - 0.5f * a * a * h;
-    } else {
-        integral = 0.5f * h;
-    }
-
-    return s > 0 ? 0.5f + integral / h : 0.5f - integral / h;
-}
-
-// Integrated weight over a grid cell
-inline float tsc_integrated_weight_1d(float x_center, float cell_left, float cell_right, float h) {
-    return tsc_cdf_1d(cell_right - x_center, h) - tsc_cdf_1d(cell_left - x_center, h);
-}
-
-void tsc_2d_adaptive_cpp(
-    const float* positions,             // (num_particles, 2)
-    const float* quantities,            // (num_particles, num_fields)
-    const float* smoothing_lengths,     // (num_particles)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,              // (2,)
-    const int* gridnums,                // (2,)
-    bool periodic,              
-    bool use_openmp,
-    int omp_threads,
-    float* fields,                      // (gridnum_x, gridnum_y, num_fields)
-    float* weights                      // (gridnum_x, gridnum_y)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-
-    // prepare output arrays
-    const int stride_x = gridnum_y * num_fields;
-    const int stride_y = num_fields;
-    const int weight_stride_x = gridnum_y;
-    const int weight_stride_y = 1;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // compute normalized position in grid units
-        float x_cell = positions[2 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[2 * n + 1] * inv_cell_size_y;
-        float h_x = smoothing_lengths[n] * inv_cell_size_x;
-        float h_y = smoothing_lengths[n] * inv_cell_size_y;
-        float support_x = 1.5f * h_x;
-        float support_y = 1.5f * h_y;
-
-        // compute bounding box of grid cells that the particle overlaps with
-        int i_min = static_cast<int>(std::floor(x_cell - support_x));
-        int j_min = static_cast<int>(std::floor(y_cell - support_y));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y));
-        const float* particle = quantities + n * num_fields;
-
-        // iterate over grid cells in x direction
-        for (int i = i_min; i <= i_max; ++i) {
-            int ii = i;
-
-            // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic);
-            if (is_outside_domain(ii, gridnum_x)) continue;
-
-            // compute integrated weight for this cell in x direction
-            float wx = tsc_integrated_weight_1d(x_cell, float(i), float(i+1), h_x);
-            if (wx == 0.0f) continue;
-
-            // iterate over grid cells in y direction
-            for (int j = j_min; j <= j_max; ++j) {
-                int jj = j;
-
-                // check periodicity and apply PBC if needed, otherwise early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic);
-                if (is_outside_domain(jj, gridnum_y)) continue;
-
-                // compute integrated weight for this cell in y direction
-                float wy = tsc_integrated_weight_1d(y_cell, float(j), float(j+1), h_y);
-                if (wy == 0.0f) continue;
-
-                // compute combined weight for this grid cell
-                float w = wx * wy;
-
-                // deposit to grid  
-                int base_idx = ii * stride_x + jj * stride_y;
-                int weight_idx = ii * weight_stride_x + jj * weight_stride_y;
-                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
-                accumulate_weight(weights, weight_idx, w, parallel);
-            }
-        }
-    });
-}
-
-void tsc_3d_adaptive_cpp(
-    const float* positions,             // (num_particles,3)
-    const float* quantities,            // (num_particles,num_fields)
-    const float* smoothing_lengths,     // (num_particles)
-    int num_particles,
-    int num_fields,
-    const float* boxsizes,              // (3,)
-    const int* gridnums,                // (3,)
-    bool periodic,
-    bool use_openmp,
-    int omp_threads,
-    float* fields,                      // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights                      // (gridnum_x, gridnum_y, gridnum_z)
-) {
-    // resolve openMP settings
-    const bool parallel = allow_openmp(use_openmp);
-    const int threads = resolve_openmp_threads(parallel, omp_threads);
-
-    // extract grid parameters and precompute inverse cell sizes
-    const int gridnum_x = gridnums[0];
-    const int gridnum_y = gridnums[1];
-    const int gridnum_z = gridnums[2];
-    const float inv_cell_size_x = static_cast<float>(gridnum_x) / boxsizes[0];
-    const float inv_cell_size_y = static_cast<float>(gridnum_y) / boxsizes[1];
-    const float inv_cell_size_z = static_cast<float>(gridnum_z) / boxsizes[2];
-    
-    // prepare output arrays
-    const int stride_x = gridnum_y * gridnum_z * num_fields;
-    const int stride_y = gridnum_z * num_fields;
-    const int stride_z = num_fields;
-    const int weight_stride_x = gridnum_y * gridnum_z;
-    const int weight_stride_y = gridnum_z;
-    std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
-    std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
-
-    // iterate over particles and accumulate to grid
-    for_each_particle(num_particles, parallel, threads, [&](int n) {
-
-        // compute normalized position in grid units
-        float x_cell = positions[3 * n + 0] * inv_cell_size_x;
-        float y_cell = positions[3 * n + 1] * inv_cell_size_y;
-        float z_cell = positions[3 * n + 2] * inv_cell_size_z;
-        float h_x = smoothing_lengths[n] * inv_cell_size_x;
-        float h_y = smoothing_lengths[n] * inv_cell_size_y;
-        float h_z = smoothing_lengths[n] * inv_cell_size_z;
-        float support_x = 1.5f * h_x;
-        float support_y = 1.5f * h_y;
-        float support_z = 1.5f * h_z;
-
-        // compute bounding box of grid cells that the particle overlaps with
-        int i_min = static_cast<int>(std::floor(x_cell - support_x));
-        int j_min = static_cast<int>(std::floor(y_cell - support_y));
-        int k_min = static_cast<int>(std::floor(z_cell - support_z));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y));
-        int k_max = static_cast<int>(std::ceil(z_cell + support_z));
-        const float* particle = quantities + n * num_fields;
-
-        // iterate over grid cells in x direction
-        for (int i = i_min; i <= i_max; ++i) {
-            int ii = i;
-
-            // check periodicity and apply PBC if needed, early-out if outside domain
-            ii = apply_pbc(ii, gridnum_x, periodic);
-            if (is_outside_domain(ii, gridnum_x)) continue;
-            
-            // compute integrated weight for this cell in x direction
-            float wx = tsc_integrated_weight_1d(x_cell, float(i), float(i+1), h_x);
-            if (wx == 0.0f) continue;
-
-            // iterate over grid cells in y direction
-            for (int j = j_min; j <= j_max; ++j) {
-                int jj = j;
-
-                // check periodicity and apply PBC if needed, early-out if outside domain
-                jj = apply_pbc(jj, gridnum_y, periodic);
-                if (is_outside_domain(jj, gridnum_y)) continue;
-
-                // compute integrated weight for this cell in y direction
-                float wy = tsc_integrated_weight_1d(y_cell, float(j), float(j+1), h_y);
-                if (wy == 0.0f) continue;
-
-                // iterate over grid cells in z direction
-                for (int k = k_min; k <= k_max; ++k) {
-                    int kk = k;
-
-                    // check periodicity and apply PBC if needed, early-out if outside domain
-                    kk = apply_pbc(kk, gridnum_z, periodic);
-                    if (is_outside_domain(kk, gridnum_z)) continue;
-
-                    // compute integrated weight for this cell in z direction
-                    float wz = tsc_integrated_weight_1d(z_cell, float(k), float(k+1), h_z);
-                    if (wz == 0.0f) continue;
-
-                    // compute combined weight for this grid cell
-                    float w = wx * wy * wz;
-
-                    // deposit to grid
-                    int base_idx = ii * stride_x + jj * stride_y + kk * stride_z;
-                    int weight_idx = ii * weight_stride_x + jj * weight_stride_y + kk;
-                    accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
-                    accumulate_weight(weights, weight_idx, w, parallel);
-                }
-            }
-        }
-    });
-}
-
-
 // =============================================================================
 // Separable kernel deposition (2D)
 // =============================================================================
@@ -1083,39 +285,66 @@ void separable_kernel_deposition_2d_cpp(
     // compute cell sizes and related parameters
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
     const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
+    
+    // precompute inverse cell size to save divisions
+    const float cellSize_x_inv = 1.0f / cellSize_x;
+    const float cellSize_y_inv = 1.0f / cellSize_y;
+
+    // precompute max kernel support in cell units for clipping ( if periodic)
+    float max_support_x = 0.5f * boxsize_x / kernel_support;
+    float max_support_y = 0.5f * boxsize_y / kernel_support;
+    float max_support = std::min({max_support_x, max_support_y});
 
     // compute strides for fields/weights and set up output arrays
     const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
     const int weight_stride_x = gridnum_y;
+    const int weight_stride_y = 1;
+
+    // setup memory for output arrays
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // perform for loop over particles
     for_each_particle(num_particles, parallel, threads, [&](int n) {
 
-        // gather relevant particle data and precompute kernel prefactor
-        float hsm_x_current = smoothing_lengths[2 * n + 0];
-        float hsm_y_current = smoothing_lengths[2 * n + 1];
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_x_current * hsm_y_current);
-        
-        // convert particle position to cell units
-        float x_cell = positions[2 * n + 0] / cellSize_x;
-        float y_cell = positions[2 * n + 1] / cellSize_y;
+        // gather relevant particle data
+        float x_phys = positions[2 * n + 0];
+        float y_phys = positions[2 * n + 1];
 
-        // compute kernel support in physical and cell units
-        float support_x_cell = kernel_support * hsm_x_current / cellSize_x;
-        float support_y_cell = kernel_support * hsm_y_current / cellSize_y;
+        // resolve smoothing lengths in physical units
+        float hsm_x_phys = smoothing_lengths[2 * n + 0];
+        float hsm_y_phys = smoothing_lengths[2 * n + 1];
+        if (periodic) {
+            float hsm_max = std::max(hsm_x_phys, hsm_y_phys);
+            if (hsm_max > max_support) {
+                float scale = max_support / hsm_max;
+                hsm_x_phys *= scale;
+                hsm_y_phys *= scale;
+            }
+        }
+
+        // convert to cell units
+        float x_cell = x_phys * cellSize_x_inv;
+        float y_cell = y_phys * cellSize_y_inv;
+
+        // convert to cell units
+        float hsm_x_cell = hsm_x_phys * cellSize_x_inv;
+        float hsm_y_cell = hsm_y_phys * cellSize_y_inv;
+
+        // compute kernel support in cell units
+        float support_x_cell = kernel_support * hsm_x_cell;
+        float support_y_cell = kernel_support * hsm_y_cell;
 
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
         int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
+        int i_max = static_cast<int>(std::ceil (x_cell + support_x_cell)) - 1;
+        int j_max = static_cast<int>(std::ceil (y_cell + support_y_cell)) - 1;
         const float* particle = quantities + n * num_fields;
 
-        // for separable kernels, typically the integrals are known analytically,
-        // so we can compute them exactly for each cell without needing to cache samples on a grid
+        /* for separable kernels, the integrals are typically known analytically 
+        so we can compute them exactly for each cell without needing to cache samples on a grid */
         for (int i = i_min; i <= i_max; ++i) {
             for (int j = j_min; j <= j_max; ++j) {
 
@@ -1125,19 +354,18 @@ void separable_kernel_deposition_2d_cpp(
                 if (is_outside_domain(ii, gridnum_x) || is_outside_domain(jj, gridnum_y)) continue;
 
                 // compute cell bounds in "q" units ( (box_edge - particle_pos) / hsm )
-                float qx_left  = (i * cellSize_x - positions[2 * n + 0]) / hsm_x_current;
-                float qy_left  = (j * cellSize_y - positions[2 * n + 1]) / hsm_y_current;
-                float qx_right = ((i + 1) * cellSize_x - positions[2 * n + 0]) / hsm_x_current;
-                float qy_right = ((j + 1) * cellSize_y - positions[2 * n + 1]) / hsm_y_current;
+                float qx_left  = (i - x_cell) / hsm_x_cell;
+                float qy_left  = (j - y_cell) / hsm_y_cell;
+                float qx_right = ((i + 1) - x_cell) / hsm_x_cell;
+                float qy_right = ((j + 1) - y_cell) / hsm_y_cell;
 
+                // compute total integral over the current cell using limits in q-space
                 std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right};
-
-                // compute total integral over the current cell using q-space bounds
                 float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(q_bounds);
             
-                // deposit to grid
+                // deposit into current cell
                 int base_idx = ii * stride_x + jj * stride_y;
-                int weight_idx = ii * weight_stride_x + jj;
+                int weight_idx = ii * weight_stride_x + jj * weight_stride_y;
                 accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
                 accumulate_weight(weights, weight_idx, integral, parallel);
             }
@@ -1160,7 +388,6 @@ void separable_kernel_deposition_3d_cpp(
     const bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    //int min_kernel_evaluations_per_axis,
     const bool use_openmp,
     const int omp_threads,
     float* fields,                          // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -1189,6 +416,17 @@ void separable_kernel_deposition_3d_cpp(
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
     const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
     const float cellSize_z = boxsize_z / static_cast<float>(gridnum_z);
+    
+    // precompute inverse cell size to save divisions
+    const float cellSize_x_inv = 1.0f / cellSize_x;
+    const float cellSize_y_inv = 1.0f / cellSize_y;
+    const float cellSize_z_inv = 1.0f / cellSize_z;
+
+    // precompute max kernel support in cell units for clipping ( if periodic)
+    float max_support_x = 0.5f * boxsize_x / kernel_support;
+    float max_support_y = 0.5f * boxsize_y / kernel_support;
+    float max_support_z = 0.5f * boxsize_z / kernel_support;
+    float max_support = std::min({max_support_x, max_support_y, max_support_z});
 
     // compute strides for fields/weights and set up output arrays
     const int stride_x = gridnum_y * gridnum_z * num_fields;
@@ -1197,40 +435,56 @@ void separable_kernel_deposition_3d_cpp(
     const int weight_stride_x = gridnum_y * gridnum_z;
     const int weight_stride_y = gridnum_z;
     const int weight_stride_z = 1;
+
+    // setup memory for output arrays
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // perform for loop over particles
     for_each_particle(num_particles, parallel, threads, [&](int n) {
 
-        // gather relevant particle data and precompute kernel prefactor
-        float hsm_x_current = smoothing_lengths[3 * n + 0];
-        float hsm_y_current = smoothing_lengths[3 * n + 1];
-        float hsm_z_current = smoothing_lengths[3 * n + 2];
+        // gather relevant particle data
+        float x_phys = positions[3 * n + 0];
+        float y_phys = positions[3 * n + 1];
+        float z_phys = positions[3 * n + 2];
 
-        float hx = std::max(hsm_x_current, 1e-12f);
-        float hy = std::max(hsm_y_current, 1e-12f);
-        float hz = std::max(hsm_z_current, 1e-12f);
+        // resolve smoothing lengths in physical units
+        float hsm_x_phys = smoothing_lengths[3 * n + 0];
+        float hsm_y_phys = smoothing_lengths[3 * n + 1];
+        float hsm_z_phys = smoothing_lengths[3 * n + 2];
 
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_x_current * hsm_y_current * hsm_z_current);
+        if (periodic) {
+            float hsm_max = std::max({hsm_x_phys, hsm_y_phys, hsm_z_phys});
+            if (hsm_max > max_support) {
+                float scale = max_support / hsm_max;
+                hsm_x_phys *= scale;
+                hsm_y_phys *= scale;
+                hsm_z_phys *= scale;
+            }
+        }
 
-        // convert particle position to cell units
-        float x_cell = positions[3 * n + 0] / cellSize_x;
-        float y_cell = positions[3 * n + 1] / cellSize_y;
-        float z_cell = positions[3 * n + 2] / cellSize_z;
+        // convert to cell units
+        float x_cell = x_phys * cellSize_x_inv;
+        float y_cell = y_phys * cellSize_y_inv;
+        float z_cell = z_phys * cellSize_z_inv;
+
+        // convert to cell units
+        float hsm_x_cell = hsm_x_phys * cellSize_x_inv;
+        float hsm_y_cell = hsm_y_phys * cellSize_y_inv;
+        float hsm_z_cell = hsm_z_phys * cellSize_z_inv;
 
         // compute kernel support in cell units
-        float support_x_cell = kernel_support * hsm_x_current / cellSize_x;
-        float support_y_cell = kernel_support * hsm_y_current / cellSize_y;
-        float support_z_cell = kernel_support * hsm_z_current / cellSize_z;
+        float support_x_cell = kernel_support * hsm_x_cell;
+        float support_y_cell = kernel_support * hsm_y_cell;
+        float support_z_cell = kernel_support * hsm_z_cell;
 
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
         int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
         int k_min = static_cast<int>(std::floor(z_cell - support_z_cell));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
-        int k_max = static_cast<int>(std::ceil(z_cell + support_z_cell));
+        int i_max = static_cast<int>(std::ceil (x_cell + support_x_cell));
+        int j_max = static_cast<int>(std::ceil (y_cell + support_y_cell));
+        int k_max = static_cast<int>(std::ceil (z_cell + support_z_cell));
         const float* particle = quantities + n * num_fields;
 
         // for separable kernels, typically the integrals are known analytically,
@@ -1245,17 +499,16 @@ void separable_kernel_deposition_3d_cpp(
                     int kk = apply_pbc(k, gridnum_z, periodic);
                     if (is_outside_domain(ii, gridnum_x) || is_outside_domain(jj, gridnum_y) || is_outside_domain(kk, gridnum_z)) continue;
 
-                    // compute cell bounds in "q" units ( (box_edge - particle_pos) / hsm )
-                    float qx_left  = (i * cellSize_x - positions[3 * n + 0]) / hsm_x_current;
-                    float qy_left  = (j * cellSize_y - positions[3 * n + 1]) / hsm_y_current;
-                    float qz_left  = (k * cellSize_z - positions[3 * n + 2]) / hsm_z_current;
-                    float qx_right = ((i + 1) * cellSize_x - positions[3 * n + 0]) / hsm_x_current;
-                    float qy_right = ((j + 1) * cellSize_y - positions[3 * n + 1]) / hsm_y_current;
-                    float qz_right = ((k + 1) * cellSize_z - positions[3 * n + 2]) / hsm_z_current;
-
-                    std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right, qz_left, qz_right};
-
+                    // compute cell bounds in "q" space ( (box_edge - particle_pos) / hsm )
+                    float qx_left  = (i - x_cell) / hsm_x_cell;
+                    float qy_left  = (j - y_cell) / hsm_y_cell;
+                    float qz_left  = (k - z_cell) / hsm_z_cell;
+                    float qx_right = ((i + 1) - x_cell) / hsm_x_cell;
+                    float qy_right = ((j + 1) - y_cell) / hsm_y_cell;
+                    float qz_right = ((k + 1) - z_cell) / hsm_z_cell;
+                    
                     // compute total integral over the current cell using q-space bounds
+                    std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right, qz_left, qz_right};
                     float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(q_bounds);
 
                     // deposit to grid
@@ -1274,32 +527,33 @@ void separable_kernel_deposition_3d_cpp(
 // =============================================================================
 
 void isotropic_kernel_deposition_2d_cpp(
-    const float* positions,           // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* smoothing_lengths,           // (num_particles)
+    const float* positions,             // (num_particles, 2)
+    const float* quantities,            // (num_particles, num_fields)
+    const float* smoothing_lengths,     // (num_particles)
     int num_particles,
     int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
+    const float* boxsizes,              // (2,)
+    const int* gridnums,                // (2,)
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    const int num_kernel_evaluations_per_axis,
+    const float eta_crit,
     bool use_openmp,
     int omp_threads,
-    float* fields,             // (gridnum_x, gridnum_y, num_fields)
-    float* weights             // (gridnum_x, gridnum_y)
+    float* fields,                      // (gridnum_x, gridnum_y, num_fields)
+    float* weights                      // (gridnum_x, gridnum_y)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
     const int threads = resolve_openmp_threads(parallel, omp_threads);
-
+    
     // set up the kernel and cache integral samples
     auto kernel = create_spherical_kernel(kernel_name, 2);
     SphericalKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
-    const int min_kernel_evaluations = kernel_samples.count;
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, num_kernel_evaluations_per_axis);
+    const int num_samples = kernel_samples.count;
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1313,31 +567,49 @@ void isotropic_kernel_deposition_2d_cpp(
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
     const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
 
-    // compute strides for fields/weights and set up output arrays
+    // precompute inverse cell size to save divisions
+    const float cellSize_x_inv = 1.0f / cellSize_x;
+    const float cellSize_y_inv = 1.0f / cellSize_y;
+
+    // precompute max kernel support in cell units for clipping ( if periodic)
+    float max_support_x = 0.5f * boxsize_x / kernel_support;
+    float max_support_y = 0.5f * boxsize_y / kernel_support;
+    float max_support = std::min({max_support_x, max_support_y});
+
+    // compute strides for fields
     const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
+
+    // compute strides for weights
     const int weight_stride_x = gridnum_y;
+    const int weight_stride_y = 1;
+
+    // setup memory for output arrays
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
 
     // perform for loop over particles
     for_each_particle(num_particles, parallel, threads, [&](int n) {
 
-        // gather relevant particle data and precompute kernel prefactor
-        float hsm_current = smoothing_lengths[n];
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current);
-        
-        // convert particle position to cell units
-        float x_pos = positions[2 * n + 0];
-        float y_pos = positions[2 * n + 1];
-        float x_cell = x_pos / cellSize_x;
-        float y_cell = y_pos / cellSize_y;
+        // gather relevant particle data
+        float x_phys = positions[2 * n + 0];
+        float y_phys = positions[2 * n + 1];
+
+        // resolve smoothing length (clip max = boxsize/2) and kernel prefactor
+        float hsm_phys = smoothing_lengths[n];
+        if (periodic) {
+            if (hsm_phys > max_support) hsm_phys = max_support;
+        }
+        float kernel_prefactor = kernel_ptr->sigma() / (hsm_phys * hsm_phys);
+
+        // convert to cell units
+        float x_cell = x_phys * cellSize_x_inv;
+        float y_cell = y_phys * cellSize_y_inv;
 
         // compute kernel support in physical and cell units
-        float support_phys = kernel_support * hsm_current;
-        float support_x_cell = support_phys / cellSize_x;
-        float support_y_cell = support_phys / cellSize_y;
-        //float kernel_normalization = kernel_ptr->normalization(detH);
+        float support_phys = kernel_support * hsm_phys;
+        float support_x_cell = support_phys * cellSize_x_inv;
+        float support_y_cell = support_phys * cellSize_y_inv;
 
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
@@ -1351,19 +623,22 @@ void isotropic_kernel_deposition_2d_cpp(
         int num_cells_y = j_max - j_min;
         int total_cells = num_cells_x * num_cells_y;
 
+        // compute eta
+        float eta = std::min({hsm_phys / cellSize_x, hsm_phys / cellSize_y});
+
         // if the number of cells is small, use the cached kernel samples to evaluate the kernel at each sample point
-        // -> iteration happens over the kernel sample points
-        if (total_cells < min_kernel_evaluations) {
+        if (eta < eta_crit) {
             
-            for (int s = 0; s < min_kernel_evaluations; ++s) {
+            // -> iteration happens over the kernel sample points
+            for (int s = 0; s < num_samples; ++s) {
                 
                 // kernel sample positions mapped to physical space
-                float x_phys = x_pos + kernel_samples.coords[2 * s + 0] * hsm_current;
-                float y_phys = y_pos + kernel_samples.coords[2 * s + 1] * hsm_current;
+                float x_sample = x_phys + kernel_samples.coords[2 * s + 0] * hsm_phys;
+                float y_sample = y_phys + kernel_samples.coords[2 * s + 1] * hsm_phys;
                 
                 // given the geometry, determine the cell into which sample falls
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
+                auto ix = cell_index_from_pos(x_sample, boxsize_x, gridnum_x, periodic);
+                auto iy = cell_index_from_pos(y_sample, boxsize_y, gridnum_y, periodic);
                 if (!ix || !iy) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1372,7 +647,7 @@ void isotropic_kernel_deposition_2d_cpp(
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y;
-                int weight_idx = (*ix) * weight_stride_x + (*iy);
+                int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y;
                 accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
                 accumulate_weight(weights, weight_idx, integral, parallel);
             }
@@ -1406,18 +681,19 @@ void isotropic_kernel_deposition_2d_cpp(
                         dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
 
                         float r = std::sqrt(dx * dx + dy * dy);
-                        float q = r / hsm_current;
+                        float q = r / hsm_phys;
                         return kernel_prefactor * kernel_ptr->evaluate(q);
                     };
 
                     float integral = integrate_cell_2d(integration_method, eval);
                     integral *= cellSize_x * cellSize_y;
-                    if (integral == 0.0f) integral = 1.0f;
-
                     total_weight += integral;
 
+                    // if cell outside support -> integral = 0, so we skip deposition, which is good
+                    // the branch above takes care of the case where kernel is contained within a single cell (-> integral = 1.0)
+
                     int base_idx   = an * stride_x + bn * stride_y;
-                    int weight_idx = an * weight_stride_x + bn;
+                    int weight_idx = an * weight_stride_x + bn * weight_stride_y;
 
                     base_indices.push_back(base_idx);
                     weight_indices.push_back(weight_idx);
@@ -1456,7 +732,8 @@ void isotropic_kernel_deposition_3d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    const int num_kernel_evaluations_per_axis,
+    const float eta_crit,
     bool use_openmp,
     int omp_threads,
     float* fields,                  // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -1469,8 +746,8 @@ void isotropic_kernel_deposition_3d_cpp(
     // set up the kernel and cache integral samples
     auto kernel = create_spherical_kernel(kernel_name, 3);
     SphericalKernel* kernel_ptr = kernel.get();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
-    const int min_kernel_evaluations = kernel_samples.count;
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, num_kernel_evaluations_per_axis);
+    const int num_samples = kernel_samples.count;
     const float kernel_support = kernel->support();
 
     // extract boxsize parameters
@@ -1488,32 +765,52 @@ void isotropic_kernel_deposition_3d_cpp(
     const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
     const float cellSize_z = boxsize_z / static_cast<float>(gridnum_z);
 
-    // compute strides for fields/weights and set up output arrays
+    // precompute inverse cell size to save divisions
+    const float cellSize_x_inv = 1.0f / cellSize_x;
+    const float cellSize_y_inv = 1.0f / cellSize_y;
+    const float cellSize_z_inv = 1.0f / cellSize_z;
+
+    // precompute max kernel support in cell units for clipping ( if periodic)
+    float max_support_x = 0.5f * boxsize_x / kernel_support;
+    float max_support_y = 0.5f * boxsize_y / kernel_support;
+    float max_support_z = 0.5f * boxsize_z / kernel_support;
+    float max_support = std::min({max_support_x, max_support_y, max_support_z});
+
+    // compute strides for fields
     const int stride_x = gridnum_y * gridnum_z * num_fields;
     const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
+
+    // compute strides for weights
     const int weight_stride_x = gridnum_y * gridnum_z;
     const int weight_stride_y = gridnum_z;
+    const int weight_stride_z = 1;
+
+    // setup memory for output arrays
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // perform for loop over particles
     for_each_particle(num_particles, parallel, threads, [&](int n) {
 
-        // gather relevant values for the current particle
-        float hsm_current = smoothing_lengths[n];
-        float kernel_prefactor = kernel_ptr->sigma() / (hsm_current * hsm_current * hsm_current);
-
         // convert particle position to cell units
-        float x_pos = positions[3 * n + 0];
-        float y_pos = positions[3 * n + 1];
-        float z_pos = positions[3 * n + 2];
-        float x_cell = x_pos / cellSize_x;
-        float y_cell = y_pos / cellSize_y;
-        float z_cell = z_pos / cellSize_z;
+        float x_phys = positions[3 * n + 0];
+        float y_phys = positions[3 * n + 1];
+        float z_phys = positions[3 * n + 2];
+
+        // resolve smoothing length (clip max = boxsize/2) and kernel prefactor
+        float hsm_phys = smoothing_lengths[n];
+        if (periodic) {
+            if (hsm_phys > max_support) hsm_phys = max_support;
+        }
+        float kernel_prefactor = kernel_ptr->sigma() / (hsm_phys * hsm_phys * hsm_phys);
+
+        float x_cell = x_phys * cellSize_x_inv;
+        float y_cell = y_phys * cellSize_y_inv;
+        float z_cell = z_phys * cellSize_z_inv;
 
         // compute kernel support in physical and cell units
-        float support_phys = kernel_support * hsm_current;
+        float support_phys = kernel_support * hsm_phys;
         float support_x_cell = support_phys / cellSize_x;
         float support_y_cell = support_phys / cellSize_y;
         float support_z_cell = support_phys / cellSize_z;
@@ -1534,20 +831,22 @@ void isotropic_kernel_deposition_3d_cpp(
         int num_cells_z = k_max - k_min;
         int total_cells = num_cells_x * num_cells_y * num_cells_z;
 
-        // if the number of cells is small, use the cached kernel samples to evaluate the kernel at each sample point
-        // -> iteration changes over the kernel sample points
-        if (total_cells < min_kernel_evaluations) {
+        // compute eta
+        float eta = std::min({hsm_phys / cellSize_x, hsm_phys / cellSize_y, hsm_phys / cellSize_z});
+
+        // follow anti-aliasing strategy
+        if (eta < eta_crit) {
             
-            for (int s = 0; s < min_kernel_evaluations; ++s) {
+            for (int s = 0; s < num_samples; ++s) {
 
                 // kernel sample positions and mapping to physical space
-                float x_phys = x_pos + kernel_samples.coords[3 * s + 0] * hsm_current;
-                float y_phys = y_pos + kernel_samples.coords[3 * s + 1] * hsm_current;
-                float z_phys = z_pos + kernel_samples.coords[3 * s + 2] * hsm_current;
+                float x_sample = x_phys + kernel_samples.coords[3 * s + 0] * hsm_phys;
+                float y_sample = y_phys + kernel_samples.coords[3 * s + 1] * hsm_phys;
+                float z_sample = z_phys + kernel_samples.coords[3 * s + 2] * hsm_phys;
 
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
-                auto iz = cell_index_from_pos(z_phys, boxsize_z, gridnum_z, periodic);
+                auto ix = cell_index_from_pos(x_sample, boxsize_x, gridnum_x, periodic);
+                auto iy = cell_index_from_pos(y_sample, boxsize_y, gridnum_y, periodic);
+                auto iz = cell_index_from_pos(z_sample, boxsize_z, gridnum_z, periodic);
                 if (!ix || !iy || !iz) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1595,20 +894,12 @@ void isotropic_kernel_deposition_3d_cpp(
                             dz = wrap_distance_if_periodic(dz, boxsize_z, periodic);
 
                             float r = std::sqrt(dx * dx + dy * dy + dz * dz);
-                            float q = r / hsm_current;
+                            float q = r / hsm_phys;
                             return kernel_prefactor * kernel_ptr->evaluate(q);
                         };
 
                         float integral = integrate_cell_3d(integration_method, eval);
                         integral *= cellSize_x * cellSize_y * cellSize_z;
-                        
-                        // if integral is zero, then we have the edge case where the kernel is basically a delta function
-                        // and no integration method (neither midpoint, nor trapezoidal, nor Simpson's) can capture the 
-                        // finds contributions to the integral, so integral = 0
-                        // in this case we know that the particle kernel is fully contained within this cell
-                        // and we can set the integral to 1
-                        if (integral == 0.0f) integral = 1.0f;
-
                         total_weight += integral;
 
                         int base_idx   = an * stride_x + bn * stride_y + cn * stride_z;
@@ -1622,7 +913,7 @@ void isotropic_kernel_deposition_3d_cpp(
             }
 
             // compute correction factor to ensure normalization
-            float correction = 1.0f / (total_weight + 1e-12f);
+            float correction = 1.0f / total_weight;
 
             // SECOND PASS: deposit once (corrected)
             const size_t count = integrals.size();
@@ -1644,22 +935,23 @@ void isotropic_kernel_deposition_3d_cpp(
 // =============================================================================
 
 void anisotropic_kernel_deposition_2d_cpp(
-    const float* positions,           // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* hmat_eigvecs,  // (num_particles, 4) - stored as [v00, v10, v01, v11] for each particle
-    const float* hmat_eigvals,  // (num_particles, 2) - stored as [lambda0, lambda1] for each particle
+    const float* positions,             // (num_particles, 2)
+    const float* quantities,            // (num_particles, num_fields)
+    const float* hmat_eigvecs,          // (num_particles, 4) - stored as [v00, v10, v01, v11] for each particle
+    const float* hmat_eigvals,          // (num_particles, 2) - stored as [lambda0, lambda1] for each particle
     int num_particles,
     int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
+    const float* boxsizes,              // (2,)
+    const int* gridnums,                // (2,)
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    const int num_kernel_evaluations_per_axis,
+    const float eta_crit,
     bool use_openmp,
     int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, num_fields)   
-    float* weights              // (gridnum_x, gridnum_y)
+    float* fields,                      // (gridnum_x, gridnum_y, num_fields)   
+    float* weights                      // (gridnum_x, gridnum_y)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -1669,8 +961,8 @@ void anisotropic_kernel_deposition_2d_cpp(
     auto kernel = create_spherical_kernel(kernel_name, 2);
     SphericalKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
-    const int min_kernel_evaluations = kernel_samples.count;
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, num_kernel_evaluations_per_axis);
+    const int num_samples = kernel_samples.count;
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1684,37 +976,63 @@ void anisotropic_kernel_deposition_2d_cpp(
     const float cellSize_x = boxsize_x / static_cast<float>(gridnum_x);
     const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
     
-    // compute strides for fields/weights and set up output arrays
+    // precompute inverse cell size to save divisions
+    const float cellSize_x_inv = 1.0f / cellSize_x;
+    const float cellSize_y_inv = 1.0f / cellSize_y;
+
+    // precompute max kernel support in cell units for clipping ( if periodic)
+    float max_support_x = 0.5f * boxsize_x / kernel_support;
+    float max_support_y = 0.5f * boxsize_y / kernel_support;
+    float max_support = std::min({max_support_x, max_support_y});
+
+    // compute strides for fields
     const int stride_x = gridnum_y * num_fields;
     const int stride_y = num_fields;
+
+    // compute strides for weights
     const int weight_stride_x = gridnum_y;
+    const int weight_stride_y = 1;
+
+    // setup memory for output arrays
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y);
     
     // perform for loop over particles
     for_each_particle(num_particles, parallel, threads, [&](int n) {
         
-        // gather relevant values for the current particle
-        const float* vecs = &hmat_eigvecs[n * 4];
-        const float* vals = &hmat_eigvals[n * 2];
-        float vals_gu[2] = { vals[0] / cellSize_x, vals[1] / cellSize_y };
-        float detH = vals[0] * vals[1];
+        // gather relevant particle data
+        float x_phys = positions[2 * n + 0];
+        float y_phys = positions[2 * n + 1];
+
+        // resolve the smoothing tensors / eigvals (not eigvecs, since they are normalized)
+        const float* evecs = &hmat_eigvecs[n * 4];
+        float evals_phys[2] = { hmat_eigvals[n * 2 + 0], hmat_eigvals[n * 2 + 1] };
+
+        if (periodic) {
+            // check whether the max eval exceeds the max support and scale if applicable
+            float max_eval = std::max({evals_phys[0], evals_phys[1]});
+            if (max_eval > max_support) {
+                float scale = max_support / max_eval;
+                evals_phys[0] *= scale;
+                evals_phys[1] *= scale;
+            }
+        }
+        float evals_cell[2] = { evals_phys[0] / cellSize_x, evals_phys[1] / cellSize_y };
+        float detH = evals_phys[0] * evals_phys[1];
         float kernel_prefactor = kernel_ptr->sigma() / detH;
         
         // convert particle position to cell units
-        float x_pos = positions[2 * n + 0];
-        float y_pos = positions[2 * n + 1];
-        float x_cell = x_pos / cellSize_x;
-        float y_cell = y_pos / cellSize_y;
+        float x_cell = x_phys * cellSize_x_inv;
+        float y_cell = y_phys * cellSize_y_inv;
 
         // figure out the extent of the kernel 
         float support_x_cell = kernel_support * std::sqrt(
-            std::pow(vecs[0] * vals_gu[0], 2) +
-            std::pow(vecs[2] * vals_gu[1], 2)
+            std::pow(evecs[0] * evals_cell[0], 2) +
+            std::pow(evecs[2] * evals_cell[1], 2)
         );
         float support_y_cell = kernel_support * std::sqrt(
-            std::pow(vecs[1] * vals_gu[0], 2) +
-            std::pow(vecs[3] * vals_gu[1], 2)
+            std::pow(evecs[1] * evals_cell[0], 2) +
+            std::pow(evecs[3] * evals_cell[1], 2)
         );
 
         // compute inclusive index bounds within the kernel support
@@ -1729,20 +1047,22 @@ void anisotropic_kernel_deposition_2d_cpp(
         int num_cells_y = j_max - j_min + 1;
         int total_cells = num_cells_x * num_cells_y;
 
-        // if the number of cells is small, use the cached kernel samples to evaluate the kernel at each sample point
-        // -> iteration changes over the kernel sample points
-        if (total_cells < min_kernel_evaluations) {
+        // compute eta / eta_crit to determine which integration to use
+        float eta = std::min({evals_phys[0] / cellSize_x, evals_phys[1] / cellSize_y});
 
-            for (int s = 0; s < min_kernel_evaluations; ++s) {
+        // if eta < eta_crit, numerical quadrature is not enough, need to switch to kernel integral samples
+        if (eta < eta_crit) {
+
+            for (int s = 0; s < num_samples; ++s) {
 
                 // kernel sample positions and mapping to physical space
-                float x_phys = x_pos + vecs[0] * (vals[0] * kernel_samples.coords[2 * s + 0])
-                                      + vecs[2] * (vals[1] * kernel_samples.coords[2 * s + 1]);
-                float y_phys = y_pos + vecs[1] * (vals[0] * kernel_samples.coords[2 * s + 0])
-                                      + vecs[3] * (vals[1] * kernel_samples.coords[2 * s + 1]);
+                float x = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[2 * s + 0])
+                                      + evecs[2] * (evals_phys[1] * kernel_samples.coords[2 * s + 1]);
+                float y = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[2 * s + 0])
+                                      + evecs[3] * (evals_phys[1] * kernel_samples.coords[2 * s + 1]);
 
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
+                auto ix = cell_index_from_pos(x, boxsize_x, gridnum_x, periodic);
+                auto iy = cell_index_from_pos(y, boxsize_y, gridnum_y, periodic);
                 if (!ix || !iy) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1750,7 +1070,7 @@ void anisotropic_kernel_deposition_2d_cpp(
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y;
-                int weight_idx = (*ix) * weight_stride_x + (*iy);
+                int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y;
                 accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
                 accumulate_weight(weights, weight_idx, integral, parallel);
             }
@@ -1783,8 +1103,8 @@ void anisotropic_kernel_deposition_2d_cpp(
                         dx = wrap_distance_if_periodic(dx, boxsize_x, periodic);
                         dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
 
-                        float xi1 = (vecs[0] * dx + vecs[1] * dy) / vals[0];
-                        float xi2 = (vecs[2] * dx + vecs[3] * dy) / vals[1];
+                        float xi1 = (evecs[0] * dx + evecs[1] * dy) / evals_phys[0];
+                        float xi2 = (evecs[2] * dx + evecs[3] * dy) / evals_phys[1];
                         float q = std::sqrt(xi1 * xi1 + xi2 * xi2);
 
                         return kernel_prefactor * kernel_ptr->evaluate(q);
@@ -1792,8 +1112,6 @@ void anisotropic_kernel_deposition_2d_cpp(
 
                     float integral = integrate_cell_2d(integration_method, eval);
                     integral *= cellSize_x * cellSize_y;
-                    if (integral == 0.0f) integral = 1.0f;
-
                     total_weight += integral;
 
                     int base_idx   = an * stride_x + bn * stride_y;
@@ -1837,7 +1155,8 @@ void anisotropic_kernel_deposition_3d_cpp(
     bool periodic,              // (3,)
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    const int num_kernel_evaluations_per_axis,
+    const float eta_crit,
     bool use_openmp,
     int omp_threads,
     float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
@@ -1851,8 +1170,8 @@ void anisotropic_kernel_deposition_3d_cpp(
     auto kernel = create_spherical_kernel(kernel_name, 3);
     SphericalKernel* kernel_ptr = kernel.get();
     const float kernel_support = kernel->support();
-    const auto kernel_samples = build_kernel_sample_grid(*kernel, min_kernel_evaluations_per_axis);
-    const int min_kernel_evaluations = kernel_samples.count;
+    const auto kernel_samples = build_kernel_sample_grid(*kernel, num_kernel_evaluations_per_axis);
+    const int num_samples = kernel_samples.count;
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1869,49 +1188,76 @@ void anisotropic_kernel_deposition_3d_cpp(
     const float cellSize_y = boxsize_y / static_cast<float>(gridnum_y);
     const float cellSize_z = boxsize_z / static_cast<float>(gridnum_z);
 
-    // compute strides for fields/weights and set up output arrays
+    // precompute inverse cell size to save divisions
+    const float cellSize_x_inv = 1.0f / cellSize_x;
+    const float cellSize_y_inv = 1.0f / cellSize_y;
+    const float cellSize_z_inv = 1.0f / cellSize_z;
+
+    // precompute max kernel support in cell units for clipping ( if periodic)
+    float max_support_x = 0.5f * boxsize_x / kernel_support;
+    float max_support_y = 0.5f * boxsize_y / kernel_support;
+    float max_support_z = 0.5f * boxsize_z / kernel_support;
+    float max_support = std::min({max_support_x, max_support_y, max_support_z});
+
+    // compute strides for fields
     const int stride_x = gridnum_y * gridnum_z * num_fields;
     const int stride_y = gridnum_z * num_fields;
     const int stride_z = num_fields;
+    
+    // compute strides for weights
     const int weight_stride_x = gridnum_y * gridnum_z;
     const int weight_stride_y = gridnum_z;
+    const int weight_stride_z = 1;
+
+    // setup memory for output arrays
     std::memset(fields,  0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z * num_fields);
     std::memset(weights, 0, sizeof(float) * gridnum_x * gridnum_y * gridnum_z);
 
     // perform for loop over particles
     for_each_particle(num_particles, parallel, threads, [&](int n) {
+        
         // gather relevant values for the current particle
-        const float* vecs = &hmat_eigvecs[n * 9];
-        const float* vals = &hmat_eigvals[n * 3];
+        float x_phys = positions[3 * n + 0];
+        float y_phys = positions[3 * n + 1];
+        float z_phys = positions[3 * n + 2];
+        
+        const float* evecs = &hmat_eigvecs[n * 9];
+        float evals_phys[3] = { hmat_eigvals[n * 3 + 0], hmat_eigvals[n * 3 + 1], hmat_eigvals[n * 3 + 2] };
 
-        // compute detH and normalization
-        float vals_gu[3] = { vals[0] / cellSize_x, vals[1] / cellSize_y, vals[2] / cellSize_z };
-        float detH = vals[0] * vals[1] * vals[2];
+        if (periodic) {
+            // check whether the max eval exceeds the max support and scale if applicable
+            float max_eval = std::max({evals_phys[0], evals_phys[1], evals_phys[2]});
+            if (max_eval > max_support) {
+                float scale = max_support / max_eval;
+                evals_phys[0] *= scale;
+                evals_phys[1] *= scale;
+                evals_phys[2] *= scale;
+            }
+        }
+        float evals_cell[3] = { evals_phys[0] / cellSize_x, evals_phys[1] / cellSize_y, evals_phys[2] / cellSize_z };
+        float detH = evals_phys[0] * evals_phys[1] * evals_phys[2];
         float kernel_prefactor = kernel_ptr->sigma() / detH;
 
         // convert particle position to cell units
-        float x_pos = positions[3 * n + 0];
-        float y_pos = positions[3 * n + 1];
-        float z_pos = positions[3 * n + 2];
-        float x_cell = x_pos / cellSize_x;
-        float y_cell = y_pos / cellSize_y;
-        float z_cell = z_pos / cellSize_z;
+        float x_cell = x_phys * cellSize_x_inv;
+        float y_cell = y_phys * cellSize_y_inv;
+        float z_cell = z_phys * cellSize_z_inv;
 
         // estimate kernel support along each axis in cell units
         float support_x_cell = kernel_support * std::sqrt(
-            std::pow(vecs[0] * vals_gu[0], 2) +
-            std::pow(vecs[3] * vals_gu[1], 2) +
-            std::pow(vecs[6] * vals_gu[2], 2)         
+            std::pow(evecs[0] * evals_cell[0], 2) +
+            std::pow(evecs[3] * evals_cell[1], 2) +
+            std::pow(evecs[6] * evals_cell[2], 2)         
         );
         float support_y_cell = kernel_support * std::sqrt(
-            std::pow(vecs[1] * vals_gu[0], 2) +
-            std::pow(vecs[4] * vals_gu[1], 2) +
-            std::pow(vecs[7] * vals_gu[2], 2)
+            std::pow(evecs[1] * evals_cell[0], 2) +
+            std::pow(evecs[4] * evals_cell[1], 2) +
+            std::pow(evecs[7] * evals_cell[2], 2)
         );
         float support_z_cell = kernel_support * std::sqrt(
-            std::pow(vecs[2] * vals_gu[0], 2) +
-            std::pow(vecs[5] * vals_gu[1], 2) +
-            std::pow(vecs[8] * vals_gu[2], 2)
+            std::pow(evecs[2] * evals_cell[0], 2) +
+            std::pow(evecs[5] * evals_cell[1], 2) +
+            std::pow(evecs[8] * evals_cell[2], 2)
         );
 
         // compute inclusive index bounds within the kernel support
@@ -1929,21 +1275,24 @@ void anisotropic_kernel_deposition_3d_cpp(
         int num_cells_z = k_max - k_min;
         int total_cells = num_cells_x * num_cells_y * num_cells_z;
 
+        // compute eta
+        float eta = std::min({evals_phys[0] / cellSize_x, evals_phys[1] / cellSize_y, evals_phys[2] / cellSize_z});
+
         // small-support path: use cached kernel samples
-        if (total_cells < min_kernel_evaluations) {
+        if (eta < eta_crit) {
             
-            for (int s = 0; s < min_kernel_evaluations; ++s) {
+            for (int s = 0; s < num_samples; ++s) {
 
                 // kernel sample positions and mapping to physical space
-                float x_phys = x_pos + vecs[0] * (vals[0] * kernel_samples.coords[3 * s + 0])
-                                      + vecs[3] * (vals[1] * kernel_samples.coords[3 * s + 1])
-                                      + vecs[6] * (vals[2] * kernel_samples.coords[3 * s + 2]);
-                float y_phys = y_pos + vecs[1] * (vals[0] * kernel_samples.coords[3 * s + 0])
-                                      + vecs[4] * (vals[1] * kernel_samples.coords[3 * s + 1])
-                                      + vecs[7] * (vals[2] * kernel_samples.coords[3 * s + 2]);
-                float z_phys = z_pos + vecs[2] * (vals[0] * kernel_samples.coords[3 * s + 0])
-                                      + vecs[5] * (vals[1] * kernel_samples.coords[3 * s + 1])
-                                      + vecs[8] * (vals[2] * kernel_samples.coords[3 * s + 2]);
+                float x_phys = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
+                                      + evecs[3] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
+                                      + evecs[6] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
+                float y_phys = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
+                                      + evecs[4] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
+                                      + evecs[7] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
+                float z_phys = z_phys + evecs[2] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
+                                      + evecs[5] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
+                                      + evecs[8] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
 
                 auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
                 auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
@@ -1955,7 +1304,7 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y + (*iz) * stride_z;
-                int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y + (*iz);
+                int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y + (*iz) * weight_stride_z;
                 accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
                 accumulate_weight(weights, weight_idx, integral, parallel);
             }
@@ -1994,9 +1343,9 @@ void anisotropic_kernel_deposition_3d_cpp(
                             dy = wrap_distance_if_periodic(dy, boxsize_y, periodic);
                             dz = wrap_distance_if_periodic(dz, boxsize_z, periodic);
 
-                            float xi1 = (vecs[0] * dx + vecs[1] * dy + vecs[2] * dz) / vals[0];
-                            float xi2 = (vecs[3] * dx + vecs[4] * dy + vecs[5] * dz) / vals[1];
-                            float xi3 = (vecs[6] * dx + vecs[7] * dy + vecs[8] * dz) / vals[2];
+                            float xi1 = (evecs[0] * dx + evecs[1] * dy + evecs[2] * dz) / evals_phys[0];
+                            float xi2 = (evecs[3] * dx + evecs[4] * dy + evecs[5] * dz) / evals_phys[1];
+                            float xi3 = (evecs[6] * dx + evecs[7] * dy + evecs[8] * dz) / evals_phys[2];
 
                             float q = std::sqrt(xi1 * xi1 + xi2 * xi2 + xi3 * xi3);
                             return kernel_prefactor * kernel_ptr->evaluate(q);
@@ -2004,12 +1353,10 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                         float integral = integrate_cell_3d(integration_method, eval);
                         integral *= cellSize_x * cellSize_y * cellSize_z;
-                        if (integral == 0.0f) integral = 1.0f;
-
                         total_weight += integral;
 
                         int base_idx   = an * stride_x + bn * stride_y + cn * stride_z;
-                        int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn;
+                        int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn * weight_stride_z;
 
                         base_indices.push_back(base_idx);
                         weight_indices.push_back(weight_idx);

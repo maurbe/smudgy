@@ -713,8 +713,13 @@ class PointCloud:
         if not adaptive:
             spacing = d_lens / gn
             if method == "separable":
+                # here we need to return the smoothing lengths corresponding to the support of the kernel?
+                # for CIC = spacing * 0.5 = spacing * support
+                # for TSC = spacing * 1.5 = spacing * support
+                # get the support factor from the kernel properties
+                # factor = get_kernel(kn, dim=self.dim).support
                 return (
-                    np.repeat((spacing / 2.0)[np.newaxis, :], num_p, axis=0).astype(
+                    np.repeat((spacing * 1.0)[np.newaxis, :], num_p, axis=0).astype(
                         np.float32
                     ),
                     None,
@@ -759,6 +764,7 @@ class PointCloud:
         kn: str,
         integration: str,
         min_evals: int,
+        eta_crit: float,
     ) -> tuple:
         """Construct the argument tuple required by the backends."""
         common = (pos, fields, d_lens, gn, periodic)
@@ -767,8 +773,8 @@ class PointCloud:
         if method == "separable":
             return common[:2] + (h,) + common[2:] + (kn, integration)
         if method == "isotropic":
-            return common[:2] + (h,) + common[2:] + (kn, integration, min_evals)
-        return common[:2] + (h_vecs, h_vals) + common[2:] + (kn, integration, min_evals)
+            return common[:2] + (h,) + common[2:] + (kn, integration, min_evals, eta_crit)
+        return common[:2] + (h_vecs, h_vals) + common[2:] + (kn, integration, min_evals, eta_crit)
 
     def deposit_to_grid(
         self,
@@ -781,7 +787,8 @@ class PointCloud:
         adaptive: bool = False,
         plane_projection: str | None = None,
         integration: str = "midpoint",
-        min_kernel_evaluations_per_axis: int = 5,
+        num_kernel_evaluations_per_axis: int = 8,
+        eta_crit: float = 1.0,
         return_weights: bool = False,
         use_python: bool = False,
         use_openmp: bool = True,
@@ -809,8 +816,10 @@ class PointCloud:
             Projection plane ('xy', 'yz', or 'zx') for 3D to 2D deposition.
         integration : str, default 'midpoint'
             Kernel integration method.
-        min_kernel_evaluations_per_axis : int, default 5
+        num_kernel_evaluations_per_axis : int, default 8
             Resolution for kernel integration.
+        eta_crit : float, default 1.0
+            Anti-aliasing threshold to switch from sampled to full numerical quadrature.
         return_weights : bool, default False
             If True, returns the weights (density) grid as well.
         use_python : bool, default False
@@ -873,7 +882,8 @@ class PointCloud:
             periodic,
             kn_res,
             integration,
-            min_kernel_evaluations_per_axis,
+            num_kernel_evaluations_per_axis,
+            eta_crit
         )
 
         fields_grid, weights = func(

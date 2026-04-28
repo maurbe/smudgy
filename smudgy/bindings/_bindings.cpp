@@ -95,390 +95,6 @@ py::tuple _ngp_3d_cpp(py::array_t<float> positions,
     return py::make_tuple(fields, weights);
 }
 
-py::tuple _cic_2d_cpp(py::array_t<float> positions,
-                    py::array_t<float> quantities,
-                    py::array_t<float> boxsizes,
-                    py::array_t<int> gridnums,
-                    bool periodic,
-                    bool use_openmp, 
-                    int omp_threads
-                )
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    cic_2d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
-        periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _cic_3d_cpp(py::array_t<float> positions,
-                    py::array_t<float> quantities,
-                    py::array_t<float> boxsizes,
-                    py::array_t<int> gridnums,
-                    bool periodic,
-                    bool use_openmp, 
-                    int omp_threads
-                )
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-    int gridnum_z = gridnums_pointer[2];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    cic_3d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer, 
-        periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _cic_2d_adaptive_cpp(py::array_t<float> positions,
-                     py::array_t<float> quantities,
-                     py::array_t<float> smoothing_lengths,
-                     py::array_t<float> boxsizes,
-                     py::array_t<int> gridnums,
-                     bool periodic,
-                     bool use_openmp, 
-                     int omp_threads
-                    )
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto smoothing_lengths_buffer = smoothing_lengths.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    cic_2d_adaptive_cpp(positions_pointer, 
-                        quantities_pointer, 
-                        smoothing_lengths_pointer, 
-                        num_particles, 
-                        num_fields, 
-                        boxsizes_pointer, 
-                        gridnums_pointer, 
-                        periodic,
-                        use_openmp, 
-                        omp_threads, 
-                        fields_pointer, 
-                        weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _cic_3d_adaptive_cpp(py::array_t<float> positions,
-                     py::array_t<float> quantities,
-                     py::array_t<float> smoothing_lengths,
-                     py::array_t<float> boxsizes,
-                     py::array_t<int> gridnums,
-                     bool periodic,
-                     bool use_openmp, 
-                     int omp_threads
-                    )
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto smoothing_lengths_buffer = smoothing_lengths.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-    int gridnum_z = gridnums_pointer[2];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    cic_3d_adaptive_cpp(positions_pointer, 
-                        quantities_pointer, 
-                        smoothing_lengths_pointer, 
-                        num_particles, 
-                        num_fields, 
-                        boxsizes_pointer, 
-                        gridnums_pointer, 
-                        periodic,
-                        use_openmp, 
-                        omp_threads, 
-                        fields_pointer, 
-                        weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _tsc_2d_cpp(py::array_t<float> positions,
-             py::array_t<float> quantities,
-             py::array_t<float> boxsizes,
-             py::array_t<int> gridnums,
-             bool periodic,
-            bool use_openmp, 
-            int omp_threads)
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    tsc_2d_cpp(positions_pointer, 
-               quantities_pointer, 
-               num_particles, 
-               num_fields, 
-               boxsizes_pointer, 
-               gridnums_pointer, 
-               periodic,
-               use_openmp, 
-               omp_threads, 
-               fields_pointer, 
-               weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _tsc_3d_cpp(py::array_t<float> positions,
-             py::array_t<float> quantities,
-             py::array_t<float> boxsizes,
-             py::array_t<int> gridnums,
-             bool periodic,
-            bool use_openmp, 
-            int omp_threads)
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-    int gridnum_z = gridnums_pointer[2];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    tsc_3d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer, periodic,
-               use_openmp, omp_threads, fields_pointer, weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _tsc_2d_adaptive_cpp(py::array_t<float> positions,
-             py::array_t<float> quantities,
-             py::array_t<float> smoothing_lengths,
-             py::array_t<float> boxsizes,
-             py::array_t<int> gridnums,
-             bool periodic,
-            bool use_openmp, 
-            int omp_threads)
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto smoothing_lengths_buffer = smoothing_lengths.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    tsc_2d_adaptive_cpp(positions_pointer, 
-                        quantities_pointer, 
-                        smoothing_lengths_pointer, 
-                        num_particles, 
-                        num_fields, 
-                        boxsizes_pointer, 
-                        gridnums_pointer, 
-                        periodic,
-                        use_openmp, 
-                        omp_threads, 
-                        fields_pointer, 
-                        weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
-py::tuple _tsc_3d_adaptive_cpp(py::array_t<float> positions,
-             py::array_t<float> quantities,
-             py::array_t<float> smoothing_lengths,
-             py::array_t<float> boxsizes,
-             py::array_t<int> gridnums,
-             bool periodic,
-             bool use_openmp, 
-             int omp_threads
-            )
-{
-    // Request buffer info
-    auto positions_buffer = positions.request();
-    auto quantities_buffer = quantities.request();
-    auto boxsizes_buffer = boxsizes.request();
-    auto smoothing_lengths_buffer = smoothing_lengths.request();
-    auto gridnums_buffer = gridnums.request();
-    const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
-
-    int num_particles = positions_buffer.shape[0];
-    int num_fields = quantities_buffer.shape[1];
-    int gridnum_x = gridnums_pointer[0];
-    int gridnum_y = gridnums_pointer[1];
-    int gridnum_z = gridnums_pointer[2];
-
-    py::array_t<float> fields({gridnum_x, gridnum_y, gridnum_z, num_fields});
-    py::array_t<float> weights({gridnum_x, gridnum_y, gridnum_z});
-    float* fields_pointer = fields.mutable_data();
-    float* weights_pointer = weights.mutable_data();
-    std::fill_n(fields_pointer, gridnum_x * gridnum_y * gridnum_z * num_fields, 0.0f);
-    std::fill_n(weights_pointer, gridnum_x * gridnum_y * gridnum_z, 0.0f);
-
-    float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
-    float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
-    float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
-    float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
-    // Call backend function (direct loop)
-    tsc_3d_adaptive_cpp(positions_pointer, 
-                        quantities_pointer, 
-                        smoothing_lengths_pointer, 
-                        num_particles, 
-                        num_fields, 
-                        boxsizes_pointer, 
-                        gridnums_pointer, 
-                        periodic,
-                        use_openmp, 
-                        omp_threads, 
-                        fields_pointer, 
-                        weights_pointer);
-
-    // Return numpy arrays
-    return py::make_tuple(fields, weights);
-}
-
 py::tuple _separable_2d_cpp(
     py::array_t<float> positions,
     py::array_t<float> quantities,
@@ -603,7 +219,8 @@ py::tuple _isotropic_2d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    int num_kernel_evaluations_per_axis,
+    float eta_critical,
     bool use_openmp, 
     int omp_threads)
 {
@@ -642,7 +259,8 @@ py::tuple _isotropic_2d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations_per_axis,
+        num_kernel_evaluations_per_axis,
+        eta_critical,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -661,7 +279,8 @@ py::tuple _isotropic_3d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    int num_kernel_evaluations_per_axis,
+    float eta_critical,
     bool use_openmp, int omp_threads)
 {
     auto positions_buffer = positions.request();
@@ -700,7 +319,8 @@ py::tuple _isotropic_3d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations_per_axis,
+        num_kernel_evaluations_per_axis,
+        eta_critical,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -720,7 +340,8 @@ py::tuple _anisotropic_2d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    int num_kernel_evaluations_per_axis,
+    float eta_critical,
     bool use_openmp, int omp_threads)
 {
     auto positions_buffer = positions.request();
@@ -761,7 +382,8 @@ py::tuple _anisotropic_2d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations_per_axis,
+        num_kernel_evaluations_per_axis,
+        eta_critical,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -781,7 +403,8 @@ py::tuple _anisotropic_3d_cpp(
     bool periodic,
     const std::string& kernel_name,
     const std::string& integration_method,
-    int min_kernel_evaluations_per_axis,
+    int num_kernel_evaluations_per_axis,
+    float eta_critical,
     bool use_openmp, int omp_threads)
 {
     auto positions_buffer = positions.request();
@@ -823,7 +446,8 @@ py::tuple _anisotropic_3d_cpp(
         periodic,
         kernel_name,
         integration_method,
-        min_kernel_evaluations_per_axis,
+        num_kernel_evaluations_per_axis,
+        eta_critical,
         use_openmp,
         omp_threads,
         fields_pointer,
@@ -842,8 +466,8 @@ py::float_ _compute_total_integral_separable(
 py::float_ _compute_total_integral_spherical(
     const std::string& kernel_name,
     const int dim,
-    const int min_kernel_evaluations_per_axis){
-    return compute_total_integral_spherical(kernel_name, dim, min_kernel_evaluations_per_axis);
+    const int num_kernel_evaluations_per_axis){
+    return compute_total_integral_spherical(kernel_name, dim, num_kernel_evaluations_per_axis);
 }
 
 py::tuple _get_separable_kernel_values_1D(
@@ -940,7 +564,7 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             The name of the kernel function.
         dim : int
             The dimensionality of the kernel.
-        min_kernel_evaluations_per_axis : int, optional
+        num_kernel_evaluations_per_axis : int, optional
             Minimum number of evaluations per axis for numerical integration (if needed).
 
         Returns
@@ -950,7 +574,7 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         )doc",
         py::arg("kernel_name"),
         py::arg("dim"),        
-        py::arg("min_kernel_evaluations_per_axis"));
+        py::arg("num_kernel_evaluations_per_axis"));
 
     m.def("_ngp_2d_cpp", &_ngp_2d_cpp, 
         R"doc(
@@ -1024,306 +648,6 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
-    m.def("_cic_2d_cpp", &_cic_2d_cpp, 
-        R"doc(
-        Deposit particle quantities onto a 2D grid using CIC (C++ backend).
-
-        Parameters
-        ----------
-        positions : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        boxsizes : array_like, shape (2,)
-            Domain size per axis.
-        gridnums : array_like, shape (2,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_cic_3d_cpp", &_cic_3d_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 3D grid using CIC (C++ backend).
-
-        Parameters
-        ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        boxsizes : array_like, shape (3,)
-            Domain size per axis.
-        gridnums : array_like, shape (3,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy, Gz)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_cic_2d_adaptive_cpp", &_cic_2d_adaptive_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 2D grid using adaptive CIC (C++ backend).
-
-        Parameters
-        ----------
-        positions : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N, 2)
-            Smoothing lengths per particle (adaptive support).
-        boxsizes : array_like, shape (2,)
-            Domain size per axis.
-        gridnums : array_like, shape (2,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("smoothing_lengths"),
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_cic_3d_adaptive_cpp", &_cic_3d_adaptive_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 3D grid using adaptive CIC (C++ backend).
-
-        Parameters
-        ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N, 3)
-            Smoothing lengths per particle (adaptive support).
-        boxsizes : array_like, shape (3,)
-            Domain size per axis.
-        gridnums : array_like, shape (3,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy, Gz)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("smoothing_lengths"),
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_tsc_2d_cpp", &_tsc_2d_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 2D grid using TSC (C++ backend).
-
-        Parameters
-        ----------
-        pos : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        boxsizes : array_like, shape (2,)
-            Domain size per axis.
-        gridnums : array_like, shape (2,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_tsc_3d_cpp", &_tsc_3d_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 3D grid using TSC (C++ backend).
-
-        Parameters
-        ----------
-        pos : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        boxsizes : array_like, shape (3,)
-            Domain size per axis.
-        gridnums : array_like, shape (3,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy, Gz)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_tsc_2d_adaptive_cpp", &_tsc_2d_adaptive_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 2D grid using adaptive TSC (C++ backend).
-
-        Parameters
-        ----------
-        pos : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N, 2)
-            Smoothing lengths per particle (adaptive support).
-        boxsizes : array_like, shape (2,)
-            Domain size per axis.
-        gridnums : array_like, shape (2,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("smoothing_lengths"),
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-
-    m.def("_tsc_3d_adaptive_cpp", &_tsc_3d_adaptive_cpp,     
-        R"doc(
-        Deposit particle quantities onto a 3D grid using adaptive TSC (C++ backend).
-
-        Parameters
-        ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N, 3)
-            Smoothing lengths per particle (adaptive support).
-        boxsizes : array_like, shape (3,)
-            Domain size per axis.
-        gridnums : array_like, shape (3,)
-            Number of grid cells per axis.
-        periodic : bool
-            Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
-
-        Returns
-        -------
-        fields : numpy.ndarray, shape (Gx, Gy, Gz, F)
-            Deposited field values.
-        weights : numpy.ndarray, shape (Gx, Gy, Gz)
-            Weight sum per cell.
-        )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
-        py::arg("smoothing_lengths"),
-        py::arg("boxsizes"),
-        py::arg("gridnums"),
-        py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
-    
     m.def("_separable_2d_cpp", &_separable_2d_cpp,
         R"doc(
         Deposit particle quantities onto a 2D grid using a separable kernel (C++ backend).
@@ -1436,8 +760,10 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
         integration_method : str
             Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-        min_kernel_evaluations_per_axis : int
+        num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
+        eta_critical : float
+            Anti-aliasing threshold to switch from sampled to full numerical quadrature.
         use_openmp : bool
             Enable OpenMP parallelism.
         omp_threads : int
@@ -1458,7 +784,8 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations_per_axis"),
+        py::arg("num_kernel_evaluations_per_axis"),
+        py::arg("eta_critical"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1484,8 +811,10 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
         integration_method : str
             Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-        min_kernel_evaluations_per_axis : int
+        num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
+        eta_critical : float
+            Anti-aliasing threshold to switch from sampled to full numerical quadrature.
         use_openmp : bool
             Enable OpenMP parallelism.
         omp_threads : int
@@ -1506,7 +835,8 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations_per_axis"),
+        py::arg("num_kernel_evaluations_per_axis"),
+        py::arg("eta_critical"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1534,8 +864,10 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
         integration_method : str
             Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-        min_kernel_evaluations_per_axis : int
+        num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
+        eta_critical : float
+            Anti-aliasing threshold to switch from sampled to full numerical quadrature.
         use_openmp : bool
             Enable OpenMP parallelism.
         omp_threads : int
@@ -1557,7 +889,8 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations_per_axis"),
+        py::arg("num_kernel_evaluations_per_axis"),
+        py::arg("eta_critical"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 
@@ -1585,8 +918,10 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
             Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
         integration_method : str
             Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-        min_kernel_evaluations_per_axis : int
+        num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
+        eta_critical : float
+            Anti-aliasing threshold to switch from sampled to full numerical quadrature.
         use_openmp : bool
             Enable OpenMP parallelism.
         omp_threads : int
@@ -1608,7 +943,8 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         py::arg("periodic"),
         py::arg("kernel_name"),
         py::arg("integration_method"),
-        py::arg("min_kernel_evaluations_per_axis"),
+        py::arg("num_kernel_evaluations_per_axis"),
+        py::arg("eta_critical"),
         py::arg("use_openmp"),
         py::arg("omp_threads"));
 }

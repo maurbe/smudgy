@@ -20,7 +20,7 @@ where = ["."]
 include = ["smudgy*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["smudgy/tests"]
 
 [tool.black]
 line-length = 88

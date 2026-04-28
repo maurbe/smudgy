@@ -8,7 +8,7 @@ from smudgy import PointCloud
 GRIDNUM = 64
 DATASETS = ["random"]
 STRUCTURES = ["separable"]
-KERNEL_NAMES = ["ngp", "tophat", "tsc"]
+KERNEL_NAMES = ["ngp", "tophat"]
 
 
 def _generate_dataset(dim: int):
@@ -24,8 +24,7 @@ def _generate_dataset(dim: int):
 @pytest.mark.parametrize("dim", [2, 3])
 @pytest.mark.parametrize("structure", STRUCTURES)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
-@pytest.mark.parametrize("dataset", DATASETS)
-def test_python_cpp_backend_consistency(dim, structure, kernel_name, dataset):
+def test_python_cpp_backend_consistency(dim, structure, kernel_name):
     """Test consistency between Python and C++ backends for deposition."""
     data = _generate_dataset(dim)
 
