@@ -6,7 +6,7 @@ import pytest
 from smudgy import compute_kernel_integral
 
 DIMS = [1, 2, 3]
-MIN_KERNEL_EVALUATIONS_PER_AXIS = [1, 17, 23, 100]
+NUM_KERNEL_EVALUATIONS_PER_AXIS = [1, 17, 23, 100]
 KERNEL_NAMES = [
     "tophat_separable",
     "tsc_separable",
@@ -26,16 +26,16 @@ KERNEL_NAMES = [
 @pytest.mark.parametrize("dim", DIMS)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 @pytest.mark.parametrize(
-    "min_kernel_evaluations_per_axis", MIN_KERNEL_EVALUATIONS_PER_AXIS
+    "num_kernel_evaluations_per_axis", NUM_KERNEL_EVALUATIONS_PER_AXIS
 )
 def test_kernel_integrals(
-    kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int
+    kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
 ):
     """Test that the integrals of the kernels are close to 1.0."""
     integral = compute_kernel_integral(
         kernel_name,
         dim,
-        min_kernel_evaluations_per_axis=min_kernel_evaluations_per_axis,
+        num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
     )
     print("Integral", integral)
     assert np.allclose(

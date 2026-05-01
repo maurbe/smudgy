@@ -11,22 +11,6 @@ if hasattr(_ext, "_ngp_2d_cpp"):
     _ngp_2d = _ext._ngp_2d_cpp
 if hasattr(_ext, "_ngp_3d_cpp"):
     _ngp_3d = _ext._ngp_3d_cpp
-# if hasattr(_ext, "_cic_2d_cpp"):
-#    _cic_2d = _ext._cic_2d_cpp
-# if hasattr(_ext, "_cic_3d_cpp"):
-#    _cic_3d = _ext._cic_3d_cpp
-# if hasattr(_ext, "_cic_2d_adaptive_cpp"):
-#    _cic_2d_adaptive = _ext._cic_2d_adaptive_cpp
-# if hasattr(_ext, "_cic_3d_adaptive_cpp"):
-#    _cic_3d_adaptive = _ext._cic_3d_adaptive_cpp
-# if hasattr(_ext, "_tsc_2d_cpp"):
-#    _tsc_2d = _ext._tsc_2d_cpp
-# if hasattr(_ext, "_tsc_3d_cpp"):
-#    _tsc_3d = _ext._tsc_3d_cpp
-# if hasattr(_ext, "_tsc_2d_adaptive_cpp"):
-#    _tsc_2d_adaptive = _ext._tsc_2d_adaptive_cpp
-# if hasattr(_ext, "_tsc_3d_adaptive_cpp"):
-#    _tsc_3d_adaptive = _ext._tsc_3d_adaptive_cpp
 if hasattr(_ext, "_separable_2d_cpp"):
     _separable_2d = _ext._separable_2d_cpp
 if hasattr(_ext, "_separable_3d_cpp"):

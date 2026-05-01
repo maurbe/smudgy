@@ -43,7 +43,14 @@ def _as_float32(array):
     return np.asarray(array, dtype=np.float32)
 
 
-def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
+def _ngp_2d(
+    positions,
+    quantities,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
     """Deposit particle quantities onto a 2D grid with Nearest-Grid-Point weighting.
 
     Parameters
@@ -52,6 +59,8 @@ def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
         Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
         Per-particle fields to accumulate, with ``F`` fields per particle.
+    particle_weights : ndarray, shape (N,)
+        Per-particle weights (e.g., masses) to use during deposition.
     boxsizes : array_like of length 2
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 2
@@ -69,6 +78,7 @@ def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
     """
     positions = _as_float32(positions)
     quantities = _as_float32(quantities)
+    particle_weights = _as_float32(particle_weights)
     boxsizes = _as_float32(boxsizes)
 
     gridnum_x, gridnum_y = gridnums
@@ -94,12 +104,20 @@ def _ngp_2d(positions, quantities, boxsizes, gridnums, periodic):
         return fields, weights
 
     for f in range(quantities.shape[1]):
-        np.add.at(fields[:, :, f], (x_idx, y_idx), quantities[:, f])
-    np.add.at(weights, (x_idx, y_idx), 1)
+        np.add.at(fields[:, :, f], (x_idx, y_idx), quantities[:, f] * particle_weights)
+    np.add.at(weights, (x_idx, y_idx), particle_weights)
+
     return fields, weights
 
 
-def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
+def _ngp_3d(
+    positions,
+    quantities,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
     """Deposit particle quantities onto a 3D grid via Nearest-Grid-Point weighting.
 
     Parameters
@@ -108,6 +126,8 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
         Cartesian particle coordinates, where ``N`` is the number of particles.
     quantities : ndarray, shape (N, F)
         Per-particle fields to accumulate, with ``F`` fields per particle.
+    particle_weights : ndarray, shape (N,)
+        Per-particle weights (e.g., masses) to use during deposition.
     boxsizes : array_like of length 3
         Domain sizes per axis, assuming ``[0, boxsize]`` in each dimension.
     gridnums : array_like of length 3
@@ -125,6 +145,7 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
     """
     positions = _as_float32(positions)
     quantities = _as_float32(quantities)
+    particle_weights = _as_float32(particle_weights)
     boxsizes = _as_float32(boxsizes)
 
     gridnum_x, gridnum_y, gridnum_z = gridnums
@@ -156,15 +177,27 @@ def _ngp_3d(positions, quantities, boxsizes, gridnums, periodic):
         return fields, weights
 
     for f in range(quantities.shape[1]):
-        np.add.at(fields[:, :, :, f], (x_idx, y_idx, z_idx), quantities[:, f])
-    np.add.at(weights, (x_idx, y_idx, z_idx), 1)
+        np.add.at(
+            fields[:, :, :, f],
+            (x_idx, y_idx, z_idx),
+            quantities[:, f] * particle_weights,
+        )
+    np.add.at(weights, (x_idx, y_idx, z_idx), particle_weights)
     return fields, weights
 
 
-def _tophat_2d(positions, quantities, boxsizes, gridnums, periodic):
+def _tophat_2d(
+    positions,
+    quantities,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
     """2D Cloud-In-Cell (cell-centered grid convention)."""
     positions = _as_float32(positions)
     quantities = _as_float32(quantities)
+    particle_weights = _as_float32(particle_weights)
     boxsizes = _as_float32(boxsizes)
 
     Nx, Ny = gridnums
@@ -225,7 +258,7 @@ def _tophat_2d(positions, quantities, boxsizes, gridnums, periodic):
 
         xi = x_idx[valid]
         yi = y_idx[valid]
-        wv = w[valid]
+        wv = w[valid] * particle_weights[valid]
 
         np.add.at(fields, (xi, yi), quantities[valid] * wv[:, None])
         np.add.at(weights, (xi, yi), wv)
@@ -233,9 +266,17 @@ def _tophat_2d(positions, quantities, boxsizes, gridnums, periodic):
     return fields, weights
 
 
-def _tophat_3d(positions, quantities, boxsizes, gridnums, periodic):
+def _tophat_3d(
+    positions,
+    quantities,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
     positions = _as_float32(positions)
     quantities = _as_float32(quantities)
+    particle_weights = _as_float32(particle_weights)
     boxsizes = _as_float32(boxsizes)
 
     Nx, Ny, Nz = gridnums
@@ -297,7 +338,7 @@ def _tophat_3d(positions, quantities, boxsizes, gridnums, periodic):
         xi = x_idx[valid]
         yi = y_idx[valid]
         zi = z_idx[valid]
-        wv = w[valid]
+        wv = w[valid] * particle_weights[valid]
 
         # Vectorized accumulation over all fields
         np.add.at(fields, (xi, yi, zi), quantities[valid] * wv[:, None])

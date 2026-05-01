@@ -54,10 +54,10 @@ class SeparableKernel {
             q1 = std::min(q1,  support());
 
             // fully on one side
-            if (q0 >= 0.0f) {
+            if (q0 >= 0.0f) { // both bounds positive
                 return F_1d(q1) - F_1d(q0);
             }
-            if (q1 <= 0.0f) {
+            if (q1 <= 0.0f) { // both bounds negative
                 return F_1d(-q0) - F_1d(-q1); // flip
             }
             // crosses zero → split

@@ -133,12 +133,6 @@ class BaseKernelClass:
         print("dK_dq", dK_dq.shape, "grad_q", grad_q.shape, "det_H", det_H.shape)
         return self._kernel_sigma() / det_H[:, None, None] * dK_dq * grad_q
 
-    # def _regularize_tensor(self,
-    #                       H: npt.NDArray[np.floating]
-    #                       ) -> npt.NDArray[np.floating]:
-    #    """Add small regularization to the smoothing tensor to prevent singularity."""
-    #    return H + self.eps * np.eye(self.dim)[None, :, :]
-
     def _kernel_sigma(self):
         pass
 
@@ -200,71 +194,73 @@ class TophatSepKernel(BaseKernelClass):
 
 
 class TSCKernel(BaseKernelClass):
-    """Spherically symmetric Triangular-Shaped Cloud (TSC) kernel."""
+    """Spherically symmetric triangular (tent) kernel in radius."""
 
     def __init__(self, dim):
         """Initialize the TSC kernel for the given spatial dimension."""
         super().__init__(dim, support=1.5)
         self.name = "tsc"
-        self.node_1 = self.support / 3
 
     def _kernel_sigma(self) -> float:
+        # normalize so integral over d-dim space = 1
         if self.dim == 1:
-            return 1.0
+            return 1.0 / self.support
         elif self.dim == 2:
-            return 32.0 / (13.0 * math.pi)
+            return 3.0 / (np.pi * self.support**2)
         elif self.dim == 3:
-            return 2.0 / math.pi
+            return 3.0 / (np.pi * self.support**3)
 
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    def _kernel_values(self, q):
+        q = np.abs(q)
         val = np.zeros_like(q)
-        mask1 = q <= self.node_1
-        mask2 = (q > self.node_1) & (q <= self.support)
-        val[mask1] = 0.75 - q[mask1] ** 2
-        val[mask2] = 0.5 * (1.5 - q[mask2]) ** 2
+
+        mask = q <= self.support
+        val[mask] = 1.0 - q[mask] / self.support
+
         return val
 
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
+    def _kernel_gradient_values(self, q):
+        q = np.abs(q)
         grad = np.zeros_like(q)
-        mask1 = q <= self.node_1
-        mask2 = (q > self.node_1) & (q <= self.support)
-        grad[mask1] = -2.0 * q[mask1]
-        grad[mask2] = -(self.support - q[mask2])
+
+        mask = q <= self.support
+        grad[mask] = -(1.0 / self.support)
+
         return grad
 
 
 class TSCSepKernel(BaseKernelClass):
-    """Rectangular TSC kernel (Product of 1D TSCs)."""
+    """Separable triangle (tent) kernel with support 1.5 (not B-spline TSC)."""
 
     def __init__(self, dim):
         """Initialize the TSC separable kernel for the given spatial dimension."""
         super().__init__(dim, support=1.5)
         self.name = "tsc_separable"
-        self.node_1 = self.support / 3
 
     def _kernel_sigma(self) -> float:
-        return 1.0
+        # normalization so that integral over 1D = 1
+        # ∫_{-h}^{h} (1 - |q|/h) dq = h
+        # => need 1/h scaling
+        return 1.0 / self.support**self.dim
 
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        q = np.abs(q)
-        val = np.zeros_like(q)
-        mask1 = q <= self.node_1
-        mask2 = (q > self.node_1) & (q <= self.support)
-        val[mask1] = 0.75 - q[mask1] ** 2
-        val[mask2] = 0.5 * (self.support - q[mask2]) ** 2
+    def _kernel_values(self, q):
+        q_abs = np.abs(q)
+        val = np.zeros_like(q_abs)
+
+        mask = q_abs <= self.support
+        val[mask] = 1.0 - q_abs[mask] / self.support
+
         return val
 
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        q = np.abs(q)
+    def _kernel_gradient_values(self, q):
+        q_abs = np.abs(q)
+        sign = np.sign(q)
+
         grad = np.zeros_like(q)
-        mask1 = q <= self.node_1
-        mask2 = (q > self.node_1) & (q <= self.support)
-        grad[mask1] = -2.0 * q[mask1]
-        grad[mask2] = -(self.support - q[mask2])
+
+        mask = q_abs <= self.support
+        grad[mask] = -(1.0 / self.support) * sign[mask]
+
         return grad
 
 

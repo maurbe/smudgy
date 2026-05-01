@@ -141,17 +141,18 @@ inline void accumulate_weight(float* weights, int idx, float value, bool paralle
 // =============================================================================
 
 void ngp_2d_cpp(
-    const float* positions,     // (num_particles, 2)
-    const float* quantities,    // (num_particles, num_fields)
+    const float* positions,             // (num_particles, 2)
+    const float* quantities,            // (num_particles, num_fields)
+    const float* particle_weights,      // (num_particles) - particle weights (e.g. for "mass-weighted" depositions)
     int num_particles,                      
     int num_fields,
-    const float* boxsizes,      // (2,)
-    const int* gridnums,        // (2,)
+    const float* boxsizes,              // (2,)
+    const int* gridnums,                // (2,)
     bool periodic,
     bool use_openmp,            
     int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, num_fields)
-    float* weights              // (gridnum_x, gridnum_y)
+    float* fields,                      // (gridnum_x, gridnum_y, num_fields)
+    float* weights                      // (gridnum_x, gridnum_y)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -184,8 +185,11 @@ void ngp_2d_cpp(
         const int base_idx   = ix * field_stride_x + iy * field_stride_y;
         const int weight_idx = ix * gridnum_y + iy;
         const float* particle = quantities + n * num_fields;
-        accumulate_fields(fields, base_idx, particle, num_fields, 1.0f, parallel);
-        accumulate_weight(weights, weight_idx, 1.0f, parallel);
+
+        float wj = particle_weights[n];
+
+        accumulate_fields(fields, base_idx, particle, num_fields, wj, parallel);
+        accumulate_weight(weights, weight_idx, wj, parallel);
     });
 }
 
@@ -193,6 +197,7 @@ void ngp_2d_cpp(
 void ngp_3d_cpp(
     const float* positions,     // (num_particles, 3)
     const float* quantities,    // (num_particles, num_fields)
+    const float* particle_weights,      // (num_particles) - particle weights (e.g. for "mass-weighted" depositions)
     int num_particles,
     int num_fields,
     const float* boxsizes,      // (3,)
@@ -239,8 +244,11 @@ void ngp_3d_cpp(
         const int base_idx   = ix * field_stride_x + iy * field_stride_y + iz * field_stride_z;
         const int weight_idx = ix * gridnum_y * gridnum_z + iy * gridnum_z + iz;
         const float* particle = quantities + n * num_fields;
-        accumulate_fields(fields, base_idx, particle, num_fields, 1.0f, parallel);
-        accumulate_weight(weights, weight_idx, 1.0f, parallel);
+
+        float wj = particle_weights[n];
+        
+        accumulate_fields(fields, base_idx, particle, num_fields, wj, parallel);
+        accumulate_weight(weights, weight_idx, wj, parallel);
     });
 }
 
@@ -253,6 +261,7 @@ void separable_kernel_deposition_2d_cpp(
     const float* positions,             // (num_particles, 2)
     const float* quantities,            // (num_particles, num_fields)
     const float* smoothing_lengths,     // (num_particles, 2)
+    const float* particle_weights,      // (num_particles) - particle weights (e.g. for "mass-weighted" depositions)
     const int num_particles,
     const int num_fields,
     const float* boxsizes,              // (2,)
@@ -342,6 +351,7 @@ void separable_kernel_deposition_2d_cpp(
         int i_max = static_cast<int>(std::ceil (x_cell + support_x_cell)) - 1;
         int j_max = static_cast<int>(std::ceil (y_cell + support_y_cell)) - 1;
         const float* particle = quantities + n * num_fields;
+        float wj = particle_weights[n];
 
         /* for separable kernels, the integrals are typically known analytically 
         so we can compute them exactly for each cell without needing to cache samples on a grid */
@@ -362,12 +372,13 @@ void separable_kernel_deposition_2d_cpp(
                 // compute total integral over the current cell using limits in q-space
                 std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right};
                 float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(q_bounds);
+                float w = wj * integral;
             
                 // deposit into current cell
                 int base_idx = ii * stride_x + jj * stride_y;
                 int weight_idx = ii * weight_stride_x + jj * weight_stride_y;
-                accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                accumulate_weight(weights, weight_idx, integral, parallel);
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
     });
@@ -381,6 +392,7 @@ void separable_kernel_deposition_3d_cpp(
     const float* positions,                 // (num_particles, 3)
     const float* quantities,                // (num_particles, num_fields)
     const float* smoothing_lengths,         // (num_particles, 3)
+    const float* particle_weights,          // (num_particles)
     const int num_particles,
     const int num_fields,
     const float* boxsizes,                  // (3,)
@@ -486,6 +498,7 @@ void separable_kernel_deposition_3d_cpp(
         int j_max = static_cast<int>(std::ceil (y_cell + support_y_cell));
         int k_max = static_cast<int>(std::ceil (z_cell + support_z_cell));
         const float* particle = quantities + n * num_fields;
+        float wj = particle_weights[n];
 
         // for separable kernels, typically the integrals are known analytically,
         // so we can compute them exactly for each cell without needing to cache samples on a grid
@@ -510,12 +523,13 @@ void separable_kernel_deposition_3d_cpp(
                     // compute total integral over the current cell using q-space bounds
                     std::vector<float> q_bounds = {qx_left, qx_right, qy_left, qy_right, qz_left, qz_right};
                     float integral = kernel_ptr->sigma() * kernel_ptr->evaluate_integral(q_bounds);
+                    float w = wj * integral;
 
                     // deposit to grid
                     int base_idx = ii * stride_x + jj * stride_y + kk * stride_z;
                     int weight_idx = ii * weight_stride_x + jj * weight_stride_y + kk * weight_stride_z;
-                    accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                    accumulate_weight(weights, weight_idx, integral, parallel);
+                    accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                    accumulate_weight(weights, weight_idx, w, parallel);
                 }
             }
         }
@@ -530,6 +544,7 @@ void isotropic_kernel_deposition_2d_cpp(
     const float* positions,             // (num_particles, 2)
     const float* quantities,            // (num_particles, num_fields)
     const float* smoothing_lengths,     // (num_particles)
+    const float* particle_weights,      // (num_particles)
     int num_particles,
     int num_fields,
     const float* boxsizes,              // (2,)
@@ -617,6 +632,7 @@ void isotropic_kernel_deposition_2d_cpp(
         int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
         int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
         const float* particle = quantities + n * num_fields;
+        float wj = particle_weights[n];
 
         // compute total number of cells in the kernel support
         int num_cells_x = i_max - i_min;
@@ -643,13 +659,14 @@ void isotropic_kernel_deposition_2d_cpp(
 
                 // gather the kernel sample integral (fraction)
                 float integral = kernel_samples.integrals[s];
+                float w = wj * integral;
                 if (integral == 0.0f) continue;
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y;
                 int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y;
-                accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                accumulate_weight(weights, weight_idx, integral, parallel);
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
         // if the number of cells is large, iterate over affected cells and compute kernel integral over cell domain
@@ -687,7 +704,8 @@ void isotropic_kernel_deposition_2d_cpp(
 
                     float integral = integrate_cell_2d(integration_method, eval);
                     integral *= cellSize_x * cellSize_y;
-                    total_weight += integral;
+                    float w = wj * integral;
+                    total_weight += w;
 
                     // if cell outside support -> integral = 0, so we skip deposition, which is good
                     // the branch above takes care of the case where kernel is contained within a single cell (-> integral = 1.0)
@@ -697,7 +715,7 @@ void isotropic_kernel_deposition_2d_cpp(
 
                     base_indices.push_back(base_idx);
                     weight_indices.push_back(weight_idx);
-                    integrals.push_back(integral);
+                    integrals.push_back(w);
                 }
             }
 
@@ -707,10 +725,10 @@ void isotropic_kernel_deposition_2d_cpp(
             // SECOND PASS: deposit once (corrected)
             const size_t count = integrals.size();
             for (size_t i = 0; i < count; ++i) {
-                float w = integrals[i] * correction;
+                float w_corr = integrals[i] * correction;
 
-                accumulate_fields(fields, base_indices[i], particle, num_fields, w, parallel);
-                accumulate_weight(weights, weight_indices[i], w, parallel);
+                accumulate_fields(fields, base_indices[i], particle, num_fields, w_corr, parallel);
+                accumulate_weight(weights, weight_indices[i], w_corr, parallel);
             }
         }
     });
@@ -725,6 +743,7 @@ void isotropic_kernel_deposition_3d_cpp(
     const float* positions,         // (num_particles, 3)
     const float* quantities,        // (num_particles, num_fields)
     const float* smoothing_lengths, // (num_particles)
+    const float* particle_weights,  // (num_particles)
     int num_particles,
     int num_fields,
     const float* boxsizes,          // (3,)
@@ -824,6 +843,7 @@ void isotropic_kernel_deposition_3d_cpp(
         int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
         int k_max = static_cast<int>(std::ceil(z_cell + support_z_cell));
         const float* particle = quantities + n * num_fields;
+        float wj = particle_weights[n];
 
         // compute total number of cells in the kernel support
         int num_cells_x = i_max - i_min;
@@ -851,12 +871,13 @@ void isotropic_kernel_deposition_3d_cpp(
 
                 // gather the kernel sample integral (fraction)
                 float integral = kernel_samples.integrals[s];
+                float w = wj * integral;
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y + (*iz) * stride_z;
                 int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y + (*iz);
-                accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                accumulate_weight(weights, weight_idx, integral, parallel);
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
         // if the number of cells is large, iterate over affected cells and compute kernel integral over cell domain
@@ -900,14 +921,15 @@ void isotropic_kernel_deposition_3d_cpp(
 
                         float integral = integrate_cell_3d(integration_method, eval);
                         integral *= cellSize_x * cellSize_y * cellSize_z;
-                        total_weight += integral;
+                        float w = wj * integral;
+                        total_weight += w;
 
                         int base_idx   = an * stride_x + bn * stride_y + cn * stride_z;
                         int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn;
 
                         base_indices.push_back(base_idx);
                         weight_indices.push_back(weight_idx);
-                        integrals.push_back(integral);
+                        integrals.push_back(w);
                     }
                 }
             }
@@ -917,13 +939,11 @@ void isotropic_kernel_deposition_3d_cpp(
 
             // SECOND PASS: deposit once (corrected)
             const size_t count = integrals.size();
-            float corrected_total_weight = 0.0f;
             for (size_t i = 0; i < count; ++i) {
-                float w = integrals[i] * correction;
+                float w_corr = integrals[i] * correction;
 
-                accumulate_fields(fields, base_indices[i], particle, num_fields, w, parallel);
-                accumulate_weight(weights, weight_indices[i], w, parallel);
-                corrected_total_weight += w;
+                accumulate_fields(fields, base_indices[i], particle, num_fields, w_corr, parallel);
+                accumulate_weight(weights, weight_indices[i], w_corr, parallel);
             }
         }
     });
@@ -939,6 +959,7 @@ void anisotropic_kernel_deposition_2d_cpp(
     const float* quantities,            // (num_particles, num_fields)
     const float* hmat_eigvecs,          // (num_particles, 4) - stored as [v00, v10, v01, v11] for each particle
     const float* hmat_eigvals,          // (num_particles, 2) - stored as [lambda0, lambda1] for each particle
+    const float* particle_weights,      // (num_particles,) - stored as [w0, w1, ..., wN] for each particle
     int num_particles,
     int num_fields,
     const float* boxsizes,              // (2,)
@@ -1041,6 +1062,7 @@ void anisotropic_kernel_deposition_2d_cpp(
         int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
         int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell)) - 1;
         const float* particle = quantities + n * num_fields;
+        float wj = particle_weights[n];
 
         // compute total number of cells in the kernel support
         int num_cells_x = i_max - i_min + 1;
@@ -1067,12 +1089,13 @@ void anisotropic_kernel_deposition_2d_cpp(
 
                 // gather the kernel sample integral (fraction)
                 float integral = kernel_samples.integrals[s];
+                float w = wj * integral;
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y;
                 int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y;
-                accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                accumulate_weight(weights, weight_idx, integral, parallel);
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         } 
         // if the number of cells is large, iterate over affected cells and compute kernel integral over cell domain
@@ -1112,14 +1135,15 @@ void anisotropic_kernel_deposition_2d_cpp(
 
                     float integral = integrate_cell_2d(integration_method, eval);
                     integral *= cellSize_x * cellSize_y;
-                    total_weight += integral;
+                    float w = wj * integral;
+                    total_weight += w;
 
                     int base_idx   = an * stride_x + bn * stride_y;
                     int weight_idx = an * weight_stride_x + bn;
 
                     base_indices.push_back(base_idx);
                     weight_indices.push_back(weight_idx);
-                    integrals.push_back(integral);
+                    integrals.push_back(w);
                 }
             }
 
@@ -1129,10 +1153,10 @@ void anisotropic_kernel_deposition_2d_cpp(
             // SECOND PASS: deposit once (corrected)
             const size_t count = integrals.size();
             for (size_t i = 0; i < count; ++i) {
-                float w = integrals[i] * correction;
+                float w_corr = integrals[i] * correction;
 
-                accumulate_fields(fields, base_indices[i], particle, num_fields, w, parallel);
-                accumulate_weight(weights, weight_indices[i], w, parallel);
+                accumulate_fields(fields, base_indices[i], particle, num_fields, w_corr, parallel);
+                accumulate_weight(weights, weight_indices[i], w_corr, parallel);
             }
         }
     });
@@ -1144,23 +1168,24 @@ void anisotropic_kernel_deposition_2d_cpp(
 // =============================================================================
 
 void anisotropic_kernel_deposition_3d_cpp(
-    const float* positions,           // (num_particles, 3)
-    const float* quantities,    // (num_particles, num_fields)
-    const float* hmat_eigvecs,  // (num_particles, 9) - column-major eigenvectors
-    const float* hmat_eigvals,  // (num_particles, 3) - eigenvalues per particle
+    const float* positions,             // (num_particles, 3)
+    const float* quantities,            // (num_particles, num_fields)
+    const float* hmat_eigvecs,          // (num_particles, 9) - column-major eigenvectors
+    const float* hmat_eigvals,          // (num_particles, 3) - eigenvalues per particle
+    const float* particle_weights,      // (num_particles,) - stored as [w0, w1, ..., wN] for each particle
     int num_particles,
     int num_fields,
-    const float* boxsizes,      // (3,)
-    const int* gridnums,        // (3,)
-    bool periodic,              // (3,)
+    const float* boxsizes,              // (3,)
+    const int* gridnums,                // (3,)
+    bool periodic,                      // (3,)
     const std::string& kernel_name,
     const std::string& integration_method,
     const int num_kernel_evaluations_per_axis,
     const float eta_crit,
     bool use_openmp,
     int omp_threads,
-    float* fields,              // (gridnum_x, gridnum_y, gridnum_z, num_fields)
-    float* weights              // (gridnum_x, gridnum_y, gridnum_z)
+    float* fields,                      // (gridnum_x, gridnum_y, gridnum_z, num_fields)
+    float* weights                      // (gridnum_x, gridnum_y, gridnum_z)
 ) {
     // resolve openMP settings
     const bool parallel = allow_openmp(use_openmp);
@@ -1268,6 +1293,7 @@ void anisotropic_kernel_deposition_3d_cpp(
         int k_min = static_cast<int>(std::floor(z_cell - support_z_cell));
         int k_max = static_cast<int>(std::ceil(z_cell + support_z_cell));
         const float* particle = quantities + n * num_fields;
+        float wj = particle_weights[n];
 
         // compute total number of cells in the kernel support
         int num_cells_x = i_max - i_min;
@@ -1301,12 +1327,13 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                 // gather the kernel sample integral (fraction)
                 float integral = kernel_samples.integrals[s];
+                float w = wj * integral;
 
                 // deposit to grid
                 int base_idx = (*ix) * stride_x + (*iy) * stride_y + (*iz) * stride_z;
                 int weight_idx = (*ix) * weight_stride_x + (*iy) * weight_stride_y + (*iz) * weight_stride_z;
-                accumulate_fields(fields, base_idx, particle, num_fields, integral, parallel);
-                accumulate_weight(weights, weight_idx, integral, parallel);
+                accumulate_fields(fields, base_idx, particle, num_fields, w, parallel);
+                accumulate_weight(weights, weight_idx, w, parallel);
             }
         }
         // large-support path: integrate directly over grid cells
@@ -1353,14 +1380,15 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                         float integral = integrate_cell_3d(integration_method, eval);
                         integral *= cellSize_x * cellSize_y * cellSize_z;
-                        total_weight += integral;
+                        float w = wj * integral;
+                        total_weight += w;
 
                         int base_idx   = an * stride_x + bn * stride_y + cn * stride_z;
                         int weight_idx = an * weight_stride_x + bn * weight_stride_y + cn * weight_stride_z;
 
                         base_indices.push_back(base_idx);
                         weight_indices.push_back(weight_idx);
-                        integrals.push_back(integral);
+                        integrals.push_back(w);
                     }
                 }
             }
@@ -1371,10 +1399,10 @@ void anisotropic_kernel_deposition_3d_cpp(
             // SECOND PASS: deposit once (corrected)
             const size_t count = integrals.size();
             for (size_t i = 0; i < count; ++i) {
-                float w = integrals[i] * correction;
+                float w_corr = integrals[i] * correction;
 
-                accumulate_fields(fields, base_indices[i], particle, num_fields, w, parallel);
-                accumulate_weight(weights, weight_indices[i], w, parallel);
+                accumulate_fields(fields, base_indices[i], particle, num_fields, w_corr, parallel);
+                accumulate_weight(weights, weight_indices[i], w_corr, parallel);
             }
         }
     });

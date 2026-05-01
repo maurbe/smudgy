@@ -6,7 +6,7 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 
-from .core import backend as backend
+from .core.backend import _call_backend
 from .core.kernels import get_kernel
 from .smooth import SmoothingInfo
 from .utils import (
@@ -27,7 +27,7 @@ class PointCloud:
     def __init__(
         self,
         positions: npt.NDArray[np.floating],
-        weights: npt.NDArray[np.floating],
+        weights: npt.NDArray[np.floating] | None = None,
         boxsize: float | Sequence[float] | None = None,
         verbose: bool = True,
     ) -> None:
@@ -37,8 +37,8 @@ class PointCloud:
         ----------
         positions : npt.NDArray[np.floating]
             Particle positions, shape (N, D).
-        weights : npt.NDArray[np.floating]
-            Particle weights (e.g. masses), shape (N,).
+        weights : npt.NDArray[np.floating] | None
+            Particle weights (e.g. masses), shape (N,). If None, uniform weights are used.
         boxsize : float or Sequence[float], optional
             Periodic box size(s). If None, no periodicity is used.
         verbose : bool, default True
@@ -49,9 +49,13 @@ class PointCloud:
         assert (
             self.dim == 2 or self.dim == 3
         ), f"Particle positions must be of shape (N, 2) or (N, 3) but found {positions.shape}"
-        self.positions = positions
+        self.positions = positions.astype(np.float32)
 
-        self.weights = weights
+        self.weights = (
+            np.ones(self.positions.shape[0], dtype=np.float32)
+            if weights is None
+            else weights.astype(np.float32)
+        )
         assert (
             self.weights.shape[0] == self.positions.shape[0]
         ), f"Shape mismatch: length of weights and positions must be the same but found: {self.weights.shape} and {self.positions.shape}"
@@ -750,6 +754,7 @@ class PointCloud:
             self.smoothing.smoTens_eigvecs[mask],
         )
 
+    """
     def _get_backend_args(
         self,
         method: str,
@@ -758,6 +763,7 @@ class PointCloud:
         h: npt.NDArray[np.floating] | None,
         h_vals: npt.NDArray[np.floating] | None,
         h_vecs: npt.NDArray[np.floating] | None,
+        particle_weights: npt.NDArray[np.floating],
         d_lens: npt.NDArray[np.float32],
         gn: npt.NDArray[np.int32],
         periodic: bool,
@@ -766,8 +772,10 @@ class PointCloud:
         min_evals: int,
         eta_crit: float,
     ) -> tuple:
-        """Construct the argument tuple required by the backends."""
-        common = (pos, fields, d_lens, gn, periodic)
+        Construct the argument tuple required by the backends.
+    """
+    """
+        common = (pos, fields, particle_weights, d_lens, gn, periodic)
         if method == "ngp":
             return common
         if method == "separable":
@@ -782,6 +790,7 @@ class PointCloud:
             + common[2:]
             + (kn, integration, min_evals, eta_crit)
         )
+    """
 
     def deposit_to_grid(
         self,
@@ -857,6 +866,7 @@ class PointCloud:
         d_lens = d_max - d_min
 
         pos_temp = self.positions[mask] - d_min
+        weights_temp = self.weights[mask]
         fields_temp = fields[mask]
 
         h, h_vals, h_vecs = self._prepare_deposition_smoothing(
@@ -872,38 +882,38 @@ class PointCloud:
         )
 
         # Backend execution
-        func = getattr(backend, f"{method}_{dep_dim}d")
+        # func = getattr(backend, f"{method}_{dep_dim}d")
         threads = 0 if omp_threads is None else int(omp_threads)
-
+        func_name = f"{method}_{dep_dim}d"
         if self.verbose:
             print(
-                f"[smudgy] Using {'python' if use_python else 'c++'} backend for {method} deposition ({func.__name__})"
+                f"[smudgy] Using {'python' if use_python else 'c++'} backend for {method} deposition ({func_name})"
             )
 
-        args = self._get_backend_args(
-            method,
-            pos_temp,
-            fields_temp,
-            h,
-            h_vals,
-            h_vecs,
-            d_lens,
-            gn,
-            periodic,
-            kn_res,
-            integration,
-            num_kernel_evaluations_per_axis,
-            eta_crit,
-        )
-
-        fields_grid, weights = func(
-            *args, use_python=use_python, use_openmp=use_openmp, omp_threads=threads
+        fields_grid, weights_grid = _call_backend(
+            func_name=func_name,
+            use_python=use_python,
+            use_openmp=use_openmp,
+            omp_threads=threads,
+            positions=pos_temp,
+            quantities=fields_temp,
+            particle_weights=weights_temp,
+            smoothing_lengths=h,
+            h_vals=h_vals,
+            h_vecs=h_vecs,
+            boxsizes=d_lens,
+            gridnums=gn,
+            periodic=periodic,
+            kernel_name=kn_res,
+            integration_method=integration,
+            num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
+            eta_crit=eta_crit,
         )
 
         # Post-processing
         averaged = list(averaged) if isinstance(averaged, (list, tuple)) else [averaged]
         for i, avg in enumerate(averaged):
             if i < fields_grid.shape[-1] and avg:
-                fields_grid[..., i] /= weights + 1e-10
+                fields_grid[..., i] /= weights_grid + 1e-10
 
-        return (fields_grid, weights) if return_weights else fields_grid
+        return (fields_grid, weights_grid) if return_weights else fields_grid

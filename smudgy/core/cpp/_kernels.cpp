@@ -35,43 +35,35 @@ class TophatRect : public SeparableKernel {
 };
 
 class TSCRect : public SeparableKernel {
-    // Rectangular TSC
-    public:
+public:
     explicit TSCRect(int dim) : SeparableKernel(dim) {}
 
     const float SUPPORT = 1.5f;
-    const float NODE_1 = 0.5f;
-    
-    float evaluate_1d(float q) const override {
-        // 1D TSC kernel on support [-1.5, 1.5]
-        q = std::abs(q);
 
-        if (q >= SUPPORT) return 0.0f;
-        if (q <= NODE_1) {
-            return 0.75f - q * q;
-        } else {
-            float val = SUPPORT - q;
-            return 0.5f * val * val;
-        }
+    float evaluate_1d(float q) const override {
+        float q_abs = std::abs(q);
+        if (q_abs >= SUPPORT) return 0.0f;
+        return 1.0f - q_abs / SUPPORT;
     }
-    
-    float support() const override { return SUPPORT; }
-    
-    float sigma() const override { return 1.0f; }
-    
+
+    float support() const override {
+        return SUPPORT;
+    }
+
+    float sigma() const override {
+        // normalization so that ∫ W dx = 1 in 1D
+        return 1.0f / std::pow(SUPPORT, dim_);
+    }
+
     float F_1d(float q) const override {
-        if (q < 0.0f) return 0.0f;
-        if (q > SUPPORT) q = SUPPORT;
-        
-        float f1d;
-        if (q <= NODE_1) {
-            f1d = 0.75f * q - (1.0f / 3.0f) * q * q * q;
-        } else {
-            f1d = (1.0f / 3.0f) - (1.0f / 6.0f) * (std::pow(SUPPORT - q, 3) - 1.0f);
-        }
-        
-        // For rectangular kernels, F(q) returns the integral from 0 to q along each dimension
-        return f1d;
+        // integral of triangular kernel from 0 to q
+        if (q <= 0.0f) return 0.0f;
+        if (q >= SUPPORT) q = SUPPORT;
+
+        // W(q) = 1 - q/h, h = SUPPORT
+        // F(q) = ∫ (1 - x/h) dx
+        //      = x - x^2/(2h)
+        return q - (q * q) / (2.0f * SUPPORT);
     }
 };
 
@@ -140,73 +132,61 @@ public:
 };
 
 class TSC : public SphericalKernel {
-// spherical triangular-shaped cloud (TSC)
 public:
     explicit TSC(int dim) : SphericalKernel(dim) {}
 
     const float SUPPORT = 1.5f;
-    const float NODE_1 = 0.5f;
-    const float EPS = 1e-6f;
 
     float evaluate(float q) const override {
+        q = std::abs(q);
         if (q >= SUPPORT) return 0.0f;
-        if (q <= NODE_1) {
-            return 0.75f - q * q;
-        } else {
-            float h = SUPPORT - q;
-            return 0.5f * h * h;
-        }
+        return 1.0f - q / SUPPORT;
     }
 
-    float support() const override { return SUPPORT; }
+    float support() const override {
+        return SUPPORT;
+    }
 
     float sigma() const override {
-        if (dim_ == 1) return 1.0f;
-        if (dim_ == 2) return 32.0f / (13.0f * kPi);
-        if (dim_ == 3) return 2.0f / kPi;
-        return 0.0f; // should never reach here
+        // normalization so ∫ W dV = 1
+        if (dim_ == 1) return 1.0f / SUPPORT;
+        if (dim_ == 2) return 3.0f / (kPi * SUPPORT * SUPPORT);
+        if (dim_ == 3) return 3.0f / (kPi * SUPPORT * SUPPORT * SUPPORT);
+        return 0.0f;
     }
 
     float F(float q) const override {
-        if (q < 0.0f) return 0.0f;
-        if (q > SUPPORT) q = SUPPORT;
+        // radial integral of triangle kernel
+        if (q <= 0.0f) return 0.0f;
+        if (q >= SUPPORT) q = SUPPORT;
+
+        float h = SUPPORT;
 
         if (dim_ == 1) {
-            if (q <= NODE_1) {
-                return 0.75f * q - (1.0f / 3.0f) * q * q * q;
-            } else {
-                return std::pow(q, 3) / 6.0f - 3.0f / 4.0f * q * q + 9.0f/8.0f * q;
-            }
+            // ∫ K(q) dq
+            return q - (q * q) / (2.0f * h);
         }
 
         if (dim_ == 2) {
-            if (q <= NODE_1) {
-                return 0.375f * q * q - 0.25f * std::pow(q, 4);
-            } else {
-                return q * q / 2.0f * (0.25f * q * q - q + 1.125f);
-            }
-        }
+            // ∫ K(q) * q dq
+            return 0.5f * q * q - (q * q * q) / (3.0f * h);
+        }   
 
         if (dim_ == 3) {
-            if (q <= NODE_1) {
-                return std::pow(q, 3) * (0.25f - 0.2f * q * q);
-            } else {
-                return std::pow(q, 3) * (0.375f - 0.375f * q + 0.1 * q * q);
-            }
+            // ∫ K(q) * q^2 dq
+            return (1.0f / 3.0f) * q * q * q - (q * q * q * q) / (4.0f * h);
         }
+
         return 0.0f; // should never reach here
     }
 
     float evaluate_integral(float q1, float q2) const override {
-        if (q2 >= SUPPORT) q2 = SUPPORT;
-        if (q1 <= 0.0f) q1 = 0.0f;
+        if (q2 <= 0.0f || q1 >= SUPPORT) return 0.0f;
 
-        if (q1 <= NODE_1 && NODE_1 < q2) {
-            return F(NODE_1) - F(q1) + F(q2) - F(NODE_1 + EPS); // add small epsilon to ensure we evaluate the second part of the integral using the correct kernel shape
-        }
-        else {
-            return F(q2) - F(q1);
-        }
+        q1 = std::max(0.0f, q1);
+        q2 = std::min(SUPPORT, q2);
+
+        return F(q2) - F(q1);
     }
 };
 

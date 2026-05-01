@@ -14,18 +14,21 @@
 namespace py = pybind11;
 
 
-py::tuple _ngp_2d_cpp(py::array_t<float> positions,
-                    py::array_t<float> quantities,
-                    py::array_t<float> boxsizes,
-                    py::array_t<int> gridnums,
-                    bool periodic, 
-                    bool use_openmp, 
-                    int omp_threads
-                )
+py::tuple _ngp_2d_cpp(
+    bool use_openmp,
+    int omp_threads,
+    py::array_t<float> boxsizes,
+    py::array_t<int> gridnums,
+    bool periodic, 
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights
+)
 {
     // Request buffer info
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto boxsizes_buffer = boxsizes.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
@@ -45,27 +48,30 @@ py::tuple _ngp_2d_cpp(py::array_t<float> positions,
     float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
     float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
     // Call backend function (direct loop)
-    ngp_2d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
+    ngp_2d_cpp(positions_pointer, quantities_pointer, particle_weights_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
                periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
     return py::make_tuple(fields, weights);
 }
 
-py::tuple _ngp_3d_cpp(py::array_t<float> positions,
-                    py::array_t<float> quantities,
-                    py::array_t<float> boxsizes,
-                    py::array_t<int> gridnums,
-                    bool periodic,
-                    bool use_openmp, 
-                    int omp_threads
-                )
+py::tuple _ngp_3d_cpp(
+    bool use_openmp, 
+    int omp_threads,
+    py::array_t<float> boxsizes,
+    py::array_t<int> gridnums,
+    bool periodic,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights
+)
 {
     // Request buffer info
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto boxsizes_buffer = boxsizes.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
@@ -86,9 +92,10 @@ py::tuple _ngp_3d_cpp(py::array_t<float> positions,
     float* positions_pointer = static_cast<float*>(positions_buffer.ptr);
     float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
 
     // Call backend function (direct loop)
-    ngp_3d_cpp(positions_pointer, quantities_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
+    ngp_3d_cpp(positions_pointer, quantities_pointer, particle_weights_pointer, num_particles, num_fields, boxsizes_pointer, gridnums_pointer,
                periodic, use_openmp, omp_threads, fields_pointer, weights_pointer);
 
     // Return numpy arrays
@@ -96,22 +103,24 @@ py::tuple _ngp_3d_cpp(py::array_t<float> positions,
 }
 
 py::tuple _separable_2d_cpp(
-    py::array_t<float> positions,
-    py::array_t<float> quantities,
-    py::array_t<float> smoothing_lengths,
+    bool use_openmp, 
+    int omp_threads,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    const std::string& kernel_name,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights,
+    py::array_t<float> smoothing_lengths,
     const std::string& integration_method,
-    bool use_openmp, 
-    int omp_threads
+    const std::string& kernel_name
 )
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
     auto boxsizes_buffer = boxsizes.request();
     auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
@@ -131,11 +140,13 @@ py::tuple _separable_2d_cpp(
     float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
     float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
-
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
+    
     separable_kernel_deposition_2d_cpp(
         positions_pointer,
         quantities_pointer,
         smoothing_lengths_pointer,
+        particle_weights_pointer,
         num_particles,
         num_fields,
         boxsizes_pointer,
@@ -153,22 +164,24 @@ py::tuple _separable_2d_cpp(
 }
 
 py::tuple _separable_3d_cpp(
-    py::array_t<float> positions,
-    py::array_t<float> quantities,
-    py::array_t<float> smoothing_lengths,
+    bool use_openmp, 
+    int omp_threads,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    const std::string& kernel_name,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights,
+    py::array_t<float> smoothing_lengths,
     const std::string& integration_method,
-    bool use_openmp, 
-    int omp_threads
+    const std::string& kernel_name
 )
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
     auto boxsizes_buffer = boxsizes.request();
     auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
@@ -189,11 +202,13 @@ py::tuple _separable_3d_cpp(
     float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
     float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
 
     separable_kernel_deposition_3d_cpp(
         positions_pointer,
         quantities_pointer,
         smoothing_lengths_pointer,
+        particle_weights_pointer,
         num_particles,
         num_fields,
         boxsizes_pointer,
@@ -211,23 +226,26 @@ py::tuple _separable_3d_cpp(
 }
 
 py::tuple _isotropic_2d_cpp(
-    py::array_t<float> positions,
-    py::array_t<float> quantities,
-    py::array_t<float> smoothing_lengths,
+    bool use_openmp, 
+    int omp_threads,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    const std::string& kernel_name,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights,
+    py::array_t<float> smoothing_lengths,
     const std::string& integration_method,
+    const std::string& kernel_name,
     int num_kernel_evaluations_per_axis,
-    float eta_critical,
-    bool use_openmp, 
-    int omp_threads)
+    float eta_critical
+)
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
     auto boxsizes_buffer = boxsizes.request();
     auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
@@ -247,11 +265,13 @@ py::tuple _isotropic_2d_cpp(
     float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
     float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
 
     isotropic_kernel_deposition_2d_cpp(
         positions_pointer,
         quantities_pointer,
         smoothing_lengths_pointer,
+        particle_weights_pointer,
         num_particles,
         num_fields,
         boxsizes_pointer,
@@ -271,22 +291,26 @@ py::tuple _isotropic_2d_cpp(
 }
 
 py::tuple _isotropic_3d_cpp(
-    py::array_t<float> positions,
-    py::array_t<float> quantities,
-    py::array_t<float> smoothing_lengths,
+    bool use_openmp, 
+    int omp_threads,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    const std::string& kernel_name,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights,
+    py::array_t<float> smoothing_lengths,
     const std::string& integration_method,
+    const std::string& kernel_name,
     int num_kernel_evaluations_per_axis,
-    float eta_critical,
-    bool use_openmp, int omp_threads)
+    float eta_critical
+)
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
     auto boxsizes_buffer = boxsizes.request();
     auto smoothing_lengths_buffer = smoothing_lengths.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
@@ -307,11 +331,13 @@ py::tuple _isotropic_3d_cpp(
     float* quantities_pointer = static_cast<float*>(quantities_buffer.ptr);
     float* smoothing_lengths_pointer = static_cast<float*>(smoothing_lengths_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
 
     isotropic_kernel_deposition_3d_cpp(
         positions_pointer,
         quantities_pointer,
         smoothing_lengths_pointer,
+        particle_weights_pointer,
         num_particles,
         num_fields,
         boxsizes_pointer,
@@ -331,24 +357,28 @@ py::tuple _isotropic_3d_cpp(
 }
 
 py::tuple _anisotropic_2d_cpp(
-    py::array_t<float> positions,
-    py::array_t<float> quantities,
-    py::array_t<float> smoothing_tensor_eigvecs,
-    py::array_t<float> smoothing_tensor_eigvals,
+    bool use_openmp, 
+    int omp_threads,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    const std::string& kernel_name,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights,
+    py::array_t<float> smoothing_tensor_eigvecs,
+    py::array_t<float> smoothing_tensor_eigvals,
     const std::string& integration_method,
+    const std::string& kernel_name,
     int num_kernel_evaluations_per_axis,
-    float eta_critical,
-    bool use_openmp, int omp_threads)
+    float eta_critical
+)
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
     auto boxsizes_buffer = boxsizes.request();
     auto smoothing_tensor_eigvecs_buffer = smoothing_tensor_eigvecs.request();
     auto smoothing_tensor_eigvals_buffer = smoothing_tensor_eigvals.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
@@ -369,12 +399,14 @@ py::tuple _anisotropic_2d_cpp(
     float* smoothing_tensor_eigvecs_pointer = static_cast<float*>(smoothing_tensor_eigvecs_buffer.ptr);
     float* smoothing_tensor_eigvals_pointer = static_cast<float*>(smoothing_tensor_eigvals_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
 
     anisotropic_kernel_deposition_2d_cpp(
         positions_pointer,
         quantities_pointer,
         smoothing_tensor_eigvecs_pointer,
         smoothing_tensor_eigvals_pointer,
+        particle_weights_pointer,
         num_particles,
         num_fields,
         boxsizes_pointer,
@@ -394,24 +426,28 @@ py::tuple _anisotropic_2d_cpp(
 }
 
 py::tuple _anisotropic_3d_cpp(
-    py::array_t<float> positions,
-    py::array_t<float> quantities,
-    py::array_t<float> smoothing_tensor_eigvecs,
-    py::array_t<float> smoothing_tensor_eigvals,
+    bool use_openmp, 
+    int omp_threads,
     py::array_t<float> boxsizes,
     py::array_t<int> gridnums,
     bool periodic,
-    const std::string& kernel_name,
+    py::array_t<float> positions,
+    py::array_t<float> quantities,
+    py::array_t<float> particle_weights,
+    py::array_t<float> smoothing_tensor_eigvecs,
+    py::array_t<float> smoothing_tensor_eigvals,
     const std::string& integration_method,
+    const std::string& kernel_name,
     int num_kernel_evaluations_per_axis,
-    float eta_critical,
-    bool use_openmp, int omp_threads)
+    float eta_critical
+)
 {
     auto positions_buffer = positions.request();
     auto quantities_buffer = quantities.request();
     auto boxsizes_buffer = boxsizes.request();
     auto smoothing_tensor_eigvecs_buffer = smoothing_tensor_eigvecs.request();
     auto smoothing_tensor_eigvals_buffer = smoothing_tensor_eigvals.request();
+    auto particle_weights_buffer = particle_weights.request();
     auto gridnums_buffer = gridnums.request();
     const int* gridnums_pointer = static_cast<int*>(gridnums_buffer.ptr);
 
@@ -433,12 +469,14 @@ py::tuple _anisotropic_3d_cpp(
     float* smoothing_tensor_eigvecs_pointer = static_cast<float*>(smoothing_tensor_eigvecs_buffer.ptr);
     float* smoothing_tensor_eigvals_pointer = static_cast<float*>(smoothing_tensor_eigvals_buffer.ptr);
     float* boxsizes_pointer = static_cast<float*>(boxsizes_buffer.ptr);
+    float* particle_weights_pointer = static_cast<float*>(particle_weights_buffer.ptr);
 
     anisotropic_kernel_deposition_3d_cpp(
         positions_pointer,
         quantities_pointer,
         smoothing_tensor_eigvecs_pointer,
         smoothing_tensor_eigvals_pointer,
+        particle_weights_pointer,
         num_particles,
         num_fields,
         boxsizes_pointer,
@@ -582,20 +620,22 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 2)
-            Particle positions, where ``N`` is the number of particles.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (2,)
             Domain size per axis.
         gridnums : array_like, shape (2,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
+        positions : numpy.ndarray, shape (N, 2)
+            Particle positions, where ``N`` is the number of particles.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
 
         Returns
         -------
@@ -604,13 +644,14 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy)
             Weight sum per cell.
         )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("positions"), 
+        py::arg("quantities"), 
+        py::arg("particle_weights"));
 
     m.def("_ngp_3d_cpp", &_ngp_3d_cpp, 
         R"doc(
@@ -618,20 +659,22 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions, where ``N`` is the number of particles.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (3,)
             Domain size per axis.
         gridnums : array_like, shape (3,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
+        positions : numpy.ndarray, shape (N, 3)
+            Particle positions, where ``N`` is the number of particles.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
 
         Returns
         -------
@@ -640,13 +683,14 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy, Gz)
             Weight sum per cell.
         )doc",
-        py::arg("positions"), 
-        py::arg("quantities"), 
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("positions"), 
+        py::arg("quantities"), 
+        py::arg("particle_weights"));
 
     m.def("_separable_2d_cpp", &_separable_2d_cpp,
         R"doc(
@@ -654,26 +698,28 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N, 2)
-            Smoothing lengths per particle and axis.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (2,)
             Domain size per axis.
         gridnums : array_like, shape (2,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
+        positions : numpy.ndarray, shape (N, 2)
+            Particle positions.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
+        smoothing_lengths : numpy.ndarray, shape (N, 2)
+            Smoothing lengths per particle and axis.
+        integration_method : str
+            Integration method (``"midpoint"``, ``"trapezoidal"`, or ``"simpson"``).
         kernel_name : str
             Kernel name.
-        integration_method : str
-            Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
 
         Returns
         -------
@@ -682,16 +728,17 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy)
             Weight sum per cell.
         )doc",
-        py::arg("positions"),
-        py::arg("quantities"),
-        py::arg("smoothing_lengths"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("kernel_name"),
+        py::arg("positions"),
+        py::arg("quantities"),
+        py::arg("particle_weights"),
+        py::arg("smoothing_lengths"),
         py::arg("integration_method"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("kernel_name"));
 
     m.def("_separable_3d_cpp", &_separable_3d_cpp,
         R"doc(
@@ -699,26 +746,28 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N, 3)
-            Smoothing lengths per particle and axis.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (3,)
             Domain size per axis.
         gridnums : array_like, shape (3,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
+        positions : numpy.ndarray, shape (N, 3)
+            Particle positions.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
+        smoothing_lengths : numpy.ndarray, shape (N, 3)
+            Smoothing lengths per particle and axis.
+        integration_method : str
+            Integration method (``"midpoint"``, ``"trapezoidal"`, or ``"simpson"``).
         kernel_name : str
             Kernel name.
-        integration_method : str
-            Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
 
         Returns
         -------
@@ -727,16 +776,17 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy, Gz)
             Weight sum per cell.
         )doc",
-        py::arg("positions"),
-        py::arg("quantities"),
-        py::arg("smoothing_lengths"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("kernel_name"),
+        py::arg("positions"),
+        py::arg("quantities"),
+        py::arg("particle_weights"),
+        py::arg("smoothing_lengths"),
         py::arg("integration_method"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("kernel_name"));
 
     m.def("_isotropic_2d_cpp", &_isotropic_2d_cpp,
         R"doc(
@@ -744,30 +794,32 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N,)
-            Smoothing lengths per particle.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (2,)
             Domain size per axis.
         gridnums : array_like, shape (2,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
-        kernel_name : str
-            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
+        positions : numpy.ndarray, shape (N, 2)
+            Particle positions.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
+        smoothing_lengths : numpy.ndarray, shape (N,)
+            Smoothing lengths per particle.
         integration_method : str
-            Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+            Integration method (``"midpoint"``, ``"trapezoidal"`, or ``"simpson"``).
+        kernel_name : str
+            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"`, ``"quintic_spline"`, ``"wendland_c2"``).
         num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
         eta_critical : float
             Anti-aliasing threshold to switch from sampled to full numerical quadrature.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
 
         Returns
         -------
@@ -776,18 +828,19 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy)
             Weight sum per cell.
         )doc",
-        py::arg("positions"),
-        py::arg("quantities"),
-        py::arg("smoothing_lengths"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("kernel_name"),
+        py::arg("positions"),
+        py::arg("quantities"),
+        py::arg("particle_weights"),
+        py::arg("smoothing_lengths"),
         py::arg("integration_method"),
+        py::arg("kernel_name"),
         py::arg("num_kernel_evaluations_per_axis"),
-        py::arg("eta_critical"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("eta_critical"));
 
     m.def("_isotropic_3d_cpp", &_isotropic_3d_cpp,
         R"doc(
@@ -795,30 +848,32 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_lengths : numpy.ndarray, shape (N,)
-            Smoothing lengths per particle.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (3,)
             Domain size per axis.
         gridnums : array_like, shape (3,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
-        kernel_name : str
-            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
+        positions : numpy.ndarray, shape (N, 3)
+            Particle positions.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
+        smoothing_lengths : numpy.ndarray, shape (N,)
+            Smoothing lengths per particle.
         integration_method : str
-            Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+            Integration method (``"midpoint"``, ``"trapezoidal"`, or ``"simpson"``).
+        kernel_name : str
+            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"`, ``"quintic_spline"`, ``"wendland_c2"``).
         num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
         eta_critical : float
             Anti-aliasing threshold to switch from sampled to full numerical quadrature.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
 
         Returns
         -------
@@ -827,18 +882,19 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy, Gz)
             Weight sum per cell.
         )doc",
-        py::arg("positions"),
-        py::arg("quantities"),
-        py::arg("smoothing_lengths"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("kernel_name"),
+        py::arg("positions"),
+        py::arg("quantities"),
+        py::arg("particle_weights"),
+        py::arg("smoothing_lengths"),
         py::arg("integration_method"),
+        py::arg("kernel_name"),
         py::arg("num_kernel_evaluations_per_axis"),
-        py::arg("eta_critical"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("eta_critical"));
 
     m.def("_anisotropic_2d_cpp", &_anisotropic_2d_cpp,
         R"doc(
@@ -846,32 +902,34 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 2)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 2, 2)
-            Eigenvectors of the smoothing tensor per particle.
-        smoothing_tensor_eigvals : numpy.ndarray, shape (N, 2)
-            Eigenvalues of the smoothing tensor per particle.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (2,)
             Domain size per axis.
         gridnums : array_like, shape (2,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
-        kernel_name : str
-            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
+        positions : numpy.ndarray, shape (N, 2)
+            Particle positions.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
+        smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 2, 2)
+            Eigenvectors of the smoothing tensor per particle.
+        smoothing_tensor_eigvals : numpy.ndarray, shape (N, 2)
+            Eigenvalues of the smoothing tensor per particle.
         integration_method : str
-            Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+            Integration method (``"midpoint"``, ``"trapezoidal"`, or ``"simpson"``).
+        kernel_name : str
+            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"`, ``"quintic_spline"`, ``"wendland_c2"``).
         num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
         eta_critical : float
             Anti-aliasing threshold to switch from sampled to full numerical quadrature.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
 
         Returns
         -------
@@ -880,19 +938,20 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy)
             Weight sum per cell.
         )doc",
-        py::arg("positions"),
-        py::arg("quantities"),
-        py::arg("smoothing_tensor_eigvecs"),
-        py::arg("smoothing_tensor_eigvals"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("kernel_name"),
+        py::arg("positions"),
+        py::arg("quantities"),
+        py::arg("particle_weights"),
+        py::arg("smoothing_tensor_eigvecs"),
+        py::arg("smoothing_tensor_eigvals"),
         py::arg("integration_method"),
+        py::arg("kernel_name"),
         py::arg("num_kernel_evaluations_per_axis"),
-        py::arg("eta_critical"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("eta_critical"));
 
     m.def("_anisotropic_3d_cpp", &_anisotropic_3d_cpp,
         R"doc(
@@ -900,32 +959,34 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
 
         Parameters
         ----------
-        positions : numpy.ndarray, shape (N, 3)
-            Particle positions.
-        quantities : numpy.ndarray, shape (N, F)
-            Per-particle fields to deposit.
-        smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 3, 3)
-            Eigenvectors of the smoothing tensor per particle.
-        smoothing_tensor_eigvals : numpy.ndarray, shape (N, 3)
-            Eigenvalues of the smoothing tensor per particle.
+        use_openmp : bool
+            Enable OpenMP parallelism.
+        omp_threads : int
+            Number of OpenMP threads (0 uses the default).
         boxsizes : array_like, shape (3,)
             Domain size per axis.
         gridnums : array_like, shape (3,)
             Number of grid cells per axis.
         periodic : bool
             Periodic boundaries.
-        kernel_name : str
-            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"``, ``"quintic_spline"``, ``"wendland_c2"``).
+        positions : numpy.ndarray, shape (N, 3)
+            Particle positions.
+        quantities : numpy.ndarray, shape (N, F)
+            Per-particle fields to deposit.
+        particle_weights : numpy.ndarray, shape (N,)
+            Per-particle weights (e.g., masses) to use during deposition.
+        smoothing_tensor_eigvecs : numpy.ndarray, shape (N, 3, 3)
+            Eigenvectors of the smoothing tensor per particle.
+        smoothing_tensor_eigvals : numpy.ndarray, shape (N, 3)
+            Eigenvalues of the smoothing tensor per particle.
         integration_method : str
-            Integration method (``"midpoint"``, ``"trapezoidal"``, or ``"simpson"``).
+            Integration method (``"midpoint"``, ``"trapezoidal"`, or ``"simpson"``).
+        kernel_name : str
+            Kernel name (e.g., ``"gaussian"``, ``"cubic_spline"`, ``"quintic_spline"`, ``"wendland_c2"``).
         num_kernel_evaluations_per_axis : int
             Minimum kernel samples per axis and per particle.
         eta_critical : float
             Anti-aliasing threshold to switch from sampled to full numerical quadrature.
-        use_openmp : bool
-            Enable OpenMP parallelism.
-        omp_threads : int
-            Number of OpenMP threads (0 uses the default).
 
         Returns
         -------
@@ -934,17 +995,18 @@ PYBIND11_MODULE(_cpp_functions_ext, m) {
         weights : numpy.ndarray, shape (Gx, Gy, Gz)
             Weight sum per cell.
         )doc",
-        py::arg("positions"),
-        py::arg("quantities"),
-        py::arg("smoothing_tensor_eigvecs"),
-        py::arg("smoothing_tensor_eigvals"),
+        py::arg("use_openmp"),
+        py::arg("omp_threads"),
         py::arg("boxsizes"),
         py::arg("gridnums"),
         py::arg("periodic"),
-        py::arg("kernel_name"),
+        py::arg("positions"),
+        py::arg("quantities"),
+        py::arg("particle_weights"),
+        py::arg("smoothing_tensor_eigvecs"),
+        py::arg("smoothing_tensor_eigvals"),
         py::arg("integration_method"),
+        py::arg("kernel_name"),
         py::arg("num_kernel_evaluations_per_axis"),
-        py::arg("eta_critical"),
-        py::arg("use_openmp"),
-        py::arg("omp_threads"));
+        py::arg("eta_critical"));
 }

@@ -21,7 +21,7 @@ def check_openmp() -> bool:
 
 
 def compute_kernel_integral(
-    kernel_name: str, dim: int, min_kernel_evaluations_per_axis: int = None
+    kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int = None
 ) -> bool:
     """Check whether the kernel integral sums to 1."""
     from .core import _cpp_functions as cppfunc
@@ -30,7 +30,7 @@ def compute_kernel_integral(
         return cppfunc.compute_total_integral_separable(kernel_name, dim)
     else:
         return cppfunc.compute_total_integral_spherical(
-            kernel_name, dim, min_kernel_evaluations_per_axis
+            kernel_name, dim, num_kernel_evaluations_per_axis
         )
 
 
