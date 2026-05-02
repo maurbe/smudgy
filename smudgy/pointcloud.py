@@ -717,11 +717,6 @@ class PointCloud:
         if not adaptive:
             spacing = d_lens / gn
             if method == "separable":
-                # here we need to return the smoothing lengths corresponding to the support of the kernel?
-                # for CIC = spacing * 0.5 = spacing * support
-                # for TSC = spacing * 1.5 = spacing * support
-                # get the support factor from the kernel properties
-                # factor = get_kernel(kn, dim=self.dim).support
                 return (
                     np.repeat((spacing * 1.0)[np.newaxis, :], num_p, axis=0).astype(
                         np.float32
@@ -729,6 +724,7 @@ class PointCloud:
                     None,
                     None,
                 )
+            # for isotropic we average the spacing across all dimensions
             return np.full(num_p, np.mean(spacing) / 2.0, dtype=np.float32), None, None
 
         self._check_smoothing_computed(method if method != "separable" else "isotropic")
@@ -754,44 +750,6 @@ class PointCloud:
             self.smoothing.smoTens_eigvecs[mask],
         )
 
-    """
-    def _get_backend_args(
-        self,
-        method: str,
-        pos: npt.NDArray[np.floating],
-        fields: npt.NDArray[np.floating],
-        h: npt.NDArray[np.floating] | None,
-        h_vals: npt.NDArray[np.floating] | None,
-        h_vecs: npt.NDArray[np.floating] | None,
-        particle_weights: npt.NDArray[np.floating],
-        d_lens: npt.NDArray[np.float32],
-        gn: npt.NDArray[np.int32],
-        periodic: bool,
-        kn: str,
-        integration: str,
-        min_evals: int,
-        eta_crit: float,
-    ) -> tuple:
-        Construct the argument tuple required by the backends.
-    """
-    """
-        common = (pos, fields, particle_weights, d_lens, gn, periodic)
-        if method == "ngp":
-            return common
-        if method == "separable":
-            return common[:2] + (h,) + common[2:] + (kn, integration)
-        if method == "isotropic":
-            return (
-                common[:2] + (h,) + common[2:] + (kn, integration, min_evals, eta_crit)
-            )
-        return (
-            common[:2]
-            + (h_vecs, h_vals)
-            + common[2:]
-            + (kn, integration, min_evals, eta_crit)
-        )
-    """
-
     def deposit_to_grid(
         self,
         fields: npt.ArrayLike | str | list[str],
@@ -802,7 +760,7 @@ class PointCloud:
         structure: Structure | None = None,
         adaptive: bool = False,
         plane_projection: str | None = None,
-        integration: str = "midpoint",
+        integration_method: str = "midpoint",
         num_kernel_evaluations_per_axis: int = 8,
         eta_crit: float = 1.0,
         return_weights: bool = False,
@@ -833,7 +791,7 @@ class PointCloud:
             Whether to use adaptive smoothing from the instance.
         plane_projection : str, optional
             Projection plane ('xy', 'yz', or 'zx') for 3D to 2D deposition.
-        integration : str, default 'midpoint'
+        integration_method : str, default 'midpoint'
             Kernel integration method.
         num_kernel_evaluations_per_axis : int, default 8
             Resolution for kernel integration.
@@ -882,7 +840,6 @@ class PointCloud:
         )
 
         # Backend execution
-        # func = getattr(backend, f"{method}_{dep_dim}d")
         threads = 0 if omp_threads is None else int(omp_threads)
         func_name = f"{method}_{dep_dim}d"
         if self.verbose:
@@ -905,7 +862,7 @@ class PointCloud:
             gridnums=gn,
             periodic=periodic,
             kernel_name=kn_res,
-            integration_method=integration,
+            integration_method=integration_method,
             num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
             eta_crit=eta_crit,
         )

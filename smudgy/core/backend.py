@@ -82,43 +82,43 @@ def _call_backend(
         ]
     else:
         # prepare the correct arguments for the selected backend function
-        global_params = [use_openmp, omp_threads, boxsizes, gridnums, periodic]
-        shared_params = [positions, quantities, particle_weights]
-        kernel_params = [integration_method, kernel_name]
-        aliasing_params = [num_kernel_evaluations_per_axis, eta_crit]
+        params_global = [use_openmp, omp_threads, boxsizes, gridnums, periodic]
+        params_shared = [positions, quantities, particle_weights]
+        params_kernel = [integration_method, kernel_name]
+        params_aliasing = [num_kernel_evaluations_per_axis, eta_crit]
 
-        ngp_params = global_params + shared_params
-        sep_params = global_params + shared_params + [smoothing_lengths] + kernel_params
+        ngp_params = params_global + params_shared
+        sep_params = params_global + params_shared + [smoothing_lengths] + params_kernel
         iso_params = (
-            global_params
-            + shared_params
+            params_global
+            + params_shared
             + [smoothing_lengths]
-            + kernel_params
-            + aliasing_params
+            + params_kernel
+            + params_aliasing
         )
         aso_params = (
-            global_params
-            + shared_params
+            params_global
+            + params_shared
             + [h_vecs, h_vals]
-            + kernel_params
-            + aliasing_params
+            + params_kernel
+            + params_aliasing
         )
 
         if func_name.startswith("ngp"):
-            kwargs_ordered = ngp_params
+            args_ordered = ngp_params
         elif func_name.startswith("separable"):
-            kwargs_ordered = sep_params
+            args_ordered = sep_params
         elif func_name.startswith("isotropic"):
-            kwargs_ordered = iso_params
+            args_ordered = iso_params
         elif func_name.startswith("anisotropic"):
-            kwargs_ordered = aso_params
+            args_ordered = aso_params
         else:
             raise ValueError(
                 f"Unknown function name '{func_name}' for cpp backend call."
             )
 
-    print(f"Calling : {func_name}")
+    #print(f"Calling : {func_name}")
     backend = _select_backend(use_python)
     backend_func_name = f"_{func_name}"
     func: Callable[..., Any] = getattr(backend, backend_func_name)
-    return func(*kwargs_ordered)
+    return func(*args_ordered)

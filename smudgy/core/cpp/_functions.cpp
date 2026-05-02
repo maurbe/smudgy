@@ -765,9 +765,9 @@ void isotropic_kernel_deposition_3d_cpp(
     // set up the kernel and cache integral samples
     auto kernel = create_spherical_kernel(kernel_name, 3);
     SphericalKernel* kernel_ptr = kernel.get();
+    const float kernel_support = kernel->support();
     const auto kernel_samples = build_kernel_sample_grid(*kernel, num_kernel_evaluations_per_axis);
     const int num_samples = kernel_samples.count;
-    const float kernel_support = kernel->support();
 
     // extract boxsize parameters
     const float boxsize_x = boxsizes[0];
@@ -1078,13 +1078,13 @@ void anisotropic_kernel_deposition_2d_cpp(
             for (int s = 0; s < num_samples; ++s) {
 
                 // kernel sample positions and mapping to physical space
-                float x = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[2 * s + 0])
+                float x_sample = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[2 * s + 0])
                                       + evecs[2] * (evals_phys[1] * kernel_samples.coords[2 * s + 1]);
-                float y = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[2 * s + 0])
+                float y_sample = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[2 * s + 0])
                                       + evecs[3] * (evals_phys[1] * kernel_samples.coords[2 * s + 1]);
 
-                auto ix = cell_index_from_pos(x, boxsize_x, gridnum_x, periodic);
-                auto iy = cell_index_from_pos(y, boxsize_y, gridnum_y, periodic);
+                auto ix = cell_index_from_pos(x_sample, boxsize_x, gridnum_x, periodic);
+                auto iy = cell_index_from_pos(y_sample, boxsize_y, gridnum_y, periodic);
                 if (!ix || !iy) continue;
 
                 // gather the kernel sample integral (fraction)
@@ -1218,7 +1218,7 @@ void anisotropic_kernel_deposition_3d_cpp(
     const float cellSize_y_inv = 1.0f / cellSize_y;
     const float cellSize_z_inv = 1.0f / cellSize_z;
 
-    // precompute max kernel support in cell units for clipping ( if periodic)
+    // precompute max kernel support in cell units for clipping (if periodic)
     float max_support_x = 0.5f * boxsize_x / kernel_support;
     float max_support_y = 0.5f * boxsize_y / kernel_support;
     float max_support_z = 0.5f * boxsize_z / kernel_support;
@@ -1310,19 +1310,19 @@ void anisotropic_kernel_deposition_3d_cpp(
             for (int s = 0; s < num_samples; ++s) {
 
                 // kernel sample positions and mapping to physical space
-                float x_phys = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
+                float x_sample = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
                                       + evecs[3] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
                                       + evecs[6] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
-                float y_phys = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
+                float y_sample = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
                                       + evecs[4] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
                                       + evecs[7] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
-                float z_phys = z_phys + evecs[2] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
+                float z_sample = z_phys + evecs[2] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
                                       + evecs[5] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
                                       + evecs[8] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
 
-                auto ix = cell_index_from_pos(x_phys, boxsize_x, gridnum_x, periodic);
-                auto iy = cell_index_from_pos(y_phys, boxsize_y, gridnum_y, periodic);
-                auto iz = cell_index_from_pos(z_phys, boxsize_z, gridnum_z, periodic);
+                auto ix = cell_index_from_pos(x_sample, boxsize_x, gridnum_x, periodic);
+                auto iy = cell_index_from_pos(y_sample, boxsize_y, gridnum_y, periodic);
+                auto iz = cell_index_from_pos(z_sample, boxsize_z, gridnum_z, periodic);
                 if (!ix || !iy || !iz) continue;
 
                 // gather the kernel sample integral (fraction)
