@@ -165,3 +165,51 @@ def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
 
     """
     return create_grid_nd(n_cells, boxsize, dim=3)
+
+
+def grid_lines(edges, nx, ny=None, include_edges=True):
+    """Create 2D grid lines for plotting.
+
+    Parameters
+    ----------
+    edges
+        Tuple of (xmin, xmax, ymin, ymax) defining the rectangular domain.
+    nx
+        Number of vertical lines to draw.
+    ny
+        Number of horizontal lines to draw. If None, defaults to nx.
+    include_edges
+        If True, lines include the edges (using np.linspace); if False, lines are interior-only (exclude endpoints).
+
+    Returns
+    -------
+    tuple
+        (vlines, hlines, (xmin, xmax, ymin, ymax)) where vlines and hlines are 1D arrays of line positions.
+
+    """
+    if ny is None:
+        ny = nx
+    xmin, xmax, ymin, ymax = edges
+    nx = int(nx)
+    ny = int(ny)
+    if nx < 0 or ny < 0:
+        raise ValueError("nx/ny must be non-negative")
+
+    def _gen(a, b, M):
+        if M <= 0:
+            return np.array([], dtype=float)
+        if include_edges:
+            return np.linspace(a, b, M + 1)
+        # interior-only: place M lines strictly inside (exclude endpoints)
+        if M == 1:
+            return np.array([(a + b) / 2.0])
+        return np.linspace(a, b, M + 1)[1:-1]
+
+    vlines = _gen(xmin, xmax, nx)
+    hlines = _gen(ymin, ymax, ny)
+
+    return (
+        vlines,
+        hlines,
+        (ymin, ymax, xmin, xmax),
+    )  # switched order here is correct for plotting

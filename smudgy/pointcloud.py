@@ -253,7 +253,7 @@ class PointCloud:
             self._set_structure(structure)
         return self
 
-    def build_tree(
+    def _build_tree(
         self,
         positions: npt.NDArray[np.floating],
         boxsize: float | Sequence[float] | None = None,
@@ -276,7 +276,7 @@ class PointCloud:
         if self.smoothing.tree is None:
             if self.verbose:
                 print("[smudgy] Building kd-tree from particle positions")
-            self.build_tree(self.positions, boxsize=self.boxsize)
+            self._build_tree(self.positions, boxsize=self.boxsize)
         return self.smoothing.tree
 
     def compute_smoothing(
@@ -419,32 +419,64 @@ class PointCloud:
                 smoTens_eigvecs, dtype=np.float32
             )
 
-    def add_field(self, name: str, values: npt.ArrayLike) -> None:
-        """Add a custom field to the PointCloud instance.
+    def add_fields(
+        self, names: str | list[str], values: npt.ArrayLike | list[npt.ArrayLike]
+    ) -> None:
+        """Add one or multiple custom fields to the PointCloud instance.
 
         Parameters
         ----------
-        name : str
-            Name of the field to add.
-        values : npt.ArrayLike
-            Array of shape (N,) or (N, num_components) with field values.
+        names : str or list of str
+            Name(s) of the field(s) to add.
+        values : array_like or list of array_like
+            Field values. Each array must have shape (N,) or (N, num_components).
 
         """
+        # --- Case 1: multiple fields ---
+        if isinstance(names, (list, tuple)) or isinstance(values, (list, tuple)):
+            if not (
+                isinstance(names, (list, tuple)) and isinstance(values, (list, tuple))
+            ):
+                raise ValueError(
+                    "If passing multiple fields, both 'names' and 'values' must be lists/tuples."
+                )
+
+            if len(names) != len(values):
+                raise ValueError("'names' and 'values' must have the same length.")
+
+            for name, val in zip(names, values):
+                self.add_fields(name, val)  # recursive call
+
+            return
+
+        # --- Case 2: single field ---
+        name = names
+        values_arr = np.asarray(values, dtype=np.float32)
+
         if hasattr(self, name):
             print(f"Overwriting existing attribute '{name}' on PointCloud instance.")
-        values_arr = np.asarray(values, dtype=np.float32)
+
         self._validate_shape(values_arr, name)
         setattr(self, name, values_arr)
 
-    def delete_field(self, name: str) -> None:
-        """Delete a custom field from the PointCloud instance.
+    def delete_fields(self, names: str | list[str]) -> None:
+        """Delete one or multiple custom fields from the PointCloud instance.
 
         Parameters
         ----------
-        name : str
-            Name of the field to delete.
+        names : str or list of str
+            Name(s) of the field(s) to delete.
 
         """
+        # --- Case 1: multiple fields ---
+        if isinstance(names, (list, tuple)):
+            for name in names:
+                self.delete_fields(name)  # recursive call
+            return
+
+        # --- Case 2: single field ---
+        name = names
+
         if hasattr(self, name):
             delattr(self, name)
         else:
@@ -761,7 +793,7 @@ class PointCloud:
         adaptive: bool = False,
         plane_projection: str | None = None,
         integration_method: str = "midpoint",
-        num_kernel_evaluations_per_axis: int = 8,
+        num_kernel_evaluations_per_axis: int = 4,
         eta_crit: float = 1.0,
         return_weights: bool = False,
         use_python: bool = False,
@@ -793,7 +825,7 @@ class PointCloud:
             Projection plane ('xy', 'yz', or 'zx') for 3D to 2D deposition.
         integration_method : str, default 'midpoint'
             Kernel integration method.
-        num_kernel_evaluations_per_axis : int, default 8
+        num_kernel_evaluations_per_axis : int, default 4
             Resolution for kernel integration.
         eta_crit : float, default 1.0
             Anti-aliasing threshold to switch from sampled to full numerical quadrature.

@@ -4,14 +4,17 @@
 
     quickstart
     install
+    overview
 
 .. toctree::
     :caption: Tutorials
     :maxdepth: 1
 
     usage
-    tutorials_basic
-    tutorials_advanced
+    tutorial_structures
+    tutorial_kernels
+    tutorial_interpolation
+    tutorial_deposition
 
 
 .. toctree::

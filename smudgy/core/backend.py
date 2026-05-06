@@ -72,7 +72,7 @@ def _call_backend(
         )
 
     if use_python:
-        kwargs_ordered = [
+        args_ordered = [
             positions,
             quantities,
             particle_weights,
@@ -117,7 +117,7 @@ def _call_backend(
                 f"Unknown function name '{func_name}' for cpp backend call."
             )
 
-    #print(f"Calling : {func_name}")
+    # print(f"Calling : {func_name}")
     backend = _select_backend(use_python)
     backend_func_name = f"_{func_name}"
     func: Callable[..., Any] = getattr(backend, backend_func_name)

@@ -640,7 +640,7 @@ void isotropic_kernel_deposition_2d_cpp(
         int total_cells = num_cells_x * num_cells_y;
 
         // compute eta
-        float eta = std::min({hsm_phys / cellSize_x, hsm_phys / cellSize_y});
+        float eta = std::min({hsm_phys * cellSize_x_inv, hsm_phys * cellSize_y_inv});
 
         // if the number of cells is small, use the cached kernel samples to evaluate the kernel at each sample point
         if (eta < eta_crit) {
@@ -852,7 +852,7 @@ void isotropic_kernel_deposition_3d_cpp(
         int total_cells = num_cells_x * num_cells_y * num_cells_z;
 
         // compute eta
-        float eta = std::min({hsm_phys / cellSize_x, hsm_phys / cellSize_y, hsm_phys / cellSize_z});
+        float eta = std::min({hsm_phys * cellSize_x_inv, hsm_phys * cellSize_y_inv, hsm_phys * cellSize_z_inv});
 
         // follow anti-aliasing strategy
         if (eta < eta_crit) {
@@ -1038,7 +1038,7 @@ void anisotropic_kernel_deposition_2d_cpp(
                 evals_phys[1] *= scale;
             }
         }
-        float evals_cell[2] = { evals_phys[0] / cellSize_x, evals_phys[1] / cellSize_y };
+        float evals_cell[2] = { evals_phys[0] * cellSize_x_inv, evals_phys[1] * cellSize_y_inv };
         float detH = evals_phys[0] * evals_phys[1];
         float kernel_prefactor = kernel_ptr->sigma() / detH;
         
@@ -1259,7 +1259,7 @@ void anisotropic_kernel_deposition_3d_cpp(
                 evals_phys[2] *= scale;
             }
         }
-        float evals_cell[3] = { evals_phys[0] / cellSize_x, evals_phys[1] / cellSize_y, evals_phys[2] / cellSize_z };
+        float evals_cell[3] = { evals_phys[0] * cellSize_x_inv, evals_phys[1] * cellSize_y_inv, evals_phys[2] * cellSize_z_inv };
         float detH = evals_phys[0] * evals_phys[1] * evals_phys[2];
         float kernel_prefactor = kernel_ptr->sigma() / detH;
 
@@ -1311,14 +1311,14 @@ void anisotropic_kernel_deposition_3d_cpp(
 
                 // kernel sample positions and mapping to physical space
                 float x_sample = x_phys + evecs[0] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
-                                      + evecs[3] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
-                                      + evecs[6] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
+                                        + evecs[3] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
+                                        + evecs[6] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
                 float y_sample = y_phys + evecs[1] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
-                                      + evecs[4] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
-                                      + evecs[7] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
+                                        + evecs[4] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
+                                        + evecs[7] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
                 float z_sample = z_phys + evecs[2] * (evals_phys[0] * kernel_samples.coords[3 * s + 0])
-                                      + evecs[5] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
-                                      + evecs[8] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
+                                        + evecs[5] * (evals_phys[1] * kernel_samples.coords[3 * s + 1])
+                                        + evecs[8] * (evals_phys[2] * kernel_samples.coords[3 * s + 2]);
 
                 auto ix = cell_index_from_pos(x_sample, boxsize_x, gridnum_x, periodic);
                 auto iy = cell_index_from_pos(y_sample, boxsize_y, gridnum_y, periodic);

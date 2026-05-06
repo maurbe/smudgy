@@ -71,7 +71,7 @@ def test_weight_conservation(
         structure=structure,
         adaptive=False,
         num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
-        integration=integral_method,
+        integration_method=integral_method,
         return_weights=True,
     )
 

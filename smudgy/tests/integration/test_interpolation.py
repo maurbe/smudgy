@@ -17,6 +17,7 @@ def test_interpolation_modes(pbc, structure, quantity):
     """Test interpolation workflow for different PBC, methods, and quantities."""
     np.random.seed(42)
     N = 1000
+    M = 10
     D = 3
     kernel_name = "cubic_spline"
 
@@ -35,14 +36,20 @@ def test_interpolation_modes(pbc, structure, quantity):
     pc.compute_smoothing()
     pc.compute_density()
 
+    query_positions = np.random.uniform(0, 1, size=(M, D))
+
     # Interpolation
     if quantity == "field":
-        result = pc.interpolate_fields(values, positions, compute_gradients=False)
-        assert result.shape[0] == N
+        result = pc.interpolate_fields(
+            fields=values, query_positions=query_positions, compute_gradients=False
+        )
+        assert result.shape[0] == M
         assert np.all(np.isfinite(result))
 
     else:  # gradient
-        result = pc.interpolate_gradient_fields(values, positions)
-        assert result.shape[0] == N
+        result = pc.interpolate_gradient_fields(
+            fields=values, query_positions=query_positions
+        )
+        assert result.shape[0] == M
         assert result.shape[-1] == D
         assert np.all(np.isfinite(result))

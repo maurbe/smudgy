@@ -21,9 +21,11 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
+    "sphinx.ext.mathjax",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
+    # "myst_parser", already included in myst_nb
 ]
 
 napoleon_google_docstring = False
@@ -32,14 +34,20 @@ napoleon_numpy_docstring = True
 autodoc_member_order = "bysource"
 # autodoc_typehints = "description"
 
+nb_execution_mode = "off"
+nb_execution_in_temp = True
+
 source_suffix = {
     ".rst": "restructuredtext",
-    ".md": "markdown",
+    # ".md": "markdown",
+    ".md": "myst-nb",
 }
 
 myst_enable_extensions = [
     "colon_fence",
     "html_image",
+    "dollarmath",
+    "amsmath",
 ]
 
 templates_path = ["_templates"]

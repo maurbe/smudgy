@@ -31,8 +31,7 @@ def test_deposition_grid_adaptive(structure):
         averaged=averaged,
         gridnums=gridnums,
         kernel_name="gaussian",
-        integration="midpoint",
-        num_kernel_evaluations_per_axis=4,
+        integration_method="midpoint",
         return_weights=True,
     )
     fields, weights = result
