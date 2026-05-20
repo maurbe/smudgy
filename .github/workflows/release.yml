@@ -23,7 +23,7 @@ jobs:
           - os: windows-latest
 
           # macOS Intel
-          - os: macos-15-intel
+          - os: macos-13
             arch: x86_64
 
           # macOS Apple Silicon
@@ -78,17 +78,20 @@ jobs:
           # Build CPython wheels only
           CIBW_BUILD: "cp3*-*"
 
-          # Architecture selection
+          # IMPORTANT: explicitly disable universal2
+          CIBW_ARCHS: auto
+
+          # Per-platform architectures
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
           CIBW_ARCHS_WINDOWS: "AMD64"
 
           # Deployment target
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
-          # Skip musllinux unless needed
+          # Skip musllinux
           CIBW_SKIP: "*-musllinux_*"
 
-          # macOS wheel repair
+          # Repair command
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             delocate-wheel
             --require-archs {delocate_archs}
