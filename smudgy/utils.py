@@ -253,8 +253,8 @@ def compute_smoTens(
 
 def project_smoTens_to_2d(
     h_tensor: npt.ArrayLike,
-    plane: str | None = None,
-    basis: tuple[Sequence[float], Sequence[float]] | None = None,
+    plane: list[int] | None = None,
+    basis: list[Sequence[float], Sequence[float]] | None = None,
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
     """Project 3D smoothing tensors onto a 2D plane.
 
@@ -263,10 +263,10 @@ def project_smoTens_to_2d(
     h_tensor
             Array of shape ``(N, 3, 3)`` with 3D smoothing tensors.
     plane
-            Projection plane: ``"xy"``, ``"xz"``, or ``"yz"``.
+            Indices of the axes to project onto for 3D to 2D deposition.
             Mutually exclusive with ``basis``.
     basis
-            2-tuple of basis vectors ``(e1, e2)`` spanning the projection plane.
+            List of basis vectors ``(e1, e2)`` spanning the projection plane.
             Each vector should be array-like of length 3.
             Mutually exclusive with ``plane``.
 
@@ -281,7 +281,7 @@ def project_smoTens_to_2d(
     ------
     ValueError
             If neither or both of ``plane`` and ``basis`` are provided.
-            If ``plane`` is not one of the allowed values.
+            If ``plane`` is not one of the allowed values or types or does not have length 2.
             If ``basis`` is not a 2-tuple of 3D vectors.
 
     """
@@ -293,20 +293,22 @@ def project_smoTens_to_2d(
             "'plane' and 'basis' are mutually exclusive, only provide one of the two"
         )
 
+    # Validate that plane is either list or array of length 2 with valid indices
+    if plane is not None:
+        if not (isinstance(plane, (list, np.ndarray)) and len(plane) == 2):
+            raise ValueError("'plane' must be a list or array of length 2")
+        if any(p not in [0, 1, 2] for p in plane):
+            raise ValueError("'plane' indices must be in the range [0, 2]")
+
     # Define projection basis vectors
     if basis is not None:
         if len(basis) != 2:
             raise ValueError("'basis' must be a 2-tuple of vectors")
         e1, e2 = basis
     else:
-        if plane == "xy":
-            e1, e2 = [1, 0, 0], [0, 1, 0]
-        elif plane == "xz":
-            e1, e2 = [1, 0, 0], [0, 0, 1]
-        elif plane == "yz":
-            e1, e2 = [0, 1, 0], [0, 0, 1]
-        else:
-            raise ValueError("'plane' must be one of 'xy', 'xz', or 'yz'")
+        unit_vectors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        e1 = unit_vectors[plane[0]]
+        e2 = unit_vectors[plane[1]]
 
     # Compute projected tensors: (P @ H^-1 @ P^T)^-1
     projection_matrix = np.array([e1, e2], dtype="float32")  # (2, 3)

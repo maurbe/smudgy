@@ -78,7 +78,9 @@ def test_compute_smoTens_2d():
 def test_project_smoTens_to_2d_plane():
     """Test projecting 3D tensors to 2D using standard planes."""
     h_tensor = np.random.rand(5, 3, 3)
-    h_tensor_2d, eigvals, eigvecs = project_smoTens_to_2d(h_tensor=h_tensor, plane="xy")
+    h_tensor_2d, eigvals, eigvecs = project_smoTens_to_2d(
+        h_tensor=h_tensor, plane=[0, 1]
+    )
     assert h_tensor_2d.shape == (5, 2, 2)
     assert eigvals.shape == (5, 2)
     assert eigvecs.shape == (5, 2, 2)
@@ -102,8 +104,4 @@ def test_project_smoTens_to_2d_error():
     with pytest.raises(ValueError):
         project_smoTens_to_2d(h_tensor=h_tensor)
     with pytest.raises(ValueError):
-        project_smoTens_to_2d(h_tensor=h_tensor, plane="abc")
-    with pytest.raises(ValueError):
-        project_smoTens_to_2d(
-            h_tensor=h_tensor, plane="xy", basis=([1, 0, 0], [0, 1, 0])
-        )
+        project_smoTens_to_2d(h_tensor=h_tensor, plane=[0, 1, 2])

@@ -3,165 +3,124 @@
 import numpy as np
 import pytest
 
-from smudgy.core.kernels import get_kernel
+from smudgy.core.kernels import KERNEL_CLASSES, get_kernel
 
 
 def get_all_kernel_names():
-    """Return a list of all kernel names available in the Kernel class."""
-    return [
-        "tophat_separable",
-        "tsc_separable",
-        "gaussian_separable",
-        "tophat",
-        "tsc",
-        "lucy",
-        "gaussian",
-        "cubic_spline",
-        "quintic_spline",
-        "wendland_c2",
-        "wendland_c4",
-        "wendland_c6",
-    ]
+    """Return a list of all kernel names available in the KERNEL_CLASSES."""
+    return list(KERNEL_CLASSES.keys())
 
 
-def random_posdef_tensors(N, D):
-    """Generate N random positive-definite (D, D) tensors."""
-    A = np.random.randn(N, D, D)
-    return np.matmul(A, np.transpose(A, (0, 2, 1))) + D * np.eye(D)[None, :, :]
+def random_posdef_tensors(M, K, D):
+    """Generate (M, K, D, D) random positive-definite tensors."""
+    A = np.random.randn(M, K, D, D)
+    # Generate A * A.T + D*I to ensure positive definiteness
+    out = np.matmul(A, np.transpose(A, (0, 1, 3, 2))) + D * np.eye(D)[None, None, :, :]
+    return out
 
 
+@pytest.fixture
+def test_data():
+    """Fixture to provide consistent test dimensions."""
+    return {"M": 4, "K": 5}
+
+
+@pytest.mark.parametrize("name", get_all_kernel_names())
 @pytest.mark.parametrize("dim", [1, 2, 3])
-def test_kernel_anisotropic_output_shape_and_type(dim):
-    """Test that evaluate returns correct shape and dtype for anisotropic kernels."""
-    kernel_names = get_all_kernel_names()
-    for name in kernel_names:
+class TestKernelProperties:
+    """Test suite for kernel evaluation and gradients across all types and dimensions."""
+
+    def test_isotropic_evaluate_shape_and_dtype(self, name, dim, test_data):
+        """Test isotropic evaluation shapes and dtypes."""
         k = get_kernel(name, dim)
-        N, K = 4, 5
-        r_ij = np.random.randn(N, K, dim)
-        H = random_posdef_tensors(N, dim)
-        out = k.evaluate(r_ij, h=H)
-        assert out.shape == (N, K)
-        assert np.issubdtype(out.dtype, np.floating)
+        M, K = test_data["M"], test_data["K"]
 
+        r_ij = np.random.randn(M, K)
+        h = np.random.uniform(
+            0.1, 1.0, size=M
+        )  # 1D array should be normalized to (M, K)
 
-@pytest.mark.parametrize("dim", [1, 2, 3])
-def test_kernel_anisotropic_output_nonnegative(dim):
-    """Test that all anisotropic kernel evaluations are >= 0 for all kernels and dims."""
-    kernel_names = get_all_kernel_names()
-    for name in kernel_names:
-        k = get_kernel(name, dim)
-        N, K = 4, 5
-        r_ij = np.random.randn(N, K, dim)
-        H = random_posdef_tensors(N, dim)
-        out = k.evaluate(r_ij, h=H)
-        assert np.all(out >= 0), f"Kernel {name} dim {dim} produced negative values!"
-
-
-@pytest.mark.parametrize("dim", [1, 2, 3])
-def test_kernel_anisotropic_dtype_preserved(dim):
-    """Test that output dtype matches input dtype (float32/float64) for anisotropic kernels."""
-    kernel_names = get_all_kernel_names()
-    for name in kernel_names:
-        k = get_kernel(name, dim)
-        N, K = 3, 4
         for dtype in (np.float32, np.float64):
-            r_ij = np.random.randn(N, K, dim).astype(dtype)
-            H = random_posdef_tensors(N, dim).astype(dtype)
-            out = k.evaluate(r_ij, h=H)
+            out = k.evaluate(r_ij.astype(dtype), h.astype(dtype), mode="isotropic")
+            assert out.shape == (M, K)
             assert out.dtype == dtype
+            assert np.all(out >= 0), f"Kernel {name} produced negative values"
 
-
-@pytest.mark.parametrize("dim", [1, 2, 3])
-def test_kernel_anisotropic_symmetry(dim):
-    """Test that anisotropic kernel is symmetric: W(r, H) == W(-r, H) for all kernels."""
-    kernel_names = get_all_kernel_names()
-    for name in kernel_names:
+    def test_anisotropic_evaluate_shape_and_dtype(self, name, dim, test_data):
+        """Test anisotropic evaluation shapes and dtypes."""
         k = get_kernel(name, dim)
-        N, K = 16, 8
-        r_ij = np.random.randn(N, K, dim)
-        H = random_posdef_tensors(N, dim)
-        out1 = k.evaluate(r_ij, h=H)
-        out2 = k.evaluate(-r_ij, h=H)
-        # Use tolerance for near-zero values
-        np.testing.assert_allclose(out1, out2, rtol=1e-4, atol=1e-6)
+        M, K = test_data["M"], test_data["K"]
 
+        r_ij = np.random.randn(M, K, dim)
+        H = random_posdef_tensors(M, K, dim)
 
-def test_kernel_evaluate_output_shape_and_type():
-    """Test that evaluate returns correct shape and dtype for all kernels and dims."""
-    kernel_names = get_all_kernel_names()
-    for dim in (1, 2, 3):
-        for name in kernel_names:
-            k = get_kernel(name, dim)
-            # Create input data: (N, K) for isotropic
-            N, K = 4, 5
-            r_ij = np.abs(np.random.randn(N, K))  # distances >= 0
-            h = np.abs(np.random.rand(N)) + 0.1  # avoid zero
-            out = k.evaluate(r_ij, h=h)
-            assert out.shape == (N, K)
-            assert np.issubdtype(out.dtype, np.floating)
-
-
-def test_kernel_evaluate_output_nonnegative():
-    """Test that all kernel evaluations are >= 0 for all kernels and dims."""
-    kernel_names = get_all_kernel_names()
-    for dim in (1, 2, 3):
-        for name in kernel_names:
-            k = get_kernel(name, dim)
-            N, K = 4, 5
-            r_ij = np.abs(np.random.randn(N, K))
-            h = np.abs(np.random.rand(N)) + 0.1
-            out = k.evaluate(r_ij, h=h)
+        for dtype in (np.float32, np.float64):
+            out = k.evaluate(r_ij.astype(dtype), h=H.astype(dtype), mode="anisotropic")
+            assert out.shape == (M, K)
+            assert out.dtype == dtype
             assert np.all(
                 out >= 0
-            ), f"Kernel {name} dim {dim} produced negative values!"
+            ), f"Kernel {name} produced negative values (anisotropic)"
+
+    def test_evaluate_symmetry(self, name, dim, test_data):
+        """Test W(r) == W(-r) for both isotropic and anisotropic cases."""
+        k = get_kernel(name, dim)
+        M, K = test_data["M"], test_data["K"]
+
+        # Isotropic
+        r_ij = np.random.randn(M, K)
+        h = np.ones(M)
+        out1 = k.evaluate(r_ij, h, mode="isotropic")
+        out2 = k.evaluate(-r_ij, h, mode="isotropic")
+        np.testing.assert_allclose(out1, out2, rtol=1e-5, atol=1e-8)
+
+        # Anisotropic
+        r_vec = np.random.randn(M, K, dim)
+        H = random_posdef_tensors(M, K, dim)
+        out_a1 = k.evaluate(r_vec, h=H, mode="anisotropic")
+        out_a2 = k.evaluate(-r_vec, h=H, mode="anisotropic")
+        np.testing.assert_allclose(out_a1, out_a2, rtol=1e-5, atol=1e-8)
+
+    def test_compact_support(self, name, dim, test_data):
+        """Test that kernels return 0 outside their support radius."""
+        k = get_kernel(name, dim)
+        M, K = test_data["M"], test_data["K"]
+        # r > support * h
+        r_ij = np.full((M, K), (k.support + 1.0))
+        h = np.ones((M, K))
+        print(r_ij, h)
+        out = k.evaluate(r_ij, h, mode="isotropic")
+        assert np.all(out == 0), f"Kernel {name} did not return 0 outside support"
+
+    def test_gradient_shape_and_dtype(self, name, dim, test_data):
+        """Test evaluation of kernel gradients."""
+        k = get_kernel(name, dim)
+        M, K = test_data["M"], test_data["K"]
+
+        r_vec = np.random.randn(M, K, dim)
+
+        # Isotropic gradient
+        h_iso = np.random.uniform(0.1, 1.0, size=(M, K))
+        for dtype in (np.float32, np.float64):
+            grad = k.evaluate_gradient(
+                r_vec.astype(dtype), h_iso.astype(dtype), mode="isotropic"
+            )
+            assert grad.shape == (M, K, dim)
+            assert grad.dtype == dtype
+
+        # Anisotropic gradient
+        H_aniso = random_posdef_tensors(M, K, dim)
+        for dtype in (np.float32, np.float64):
+            grad = k.evaluate_gradient(
+                r_vec.astype(dtype), H_aniso.astype(dtype), mode="anisotropic"
+            )
+            assert grad.shape == (M, K, dim)
+            assert grad.dtype == dtype
 
 
-def test_kernel_evaluate_dtype_preserved():
-    """Test that output dtype matches input dtype (float32/float64)."""
-    kernel_names = get_all_kernel_names()
-    for dim in (1, 2, 3):
-        for name in kernel_names:
-            k = get_kernel(name, dim)
-            N, K = 3, 4
-            for dtype in (np.float32, np.float64):
-                r_ij = np.abs(np.random.randn(N, K)).astype(dtype)
-                h = (np.abs(np.random.rand(N)) + 0.1).astype(dtype)
-                out = k.evaluate(r_ij, h=h)
-                assert out.dtype == dtype
-
-
-def test_kernel_evaluate_zero_for_large_r():
-    """Test that kernels with compact support return 0 for r > support radius."""
-    # Only applies to kernels with compact support (not gaussian/super_gaussian)
-    compact_kernels = [
-        "cubic_spline",
-        "quintic_spline",
-        "wendland_c2",
-        "wendland_c4",
-        "wendland_c6",
-    ]
-    for dim in (1, 2, 3):
-        for name in compact_kernels:
-            k = get_kernel(name, dim)
-            N, K = 2, 3
-            h = np.ones(N)
-            # r_ij > 3h for all entries
-            r_ij = np.full((N, K), 4.0)
-            out = k.evaluate(r_ij, h=h)
-            assert np.all(
-                out == 0
-            ), f"Kernel {name} dim {dim} did not return 0 for r > support."
-
-
-def test_kernel_evaluate_symmetry():
-    """Test that kernel is symmetric: W(r) == W(-r) for isotropic kernels."""
-    kernel_names = get_all_kernel_names()
-    for dim in (1, 2, 3):
-        for name in kernel_names:
-            k = get_kernel(name, dim)
-            N, K = 32, 8
-            r_ij = np.random.randn(N, K)
-            h = np.abs(np.random.rand(N)) + 0.1
-            out1 = k.evaluate(r_ij, h=h)
-            out2 = k.evaluate(-r_ij, h=h)
-            np.testing.assert_allclose(out1, out2)
+def test_invalid_initialization():
+    """Test that BaseKernelClass raises errors for invalid dim."""
+    with pytest.raises(ValueError):
+        get_kernel("cubic_spline", dim=4)
+    with pytest.raises(ValueError):
+        get_kernel("cubic_spline", dim="3")

@@ -29,12 +29,6 @@ class SmoothingInfo:
         Eigenvalues of the smoothing tensors.
     smoTens_eigvecs : np.ndarray
         Eigenvectors of the smoothing tensors.
-    smoTens_projected : np.ndarray
-        Projected smoothing tensors for each particle.
-    smoTens_projected_eigvals : np.ndarray
-        Eigenvalues of the projected smoothing tensors.
-    smoTens_projected_eigvecs : np.ndarray
-        Eigenvectors of the projected smoothing tensors.
     kernel_name : str
         Name of the smoothing kernel used.
     density_iso : np.ndarray
@@ -56,9 +50,9 @@ class SmoothingInfo:
     smoTens_eigvals: np.ndarray = None
     smoTens_eigvecs: np.ndarray = None
 
-    smoTens_projected: np.ndarray = None
-    smoTens_projected_eigvals: np.ndarray = None
-    smoTens_projected_eigvecs: np.ndarray = None
+    # smoTens_projected: np.ndarray = None
+    # smoTens_projected_eigvals: np.ndarray = None
+    # smoTens_projected_eigvecs: np.ndarray = None
 
     kernel_name: str = None
     density_iso: np.ndarray = None

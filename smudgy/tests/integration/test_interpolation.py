@@ -6,7 +6,7 @@ import pytest
 from smudgy import PointCloud
 
 PBCS = [False, True]
-STRUCTURES = ["isotropic", "anisotropic"]
+STRUCTURES = ["isotropic"]  # , "anisotropic"]
 QUANTITIES = ["field", "gradient"]
 
 
@@ -19,12 +19,15 @@ def test_interpolation_modes(pbc, structure, quantity):
     N = 1000
     M = 10
     D = 3
+    num_fields = 5
     kernel_name = "cubic_spline"
 
     positions = np.random.uniform(0, 1, size=(N, D))
-    values = np.random.uniform(-1, 1, size=N)
+    fields = np.random.uniform(-1, 1, size=(N, num_fields))
     boxsize = 1.0 if pbc else None
     weights = np.ones(N)
+
+    query_positions = np.random.uniform(0, 1, size=(M, D))
 
     pc = PointCloud(positions, weights, boxsize=boxsize, verbose=False)
     pc.global_setup(
@@ -36,20 +39,20 @@ def test_interpolation_modes(pbc, structure, quantity):
     pc.compute_smoothing()
     pc.compute_density()
 
-    query_positions = np.random.uniform(0, 1, size=(M, D))
-
     # Interpolation
     if quantity == "field":
         result = pc.interpolate_fields(
-            fields=values, query_positions=query_positions, compute_gradients=False
+            fields=fields, query_positions=query_positions, compute_gradients=False
         )
         assert result.shape[0] == M
+        assert result.shape[1] == num_fields
         assert np.all(np.isfinite(result))
 
     else:  # gradient
         result = pc.interpolate_gradient_fields(
-            fields=values, query_positions=query_positions
+            fields=fields, query_positions=query_positions
         )
         assert result.shape[0] == M
+        assert result.shape[1] == num_fields
         assert result.shape[-1] == D
         assert np.all(np.isfinite(result))

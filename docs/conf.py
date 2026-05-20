@@ -36,6 +36,7 @@ autodoc_member_order = "bysource"
 
 nb_execution_mode = "off"
 nb_execution_in_temp = True
+nb_render_image_options = {"width": "600px", "align": "center"}
 
 source_suffix = {
     ".rst": "restructuredtext",
@@ -53,12 +54,28 @@ myst_enable_extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-html_theme = "furo"
-html_css_files = [
-    "custom.css",
-]
-html_theme_options = {
-    "sidebar_hide_name": True,
-}
-html_static_path = ["_static"]
 # html_logo = "_static/test.png"
+html_theme = "furo"
+html_css_files = ["custom.css",]
+html_static_path = ["_static"]
+html_theme_options = {
+
+    # repository information
+    "source_repository": "https://github.com/maurbe/smudgy/",
+    "source_branch": "main",
+    "source_directory": "docs/",
+    #"edit_button_type": "edit",
+
+    "sidebar_hide_name": True,
+
+       "light_css_variables": {
+           "color-brand-primary": "black",
+           "color-brand-content": "#3352CC",
+
+           "font-stack": "'Roboto', -apple-system, sans-serif",
+           "font-stack--headings": "'Roboto', -apple-system, sans-serif",
+           "font-stack--monospace": "'Roboto Mono', monospace",
+    },
+}
+#pygments_style = "github-light"        # Style for light mode
+#pygments_dark_style = "one-dark"  # Style for dark mode (Furo specific)

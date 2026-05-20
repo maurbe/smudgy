@@ -10,7 +10,7 @@ The primary user object is `PointCloud`, which is initialized with a set of part
 pc = sm.PointCloud(positions=positions, weights=weights, boxsize=boxsize)
 ```
 
-`boxsize` is an important parameter. If **not** provided, the code assumes open boundary conditions. Otherwise, the code uses periodic boundary conditions for all axes. Currently, it is not possible to specify per-axis periodicity. If a single number is provided (e.g. `boxsize=1`), it is used for all dimensions. Otherwise it can be specified per axis,
+`boxsize` is an important parameter. If **not** provided, the code assumes open boundary conditions. Otherwise, the code uses periodic boundary conditions for all axes. Currently, it is not possible to specify per-axis periodicity. If a single number is provided (e.g. `boxsize=1`), it is used for all dimensions. Otherwise it can also be specified per axis,
 
 ```python
 pc = sm.PointCloud(..., boxsize=[1.0, 2.0, 0.5]) # for a 3D periodic box
@@ -28,7 +28,7 @@ The user can choose from a collection of kernels (all support 2D and 3D operatio
 
 + Currently supported structures are: `separable`, `isotropic` and `anisotropic`.
 
-+ All kernels support isotropic and anisotropic structures, but only a subgroup are available for the `separable` structure. See the documentation site on kernels for a detailed overview. 
++ All kernels support `isotropic` and `anisotropic` structures, but only a subgroup are available for the `separable` structure. See the documentation and tutorial sites on kernels for a detailed overview.
 
 + `num_neighbors` refers to the number of neighbor particles to use in computations (e.g. smoothing).
 
@@ -42,25 +42,26 @@ In the context of SPH, particles can be thought of extended structures with an i
 
 ### Tree-based neighbor searches
 
-From the particle positons, `smudgy` constructs a KD-Tree for fast neighbor querying. This is done internally at the first occurence where a neighbor search is conducted. Optionally, users can build a new tree with the utility function `utils.build_kdtree`:
+From the particle positons, `smudgy` constructs a KD-Tree for fast neighbor querying. This is done internally at the first occurence where a neighbor search is necessary. Optionally, users can build a new tree with the utility function `utils.build_kdtree`:
 
 ```python
 from smudgy.utils import build_kdtree
-
 tree = build_kdtree(positions=positions, boxsize=boxsize)
 ```
 
+This can be helpful when oerating with multiple distinct point clouds, e.g. particles groups carrying different labels.
+
 ### Computing smoothing lengths and tensors
 
-With the kd-tree instance, we can now compute the relevant smoothing information that is used in most `smudgy` core operations. Based on the queried nearest neighbors, the code computes the following smoothing quantities based on the selected structure:
+With the KD-tree instance, we can now compute the relevant smoothing information that is used in most `smudgy` core operations. Based on the queried nearest neighbors, the code computes the following smoothing quantities based on the selected structure:
 
 + For `separable` and `isotropic` structures, the smoothing length is equal to the distance to the $n^{\rm th}$ nearest neighbor particle, i.e. $h = \|\mathbf r - \mathbf r_n\|$ where $n$ = `num_neighbors`. For `separable` kernels, the kernel shape is a square where $h$ is used along every axis. In the `isotropic` case, this results in spherically symmetric kernels.
 
 + For `anisotropic` structures, the smoothing length is promoted to a **smoothing tensor** $H$. Instead of a spherical kernel, we now have elliptical (in 2D) or ellipsoidal (in 3D) kernel structures. Using the KD-Tree, the code first identifies a cluster $C$ of nearest neighbors with positions $\mathbf r_j$ and weights $w_j$. Then, with the center of mass $\mathbf r_C$, it estimates the local covariance matrix via
 
-$$\Sigma_C = \frac{\sum_{j=1}^{n} w_j\, (\mathbf r_j- \mathbf r_C)(\mathbf r_j - \mathbf r_C)^{T}}{\sum_j w_j},$$
+    $$\Sigma_C = \frac{\sum_{j=1}^{n} w_j\, (\mathbf r_j- \mathbf r_C)(\mathbf r_j - \mathbf r_C)^{T}}{\sum_j w_j},$$
 
-where $H = \sqrt{\Sigma_C}$. Then, the eigenvalues $h_i$ and -vectors $e_i$ of $H$ represent the smoothing lengths and principal axes of the kernel.
+    where $H = \sqrt{\Sigma_C}$. Then, the eigenvalues $h_i$ and -vectors $e_i$ of $H$ represent the smoothing lengths and principal axes of the kernel.
 
 In `smudgy`, we can compute this informaton via the `compute_smoothing()` method as
 
@@ -75,7 +76,7 @@ pc.compute_smoothing(structure=structure, num_neighbors=num_neighbors)
 The code stores all smoothing results in the internal `smoothing` dataclass argument:
 
 ```python
-# if structure = `separable`, `isotropic`
+# if structure = `separable` or `isotropic`
 h = pc.smoothing.smoLens         # shape = (N,)
 
 # if structure = `anisotropic`
@@ -84,7 +85,7 @@ e = pc.smoothing.smoTens_eigvecs # shape = (N, dim, dim)
 h = pc.smoothing.smoTens_eigvals # shape = (N, dim)
 ```
 
-In case we already have precomputed smoothing lengths or tensors, this information can be set manually via the `set_smoothing()` method.
+In case we already have precomputed smoothing lengths or tensors, this information can also be set manually via the `set_smoothing()` method.
 
 ```python
 pc.set_smoothing(smoLens=my_h)
@@ -93,6 +94,8 @@ pc.set_smoothing(smoTens=my_H,
                  smoTens_eigvecs=my_e, 
                  smoTens_eigvals=my_h)
 ```
+
+Note that in this case a KD-tree instance will still have to be built, when accessing methods that require neighbor particles.
 
 ## Kernels
 
@@ -104,7 +107,7 @@ $$
 W(\mathbf r; h) = \prod_{i=1}^{d} W_{\rm 1D}(x_i; h),
 $$
 
-+ `isotropic` kernels with smoothing length $h$, $\sigma_d$ a dimension‑dependent normalization and $K(q)$ the shape function in normalized coordinates $q$ are defined as
++ `isotropic` kernels with smoothing length $h$, $\sigma_d$ a dimension‑dependent normalization and $K(q)$ the shape function with normalized coordinates $q$ are defined as
 
 $$
 W(\mathbf r; h) = \frac{\sigma_d}{h^{d}}\,K\!\left(q\right), \qquad q=\frac{\|\mathbf r\|}{h},
@@ -133,18 +136,18 @@ pc.compute_density()
 # or 
 pc.compute_density(structure=structure, kernel_name=kernel_name, num_neighbors=num_neighbors)
 
-# if structure = `separable`, `isotropic`
+# if structure = `separable` or `isotropic`
 density = pc.smoothing.density_iso
 
 # if structure = `anisotropic``
 density = pc.smoothing.density_aniso
 ```
 
-This attribute differentiation is done by design, s.t. users can compute the density using different approaches and easily compare the results.
+The density attribute differentiation is done by design, so that users can compute the density using different approaches and easily compare the results. See e.g. the {doc}`this tutorial <../tutorials/deposition/walkthrough>` for a visual comparison.
 
 ### Adding and deleting particle fields
 
-The `PointCloud` instance makes it easy to register additional particle fields (e.g. temperature) that can be accessed as class attributes during later operations. The method to do this is `add_fields` and accepts either a single scalar or vector field or a list of fields and names to register:
+The `PointCloud` instance makes it easy to register additional particle fields that can be accessed as class attributes during later operations. The method to do this is `add_fields` and accepts either a single scalar, array or a list of fields and names to register:
 
 ```python
 temperature = np.ones(N,)
@@ -155,6 +158,7 @@ pc.add_fields(names=['temperature', 'velocity'], fields=[temperature, velocity])
 ```
 
 Every field is set as a class attribute and can be accessed with its name identifier, e.g.
+
 ```python
 temperature = pc.temperature
 ```
@@ -168,7 +172,7 @@ pc.delete_fields(names=['temperature', 'velocity']) # multiple fields
 
 ### Interpolation
 
-Interpolating a particle field at to a new coordinate $\mathbf{x}_i$ follows the standard SPH summation. Given $n$ neighbor particles and their indices $j$, their densities $\rho_j$, weights $w_j$, smoothing lengths $h_j$ or tensors $H_j$ and specific field values $f_j$, the interpolated value at $\mathbf{x}_i$ is
+Interpolating a particle field to a new coordinate $\mathbf{x}_i$ follows the standard SPH summation. Given $n$ neighbor particles and their indices $j$, their densities $\rho_j$, weights $w_j$, smoothing lengths $h_j$ or tensors $H_j$ and specific field values $f_j$, the interpolated value at $\mathbf{x}_i$ is
 
 $$
 f(\mathbf{x}_i) = \sum_{j}^{n} \frac{w_j}{\rho_j} \, f_j \, W\big(\mathbf{x}_i - \mathbf{x}_j;\ h_j \, \text{or} \, H_j \big),
@@ -182,19 +186,22 @@ $$
 $$
 
 In `smudgy` these values can be computed using the `interpolate_fields` by passing the particle field ($f$) and the query positions ($\mathbf{x}_i$),
+
 ```python
 f = np.random.randn(N,)
 f_i = pc.interpolate_fields(fields=f, query_positions=query_positions)
 ```
 
-Similarly, for the gradient fields we either use the `interpolate_gradient_fields`
+Similarly, for the gradient fields we can either call `interpolate_fields(compute_gradients=True)` or use the convenience wrapper `interpolate_gradient_fields`
 
 ```python
 grad_f_i = pc.interpolate_gradient_fields(fields=f, query_positions=query_positions)
 ```
 
-:::{tip}
 To compute gradients we can also use `interpolate_fields(compute_gradients=True)`.
+
+:::{tip}
+If we wish to compute gradients of particle fields at the particle positions themselves, we can omit the `query_positions` argument defaulting to `pc.positions`.
 :::
 
 The method can also process multiple fields which can be passed directly, by attribute or by name:
@@ -205,16 +212,14 @@ multi_f_i = pc.interpolate_fields(fields=[f, self.temperature, 'velocity'])
 
 ### Deposition to structured grids
 
-Grid deposition is a core operation when working with particle data. `smudgy` provides a flexible, modular implementation with a fast C++ backend and optional OpenMP parallelization.
+Grid deposition is a core operation in many modern analysis workflows that involve particle data. `smudgy` provides a flexible, modular implementation with a fast C++ backend and optional OpenMP parallelization.
 
-The goal is to map particle-carried fields onto a regular grid by distributing each particle’s kernel over nearby cells. For a given particle, all grid cells within its kernel support are identified based on its smoothing length (or tensor) and kernel shape.
-
-The contribution to each cell is given by the integral of the kernel over the cell volume. The integration type depends on the on selected structure:
+The code maps particle fields onto a regular grid by integrating each particle’s kernel over all cells within the kernel support. The integration type depends on the on selected structure:
 
 + `separable` → integrals can be computed analytically and are exact
-+ `isotropic` and `anisotropic` → integrals are evaluated using numerical quadrature  
++ `isotropic` and `anisotropic` → integrals are evaluated using numerical quadrature or pre-computed integral samples
 
-Given the particle field values $f_j$, weights $w_j$, the accumulated value in a grid cell $i$ is
+Given the particle field values $f_j$ and weights $w_j$, the accumulated value in a grid cell $i$ is
 
 $$
 f_i = \sum_j w_j \, f_j \int_{\text{cell}_i} W(\mathbf{x} - \mathbf{x}_j)\, d\mathbf{x},
@@ -228,7 +233,7 @@ $$
 
 The figure below illustrates a single particle (black), its kernel (blue), and the grid cells receiving contributions.
 
-```{image} src/kernel_over_grid.png
+```{image} ../src/kernel_over_grid.png
 :alt: Kernel illustration
 :width: 60%
 :align: center
@@ -238,15 +243,15 @@ The central method is `deposit_to_grid`. The most important arguments include:
 
 + `fields`: the fields to deposit. We can pass a single or a list of fields, either directly, by attribute or by name.
 + `averaged`: defines which fields represent averaged and cumulative quantities. E.g. when depositing temperatures we want the average in a cell, while mass is a cumulative quantity.
-+ `gridnums`: numbers of grid cells to use in each spatial dim. If a single number is passed, the code uses this number for every dimension, otherwise, a list of numbers for every axis must be passed.
++ `gridnums`: numbers of grid cells to use in each spatial dimension. If a single number is passed, the code uses this number for every dimension, otherwise, a list of numbers for every axis must be passed.
++ `extent`: if `boxsize` is `None`, this argument must be provided. If provided, deposit particles only within the given extent. Can be used to quickly generate images of subgroups of the cloud.
 
 The following arguments are _optional_ but can be useful in certain situations:
 
-+ `extent`: if provided, deposit only particles within the given extent. Can be used to quickly generate images of subgroups of the cloud.
-+ `plane_projection`: one of ('xy', 'yz', or 'zx'). Useful for projecting 3D particle clouds to 2D and depositing onto a 2D grid.
-+ `return_weights`: whether or not to return the aggregated particle weights in each cell.
-+ `integration_method`: one of ('midpoint', 'trapezoidal', 'simpson'). Determines which numerical quadrature to use when integrating kernels over grid cells. Only relevant for `isotropic` and `anisotropic`, since integrals of `separable` kernels are analytically evaluated.
-+ `eta_crit`: parameter controlling the anti-aliasing strategy.
++ `plane_projection`: list of axes spanning the projection plane. `[0, 1]` → 'xy', `[2, 1]` → 'zy', etc. Useful for projecting 3D particle clouds to 2D and depositing onto a 2D grid.
++ `return_weights`: whether to return the aggregated particle weights in each cell.
++ `integration_method`: one of `'midpoint'`, `'trapezoidal'`, `'simpson'`. Determines which numerical quadrature to use when integrating kernels over grid cells. Only relevant for `isotropic` and `anisotropic`, since integrals of `separable` kernels are analytically evaluated.
++ `eta_crit`: parameter controlling anti-aliasing.
 
 An example workflow may look like the following example. For more detailed workflows refer to the tutorial sections.
 
@@ -268,6 +273,6 @@ fields_grid, weights_grid = pc.deposit_to_grid(  # shapes: (128, 128, 3), (128, 
     **kwargs,
     extent=[boxsize/4, boxsize/2, boxsize/4, boxsize/2]
     structure='anisotropic',
-    plane_projection='xy',
+    plane_projection=[0, 1],
 )
 ```

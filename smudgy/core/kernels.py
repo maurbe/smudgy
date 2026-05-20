@@ -9,7 +9,7 @@ import numpy.typing as npt
 class BaseKernelClass:
     """Base class for SPH kernels."""
 
-    def __init__(self, dim: int = None, support: float = None) -> None:
+    def __init__(self, dim: int, support: float) -> None:
         """Initialize the kernel with spatial dimension and support radius."""
         if not isinstance(dim, int) or dim not in (1, 2, 3):
             raise ValueError(
@@ -20,127 +20,159 @@ class BaseKernelClass:
         self.eps = 1e-7
         self.name = "base_kernel"
 
-    def evaluate(self, r_ij, h) -> npt.NDArray[np.floating]:
-        """Evaluate the kernel function for given pairwise distances and smoothing lengths."""
-        if not isinstance(r_ij, np.ndarray):
-            raise ValueError("r_ij must be a numpy array")
-        if not isinstance(h, np.ndarray):
-            raise ValueError("smoothing lengths must be a numpy array")
-
-        if h.ndim < 3:
-            return self._evaluate_isotropic(r_ij, h).astype(h.dtype)
-        else:
-            return self._evaluate_anisotropic(r_ij, h).astype(h.dtype)
-
-    def evaluate_gradient(self, r_ij_vec, h) -> npt.NDArray[np.floating]:
-        """Evaluate the kernel gradient for given pairwise vector distances and smoothing lengths."""
-        if not isinstance(r_ij_vec, np.ndarray):
-            raise ValueError("r_ij_vec must be a numpy array")
-        if not isinstance(h, np.ndarray):
-            raise ValueError("smoothing lengths must be a numpy array")
-
-        if h.ndim < 3:
-            return self._evaluate_gradient_isotropic(r_ij_vec, h).astype(h.dtype)
-        else:
-            return self._evaluate_gradient_anisotropic(r_ij_vec, h).astype(h.dtype)
-
-    def _evaluate_isotropic(
-        self, r_ij: npt.NDArray[np.floating], h: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-
-        if r_ij.ndim not in (1, 2):
+    def evaluate(self, r_ij, h, mode):
+        """Evaluate the kernel function for given relative positions, smoothing lengths, and mode."""
+        # assert that r_ij is a numpy array of floats with shape (..., dim)
+        if not isinstance(r_ij, np.ndarray) or r_ij.dtype.kind not in "fiu":
             raise ValueError(
-                f"`r_ij` must be of shape (N,) or (N, 1) for isotropic case but found shape {r_ij.shape}"
-            )
-        if h.ndim not in (1, 2):
-            raise ValueError(
-                f"`h` must be of shape (N,) or (N, 1) for isotropic case but found shape {h.shape}"
+                f"`r_ij` must be a numpy array of floats, ints, or unsigned ints, but found type {type(r_ij)} with dtype {getattr(r_ij, 'dtype', None)}"
             )
 
-        h = h[..., None] if h.ndim == 1 else h
-        q = np.abs(r_ij) / h
+        # assert that h is a numpy array of floats
+        if not isinstance(h, np.ndarray) or h.dtype.kind not in "fiu":
+            raise ValueError(
+                f"`h` must be a numpy array of floats, ints, or unsigned ints, but found type {type(h)} with dtype {getattr(h, 'dtype', None)}"
+            )
+
+        if mode in ["separable", "isotropic"]:
+            res = self._evaluate_isotropic(r_ij, h)
+
+        elif mode == "anisotropic":
+            res = self._evaluate_anisotropic(r_ij, h)
+        else:
+            raise ValueError(f"Invalid mode '{mode}'")
+
+        # Cast back to input dtype if it is a floating point type to avoid
+        # promotion to float64 caused by internal constants or sigma values.
+        if r_ij.dtype.kind == "f":
+            return res.astype(r_ij.dtype, copy=False)
+        return res
+
+    def evaluate_gradient(self, r_ij, h, mode):
+        """Evaluate the gradient of the kernel function for given relative positions, smoothing lengths, and mode."""
+        # assert that r_ij is a numpy array of floats with shape (..., dim)
+        if not isinstance(r_ij, np.ndarray) or r_ij.dtype.kind not in "fiu":
+            raise ValueError(
+                f"`r_ij` must be a numpy array of floats, ints, or unsigned ints, but found type {type(r_ij)} with dtype {getattr(r_ij, 'dtype', None)}"
+            )
+
+        # assert that h is a numpy array of floats
+        if not isinstance(h, np.ndarray) or h.dtype.kind not in "fiu":
+            raise ValueError(
+                f"`h` must be a numpy array of floats, ints, or unsigned ints, but found type {type(h)} with dtype {getattr(h, 'dtype', None)}"
+            )
+
+        if mode in ["separable", "isotropic"]:
+            res = self._evaluate_gradient_isotropic(r_ij, h)
+
+        elif mode == "anisotropic":
+            res = self._evaluate_gradient_anisotropic(r_ij, h)
+        else:
+            raise ValueError(f"Invalid mode '{mode}'")
+
+        # Cast back to input dtype if it is a floating point type to avoid
+        # promotion to float64 caused by internal constants or sigma values.
+        if r_ij.dtype.kind == "f":
+            return res.astype(r_ij.dtype, copy=False)
+        return res
+
+    # =========================================================
+    # isotropic
+    # =========================================================
+
+    def _evaluate_isotropic(self, r_ij, h):
+
+        if h.ndim == r_ij.ndim - 1:
+            h = h[..., None]
+
+        q = np.abs(r_ij) / (h + self.eps)
         norm = h**self.dim
+
         return self._kernel_sigma() / norm * self._kernel_values(q)
 
-    def _evaluate_anisotropic(
-        self, r_ij: npt.NDArray[np.floating], H: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
+    def _evaluate_gradient_isotropic(self, r_ij, h):
 
-        if r_ij.ndim != 3:
-            raise ValueError(
-                f"`r_ij` must be of shape (N, M, d) for anisotropic kernels but found shape {r_ij.shape}"
-            )
-        if H.ndim != 3:
-            raise ValueError(
-                f"`H` must be a 3D array of shape (N, D, D) but found shape {H.shape}"
-            )
-        if H.shape[1] != self.dim or H.shape[2] != self.dim:
-            raise ValueError(
-                f"`H` must be (N, D, D) with D=dim but found shape {H.shape}"
-            )
+        h = h[..., None]
 
-        H_inv = np.linalg.inv(H)  # (N, d, d)
-        norm = np.linalg.det(H)  # (N,)
-        xi = np.einsum("mij,mkj->mki", H_inv, r_ij)
-        q = np.linalg.norm(xi, axis=-1)  # (N, M)
-        return self._kernel_sigma() / norm[..., None] * self._kernel_values(q)
+        r_mag = np.linalg.norm(
+            r_ij,
+            axis=-1,
+            keepdims=True,
+        )
 
-    def _evaluate_gradient_isotropic(
-        self,
-        r_ij_vec: npt.NDArray[np.floating],
-        h: npt.NDArray[np.floating],
-    ) -> npt.NDArray[np.floating]:
-        if not isinstance(h, np.ndarray):
-            raise ValueError("smoothing_lengths must be a numpy array if provided")
-        if h.ndim not in (1, 2):
-            raise ValueError("smoothing_lengths must be 1D or 2D array")
-        if r_ij_vec.ndim != 3:
-            raise ValueError("r_ij_vec must be 3D (N, M, d) for isotropic case")
-
-        h = np.asarray(h)[:, None, None] if h.ndim == 1 else h  # (N, 1, 1)
-        r_ij_mag = np.linalg.norm(r_ij_vec, axis=-1)[..., None]  # (N, M, 1)
-        q = r_ij_mag / h  # (N, M, 1)
-        norm = h**self.dim  # (N, 1, 1)
+        q = r_mag / (h + self.eps)
 
         dW_dq = self._kernel_gradient_values(q)
-        dW_dr = dW_dq / h  # (N, M, 1)
+        dW_dr = dW_dq / (h + self.eps)
 
-        # Safe division for when r_ij_mag is zero: set gradient to zero in that case
-        er = np.zeros_like(r_ij_vec)
-        np.divide(r_ij_vec, r_ij_mag, out=er, where=r_ij_mag != 0.0)
-        return self._kernel_sigma() / norm * dW_dr * er  # (N, M, d)
+        er = np.zeros_like(r_ij)
 
-    def _evaluate_gradient_anisotropic(
-        self,
-        r_ij_vec: npt.NDArray[np.floating],
-        H: npt.NDArray[np.floating],
-    ) -> npt.NDArray[np.floating]:
-        assert r_ij_vec.ndim == 3, "For anisotropic kernels, r_ij_vec must be (N, M, d)"
-        assert H.ndim == 3, "Smoothing tensors must be a 3D array of shape (N, D, D)"
-        assert (
-            H.shape[1] == H.shape[2] == self.dim
-        ), "Smoothing tensors must be (N, D, D) with D=dim"
+        np.divide(
+            r_ij,
+            r_mag,
+            out=er,
+            where=r_mag > 0,
+        )
 
-        det_H = np.linalg.det(H)  # (N,)
-        H_inv = np.linalg.inv(H)  # (N, d, d)
-        H_inv_T = np.transpose(H_inv, (0, 2, 1))  # (N, d, d)
+        norm = h**self.dim
 
-        xi = np.einsum("nij,nmj->nmi", H_inv, r_ij_vec)  # (N, M, d)
-        q = np.linalg.norm(xi, axis=-1)[..., None]  # (N, M, 1)
+        return self._kernel_sigma() / norm * dW_dr * er
 
-        dK_dq = self._kernel_gradient_values(q)  # (N, M, 1)
-        grad_q = np.einsum("nij,nmj->nmi", H_inv_T, xi) / (q + self.eps)  # (N, M, d)
-        print("dK_dq", dK_dq.shape, "grad_q", grad_q.shape, "det_H", det_H.shape)
-        return self._kernel_sigma() / det_H[:, None, None] * dK_dq * grad_q
+    # =========================================================
+    # anisotropic
+    # =========================================================
+
+    def _evaluate_anisotropic(self, r_ij, H):
+
+        H_inv = np.linalg.inv(H)
+        det_H = np.linalg.det(H)
+
+        xi = np.einsum(
+            "...ij,...j->...i",
+            H_inv,
+            r_ij,
+        )
+
+        q = np.linalg.norm(xi, axis=-1)
+
+        return self._kernel_sigma() / det_H * self._kernel_values(q)
+
+    def _evaluate_gradient_anisotropic(self, r_ij, H):
+
+        H_inv = np.linalg.inv(H)
+        H_inv_T = np.swapaxes(H_inv, -1, -2)
+        det_H = np.linalg.det(H)
+
+        xi = np.einsum(
+            "...ij,...j->...i",
+            H_inv,
+            r_ij,
+        )
+
+        q = np.linalg.norm(
+            xi,
+            axis=-1,
+            keepdims=True,
+        )
+
+        dK_dq = self._kernel_gradient_values(q)
+
+        grad_q = np.einsum(
+            "...ij,...j->...i",
+            H_inv_T,
+            xi,
+        ) / (q + self.eps)
+
+        return self._kernel_sigma() / det_H[..., None] * dK_dq * grad_q
 
     def _kernel_sigma(self):
-        pass
+        raise NotImplementedError("Must implement _kernel_sigma in subclass")
 
     def _kernel_values(self):
-        pass
+        raise NotImplementedError("Must implement _kernel_values in subclass")
 
     def _kernel_gradient_values(self):
-        pass
+        raise NotImplementedError("Must implement _kernel_gradient_values in subclass")
 
 
 class TophatKernel(BaseKernelClass):
@@ -353,7 +385,7 @@ class CubicSplineKernel(BaseKernelClass):
 
     def __init__(self, dim: int) -> None:
         """Initialize the Cubic spline kernel for the given spatial dimension."""
-        super().__init__(dim=dim)
+        super().__init__(dim=dim, support=1.0)
         self.name = "cubic_spline"
 
     def _kernel_sigma(self) -> float:
@@ -386,7 +418,7 @@ class QuinticSplineKernel(BaseKernelClass):
 
     def __init__(self, dim: int) -> None:
         """Initialize the Quintic spline kernel for the given spatial dimension."""
-        super().__init__(dim=dim)
+        super().__init__(dim=dim, support=3.0)
         self.name = "quintic_spline"
 
     def _kernel_sigma(self) -> float:
@@ -425,7 +457,7 @@ class WendlandC2Kernel(BaseKernelClass):
 
     def __init__(self, dim: int) -> None:
         """Initialize the Wendland C2 kernel for the given spatial dimension."""
-        super().__init__(dim=dim)
+        super().__init__(dim=dim, support=2.0)
         self.name = "wendland_c2"
 
     def _kernel_sigma(self) -> float:
@@ -459,7 +491,7 @@ class WendlandC4Kernel(BaseKernelClass):
 
     def __init__(self, dim: int) -> None:
         """Initialize the Wendland C4 kernel for the given spatial dimension."""
-        super().__init__(dim=dim)
+        super().__init__(dim=dim, support=2.0)
         self.name = "wendland_c4"
 
     def _kernel_sigma(self) -> float:
@@ -498,7 +530,7 @@ class WendlandC6Kernel(BaseKernelClass):
 
     def __init__(self, dim: int) -> None:
         """Initialize the Wendland C6 kernel for the given spatial dimension."""
-        super().__init__(dim=dim)
+        super().__init__(dim=dim, support=2.0)
         self.name = "wendland_c6"
 
     def _kernel_sigma(self) -> float:
@@ -579,9 +611,12 @@ def get_kernel(kernel_name: str, dim: int) -> BaseKernelClass:
             If ``kernel_name`` is not recognized or if ``dim`` is not valid.
 
     """
-    assert (
-        kernel_name in KERNEL_CLASSES
-    ), f"Invalid kernel_name '{kernel_name}'. Must be one of {list(KERNEL_CLASSES.keys())}."
-    assert dim in (1, 2, 3), f"Invalid dim '{dim}'. Must be 1, 2, or 3."
+    if kernel_name not in KERNEL_CLASSES:
+        raise ValueError(
+            f"Invalid kernel_name '{kernel_name}'. Must be one of {list(KERNEL_CLASSES.keys())}."
+        )
+
+    if dim not in (1, 2, 3):
+        raise ValueError(f"Invalid dim '{dim}'. Must be 1, 2, or 3.")
 
     return KERNEL_CLASSES[kernel_name](dim=dim)

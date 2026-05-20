@@ -6,10 +6,10 @@ import pytest
 from smudgy import PointCloud
 
 DIMS = [2, 3]
-STRUCTURE = ["isotropic"]  # , "anisotropic"]
-NUM_NEIGHBORS = [3]  # , 4, 5]
-NUM_KERNEL_EVALUATIONS_PER_AXIS = [2]  # , 3, 4]
-INTEGRAL_METHODS = ["midpoint"]  # , "trapezoidal", "simpson"]
+STRUCTURE = ["isotropic", "anisotropic"]
+NUM_NEIGHBORS = [3]
+NUM_KERNEL_EVALUATIONS_PER_AXIS = [2, 3, 4]
+INTEGRAL_METHODS = ["midpoint", "trapezoidal", "simpson"]
 KERNEL_NAMES = [
     "tophat",
     "tsc",
@@ -28,7 +28,8 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
     """Create a uniform point cloud in [0, 1]^dim with uniform weights."""
     boxsize = 1.0
     num_points = int(1e3)
-    positions = np.random.uniform(0, boxsize - 1e-6, size=(num_points, dim)).astype(
+    eps = 1e-6
+    positions = np.random.uniform(eps, boxsize - eps, size=(num_points, dim)).astype(
         np.float32
     )
     weights = np.ones(num_points, dtype=np.float32)
@@ -69,9 +70,9 @@ def test_weight_conservation(
         gridnums=gridnums,
         kernel_name=kernel_name,
         structure=structure,
-        adaptive=False,
         num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
         integration_method=integral_method,
+        eta_crit=10,  # for anti-aliasing tophat kernel
         return_weights=True,
     )
 

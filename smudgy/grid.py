@@ -13,7 +13,7 @@ BoxInput = float | Sequence[float] | npt.ArrayLike
 CellInput = int | Sequence[int] | npt.ArrayLike
 
 
-def _normalize_boxsize(boxsize: BoxInput, dim: int) -> npt.NDArray[np.floating]:
+def _resolve_boxsize(boxsize: BoxInput, dim: int) -> npt.NDArray[np.floating]:
     """Return per-dimension box lengths given scalar or array-like input.
 
     Parameters
@@ -37,7 +37,7 @@ def _normalize_boxsize(boxsize: BoxInput, dim: int) -> npt.NDArray[np.floating]:
     return box_array
 
 
-def _normalize_cells(n_cells: CellInput, dim: int) -> IntArray:
+def _resolve_ncells(n_cells: CellInput, dim: int) -> IntArray:
     """Return per-dimension integer counts given scalar or array-like input.
 
     Parameters
@@ -79,7 +79,7 @@ def _normalize_cells(n_cells: CellInput, dim: int) -> IntArray:
     return n_cells_full
 
 
-def create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32Array:
+def _create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32Array:
     """Generate N-dimensional grid cell centers.
 
     Parameters
@@ -97,8 +97,8 @@ def create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32Ar
         Float32 array of shape ``(n_cells[0] * ... * n_cells[N-1], N)`` containing cell centers.
 
     """
-    cells_along_axes = _normalize_cells(n_cells, dim)
-    box_lengths = _normalize_boxsize(boxsize, dim)
+    cells_along_axes = _resolve_ncells(n_cells, dim)
+    box_lengths = _resolve_boxsize(boxsize, dim)
     deltas = box_lengths / cells_along_axes
 
     axes = [
@@ -126,7 +126,7 @@ def create_grid_1d(n_cells: int, boxsize: BoxInput) -> Float32Array:
         Float32 array of shape ``(n_cells, 1)`` with cell-center coordinates.
 
     """
-    return create_grid_nd(n_cells, boxsize, dim=1)
+    return _create_grid_nd(n_cells, boxsize, dim=1)
 
 
 def create_grid_2d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
@@ -145,7 +145,7 @@ def create_grid_2d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
         Float32 array of shape ``(n_cells[0] * n_cells[1], 2)`` containing cell centers.
 
     """
-    return create_grid_nd(n_cells, boxsize, dim=2)
+    return _create_grid_nd(n_cells, boxsize, dim=2)
 
 
 def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
@@ -164,7 +164,7 @@ def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
         Float32 array of shape ``(n_cells[0] * n_cells[1] * n_cells[2], 3)`` containing cell centers.
 
     """
-    return create_grid_nd(n_cells, boxsize, dim=3)
+    return _create_grid_nd(n_cells, boxsize, dim=3)
 
 
 def grid_lines(edges, nx, ny=None, include_edges=True):

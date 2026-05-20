@@ -15,6 +15,7 @@ from .utils import (
     compute_smoTens,
     coordinate_difference_with_pbc,
     project_smoTens_to_2d,
+    query_kdtree,
 )
 
 STRUCTURES = ("separable", "isotropic", "anisotropic")
@@ -194,9 +195,8 @@ class PointCloud:
 
     def _resolve_fields(
         self, fields: npt.ArrayLike | str | list[str]
-    ) -> npt.NDArray[np.floating]:
-        """Resolve the input 'fields' to a single (N, total_components) ndarray."""
-        # Normalize input to a list
+    ) -> tuple[npt.NDArray[np.floating], list[int]]:
+        """Resolve fields to a single array and return component counts."""
         if isinstance(fields, (str, np.ndarray)):
             fields = [fields]
         elif not isinstance(fields, list):
@@ -205,15 +205,19 @@ class PointCloud:
             )
 
         arrays = []
+        field_sizes = []
+
         for f in fields:
             arr = getattr(self, f) if isinstance(f, str) else np.asarray(f)
-            arrays.append(np.atleast_2d(arr).T if arr.ndim == 1 else np.atleast_2d(arr))
+            arr = np.atleast_2d(arr).T if arr.ndim == 1 else np.atleast_2d(arr)
 
-        # Validate and concatenate
+            arrays.append(arr)
+            field_sizes.append(arr.shape[1])
+
         for i, arr in enumerate(arrays):
             self._validate_shape(arr, f"field {i}")
 
-        return np.concatenate(arrays, axis=-1)
+        return np.concatenate(arrays, axis=-1), field_sizes
 
     def _validate_shape(self, arr: npt.NDArray[Any], name: str) -> None:
         """Ensure the first dimension of an array matches the number of particles."""
@@ -224,20 +228,20 @@ class PointCloud:
 
     def global_setup(
         self,
+        structure: Structure | None = None,
         kernel_name: str | None = None,
         num_neighbors: int | None = None,
-        structure: Structure | None = None,
     ) -> "PointCloud":
         """Set global parameters for SPH computations.
 
         Parameters
         ----------
+        structure : Structure, optional
+            Smoothing structure ('separable', 'isotropic', or 'anisotropic').
         kernel_name : str, optional
             Name of the SPH kernel to use globally.
         num_neighbors : int, optional
             Number of neighbors for smoothing length computation.
-        structure : Structure, optional
-            Smoothing structure ('separable', 'isotropic', or 'anisotropic').
 
         Returns
         -------
@@ -245,12 +249,20 @@ class PointCloud:
             The current instance for method chaining.
 
         """
-        if kernel_name:
-            self._set_kernel_name(kernel_name)
-        if num_neighbors:
-            self._set_num_neighbors(num_neighbors)
         if structure:
             self._set_structure(structure)
+            if self.verbose:
+                print(f"[smudgy] Set structure globally to '{self.structure}'")
+        if kernel_name:
+            self._set_kernel_name(kernel_name)
+            if self.verbose:
+                print(f"[smudgy] Set kernel globally to '{self.kernel_name}'")
+        if num_neighbors:
+            self._set_num_neighbors(num_neighbors)
+            if self.verbose:
+                print(
+                    f"[smudgy] Set number of neighbors globally to {self.num_neighbors}"
+                )
         return self
 
     def _build_tree(
@@ -345,17 +357,17 @@ class PointCloud:
 
     def _get_rel_coords(
         self,
-        positions: npt.NDArray[np.floating],
         query_positions: npt.NDArray[np.floating],
+        positions: npt.NDArray[np.floating],
     ) -> npt.NDArray[np.floating]:
         """Compute relative coordinates between particles and query positions, respecting PBC."""
         if self.periodic:
             return coordinate_difference_with_pbc(
-                positions,
                 query_positions[:, np.newaxis, :],
+                positions,
                 self.boxsize,
             )
-        return positions - query_positions[:, np.newaxis, :]
+        return query_positions[:, np.newaxis, :] - positions
 
     def _get_active_smoothing(
         self, structure: Structure, mask: npt.NDArray[np.bool_] | None = None
@@ -521,7 +533,11 @@ class PointCloud:
                 if st == "anisotropic"
                 else self.smoothing.smoLens
             ),
+            "mode": st,
         }
+
+        # r_ij = (N, 8)
+        # h = (N,)
 
         if self.verbose:
             print(f"[smudgy] Computing density using {st} '{kernel.name}' kernel")
@@ -537,7 +553,7 @@ class PointCloud:
     def interpolate_fields(
         self,
         fields: npt.ArrayLike | str | list[str],
-        query_positions: npt.ArrayLike,
+        query_positions: npt.ArrayLike = None,
         compute_gradients: bool = False,
         structure: Structure | None = None,
     ) -> npt.NDArray[np.floating]:
@@ -547,7 +563,7 @@ class PointCloud:
         ----------
         fields : Union[npt.ArrayLike, str, List[str]]
             Field data to interpolate. Can be an array, string name, or list of both.
-        query_positions : npt.ArrayLike
+        query_positions : npt.ArrayLike, optional
             Array of shape (M, D) with positions where fields are interpolated.
         compute_gradients : bool, default False
             Whether to compute field gradients instead of values.
@@ -570,16 +586,27 @@ class PointCloud:
         kernel_temp = get_kernel(self.smoothing.kernel_name, dim=self.dim)
 
         # cast fields to correct input format
-        fields = self._resolve_fields(fields)
+        fields, fields_sizes = self._resolve_fields(fields)
 
         # if query_positions is None, use particle positions for interpolation (i.e. return smoothed fields at particle positions)
-        # for compute_gradients = False, this is redundant, since fields is already at particle positions
-        # but for compute_gradients = True, this allows to compute smoothed gradients at particle positions
+        # for compute_gradients = True, this allows to compute smoothed gradients at particle positions
         if query_positions is None:
             query_positions = self.positions
 
+            # can re-use the neighbor indices and distances from the smoothing computation
+            nn_inds = self.smoothing.nn_inds
+            nn_dists = self.smoothing.nn_dists
+
+        else:
+            # for new query positions, need to perform a new neighbor search
+            tree = self._ensure_tree()
+            nn_dists, nn_inds = query_kdtree(
+                tree,
+                query_positions,
+                k=self.num_neighbors,
+            )
+
         # prepare interpolation weights and fields
-        nn_inds = self.smoothing.nn_inds
         fields_ = fields[nn_inds]
 
         if structure_temp == "anisotropic":
@@ -589,35 +616,44 @@ class PointCloud:
 
         weights = self.weights[nn_inds] / (density_temp[nn_inds] + 1e-8)
 
-        # compute kernel arguments
+        # select kernel arguments
+        kwargs = dict(mode=structure_temp)
+
         if structure_temp == "anisotropic" or compute_gradients:
-            rel_coords = self._get_rel_coords(self.positions[nn_inds], query_positions)
-
-        if structure_temp in ["separable", "isotropic"]:
-            kernel_kwargs = {
-                "r_ij_vec" if compute_gradients else "r_ij": (
-                    rel_coords if compute_gradients else self.smoothing.nn_dists
-                ),
-                "h": self.smoothing.smoLens,
-            }
-        else:  # anisotropic
-            kernel_kwargs = {
-                "r_ij_vec" if compute_gradients else "r_ij": rel_coords,
-                "h": self.smoothing.smoTens,
-            }
-
-        if self.verbose:
-            grad_str = "gradients" if compute_gradients else "fields"
-            print(
-                f"[smudgy] Interpolating {grad_str} at query positions using {structure_temp} '{kernel_temp.name}' kernel"
+            rel_coords = self._get_rel_coords(
+                query_positions,
+                self.positions[nn_inds],
             )
 
-        if compute_gradients:
-            w = kernel_temp.evaluate_gradient(**kernel_kwargs)
-            return np.einsum("mkf,mkd,mk->mfd", fields_, w, weights)
-        else:
-            w = kernel_temp.evaluate(**kernel_kwargs)
-            return np.einsum("mkf,mk,mk->mf", fields_, w, weights)
+        kwargs["r_ij"] = (
+            rel_coords
+            if (structure_temp == "anisotropic" or compute_gradients)
+            else nn_dists
+        )
+
+        kwargs["h"] = (
+            self.smoothing.smoTens[nn_inds]
+            if structure_temp == "anisotropic"
+            else self.smoothing.smoLens[nn_inds]
+        )
+
+        if self.verbose:
+            grad_str = "gradients of " if compute_gradients else ""
+            print(
+                f"[smudgy] Interpolating {grad_str}fields at query positions using {structure_temp} '{kernel_temp.name}' kernel"
+            )
+
+        w = (
+            kernel_temp.evaluate_gradient(**kwargs)
+            if compute_gradients
+            else kernel_temp.evaluate(**kwargs)
+        )
+
+        einsum_str = (
+            "...kf,...kd,...k->...fd" if compute_gradients else "...kf,...k,...k->...f"
+        )
+
+        return np.einsum(einsum_str, fields_, w, weights)
 
     def interpolate_gradient_fields(
         self,
@@ -673,76 +709,61 @@ class PointCloud:
 
         return method, kn
 
-    def _prepare_grid_domain(
+    def _resolve_averaged(
         self,
-        gridnums: int | Sequence[int],
-        extent: Sequence[Sequence[float]] | None,
-        plane_projection: str | None,
-    ) -> tuple[
-        npt.NDArray[np.float32],
-        npt.NDArray[np.float32],
-        npt.NDArray[np.int32],
-        npt.NDArray[np.bool_],
-        bool,
-        int,
-    ]:
-        """Compute domain bounds, periodic flags, and particle mask for deposition."""
-        dep_dim = self.positions.shape[1] if plane_projection is None else 2
+        averaged: bool | Sequence[bool],
+        field_sizes: Sequence[int],
+    ) -> npt.NDArray[np.bool_]:
+        """Resolve averaged flags to one bool per scalar field component."""
+        total_components = sum(field_sizes)
 
-        if plane_projection and self.dim != 3:
-            raise ValueError(f"Plane projection requires 3D positions, got {self.dim}d")
+        # Single bool -> broadcast everywhere
+        if isinstance(averaged, bool):
+            return np.full(total_components, averaged, dtype=np.bool_)
 
-        # Range and periodicity
-        if extent is None:
-            if self.boxsize is None:
-                raise ValueError("Either 'boxsize' must be set or 'extent' provided")
-            box = np.atleast_1d(self.boxsize).astype(np.float32)
-            if box.size == 1:
-                box = np.repeat(box, dep_dim)
-            domain_min, domain_max, periodic = (
-                np.zeros(dep_dim, dtype=np.float32),
-                box,
-                bool(self.periodic),
-            )
-        else:
-            ext = np.asarray(extent, dtype=np.float32)
-            domain_min, domain_max, periodic = ext[:, 0], ext[:, 1], False
-
-        # Grid and Masking
-        gn = np.atleast_1d(gridnums).astype(np.int32)
-        if gn.size == 1:
-            gn = np.repeat(gn, dep_dim)
-
-        if gn.size != dep_dim:
-            raise ValueError(
-                f"Length of 'gridnums' ({gn.size}) must match deposition dimension ({dep_dim})"
+        if not isinstance(averaged, (list, tuple)):
+            raise TypeError(
+                f"'averaged' must be a bool or sequence of bools, found {type(averaged)}"
             )
 
-        mask = np.all(
-            (self.positions[:, :dep_dim] >= domain_min)
-            & (self.positions[:, :dep_dim] <= domain_max),
-            axis=1,
+        # Case 1:
+        # User provided one bool per scalar component already
+        if len(averaged) == total_components:
+            return np.asarray(averaged, dtype=np.bool_)
+
+        # Case 2:
+        # User provided one bool per field -> broadcast components
+        if len(averaged) == len(field_sizes):
+            resolved = []
+            for avg, size in zip(averaged, field_sizes):
+                resolved.extend([avg] * size)
+
+            return np.asarray(resolved, dtype=np.bool_)
+
+        raise ValueError(
+            f"Length of 'averaged' ({len(averaged)}) must match either "
+            f"the number of fields ({len(field_sizes)}) or the total number "
+            f"of scalar components ({total_components})"
         )
-
-        return domain_min, domain_max, gn, mask, periodic, dep_dim
 
     def _prepare_deposition_smoothing(
         self,
         method: str,
-        kn: str,
         adaptive: bool,
         num_p: int,
         gn: npt.NDArray[np.int32],
         d_lens: npt.NDArray[np.float32],
         mask: npt.NDArray[np.bool_],
         dep_dim: int,
-        plane_proj: str | None,
+        plane_projection: list[int] | None = None,
+        plane_projection_basis: npt.NDArray[np.float32] | None = None,
     ) -> tuple[
         npt.NDArray[np.float32] | None,
         npt.NDArray[np.float32] | None,
         npt.NDArray[np.float32] | None,
     ]:
         """Prepare smoothing data (fixed or adaptive) for the deposition call."""
+        # First two are NGP and uniform methods like Cloud-in-Cell and TSC where no smoothing info is needed
         if method == "ngp":
             return None, None, None
 
@@ -757,8 +778,15 @@ class PointCloud:
                     None,
                 )
             # for isotropic we average the spacing across all dimensions
-            return np.full(num_p, np.mean(spacing) / 2.0, dtype=np.float32), None, None
+            # TODO: can do better here...
+            else:
+                return (
+                    np.full(num_p, np.mean(spacing), dtype=np.float32),
+                    None,
+                    None,
+                )
 
+        # Otherwise we gather smoothing info based on selected structure
         self._check_smoothing_computed(method if method != "separable" else "isotropic")
 
         if method == "separable":
@@ -767,20 +795,27 @@ class PointCloud:
                 None,
                 None,
             )
-        if method == "isotropic":
-            return self.smoothing.smoLens[mask], None, None
 
-        # Anisotropic
-        if dep_dim == 2 and self.dim == 3:
-            _, vals, vecs = project_smoTens_to_2d(
-                self.smoothing.smoTens[mask], plane=plane_proj
-            )
-            return None, vals, vecs
-        return (
-            None,
-            self.smoothing.smoTens_eigvals[mask],
-            self.smoothing.smoTens_eigvecs[mask],
-        )
+        if method == "isotropic":
+            return (self.smoothing.smoLens[mask], None, None)
+
+        if method == "anisotropic":
+            if plane_projection is not None or plane_projection_basis is not None:
+                _, vals, vecs = project_smoTens_to_2d(
+                    self.smoothing.smoTens[mask],
+                    plane=plane_projection,
+                    basis=plane_projection_basis,
+                )
+                return None, vals, vecs
+            else:
+                return (
+                    None,
+                    self.smoothing.smoTens_eigvals[mask],
+                    self.smoothing.smoTens_eigvecs[mask],
+                )
+
+        else:
+            raise ValueError(f"Unsupported deposition method '{method}'")
 
     def deposit_to_grid(
         self,
@@ -790,8 +825,11 @@ class PointCloud:
         extent: Sequence[Sequence[float]] | None = None,
         kernel_name: str | None = None,
         structure: Structure | None = None,
-        adaptive: bool = False,
-        plane_projection: str | None = None,
+        adaptive: bool = True,
+        plane_projection: list[int] | None = None,
+        plane_projection_basis: (
+            list[Sequence[float] | npt.NDArray[np.float32]] | None
+        ) = None,
         integration_method: str = "midpoint",
         num_kernel_evaluations_per_axis: int = 4,
         eta_crit: float = 1.0,
@@ -821,8 +859,10 @@ class PointCloud:
             Smoothing structure for deposition.
         adaptive : bool, default False
             Whether to use adaptive smoothing from the instance.
-        plane_projection : str, optional
-            Projection plane ('xy', 'yz', or 'zx') for 3D to 2D deposition.
+        plane_projection : List[int], optional
+            Indices of the axes to project onto for 3D to 2D deposition.
+        plane_projection_basis : List[Sequence[float] | npt.NDArray[np.float32]], optional
+            This feature is currently not supported. Placeholder for future functionality to specify a custom projection basis.
         integration_method : str, default 'midpoint'
             Kernel integration method.
         num_kernel_evaluations_per_axis : int, default 4
@@ -845,23 +885,86 @@ class PointCloud:
 
         """
         method, kn_res = self._resolve_deposition_method(kernel_name, structure)
-        fields = self._resolve_fields(fields)
+        fields, fields_sizes = self._resolve_fields(fields)
+
+        # adaptive = False is only supported for structure = separable or isotropic but not anisotropic
+        if not adaptive and method == "anisotropic":
+            raise ValueError(
+                "Adaptive smoothing must be enabled for 'anisotropic' deposition, but found `adaptive`=False"
+            )
 
         if omp_threads is not None and omp_threads < 1:
             raise ValueError(f"omp_threads must be >= 1, got {omp_threads}")
 
-        d_min, d_max, gn, mask, periodic, dep_dim = self._prepare_grid_domain(
-            gridnums, extent, plane_projection
-        )
-        d_lens = d_max - d_min
+        # validate mutual exclusivity of projection arguments
+        if plane_projection_basis is not None:
+            raise ValueError(
+                "Specifying 'plane_projection_basis' is currently not supported."
+            )
 
-        pos_temp = self.positions[mask] - d_min
+        # resolve the averaged argument to a list of bools matching the number of field components
+        averaged = self._resolve_averaged(averaged, fields_sizes)
+
+        # construct the mask of particles falling into extent
+        if extent is None:
+            if self.boxsize is None:
+                raise ValueError("Either 'boxsize' must be set or 'extent' provided")
+
+            box = np.atleast_1d(self.boxsize).astype(np.float32)
+            if box.size == 1:
+                box = np.repeat(box, self.dim)
+            domain_min, domain_max, periodic = (
+                np.zeros(self.dim, dtype=np.float32),
+                box,
+                bool(self.periodic),
+            )
+        else:
+            ext = np.asarray(extent, dtype=np.float32)
+            domain_min, domain_max, periodic = ext[:, 0], ext[:, 1], False
+
+        d_lens = domain_max - domain_min
+        mask = np.all(
+            (self.positions >= domain_min) & (self.positions <= domain_max),
+            axis=1,
+        )
+        pos_temp = self.positions[mask] - domain_min
         weights_temp = self.weights[mask]
         fields_temp = fields[mask]
 
+        # if plane_projection is set, collect relevant axes
+        if plane_projection:
+            # cast to array and ensure it's 1D
+            plane_projection = np.atleast_1d(plane_projection).astype(int)
+
+            # assert that given axes are all different
+            assert (
+                plane_projection[0] != plane_projection[1]
+            ), "Plane projection axes must be unique, but found duplicates in {plane_projection}"
+            # assert that given axes are valid indices for the position dimension
+            assert np.all(plane_projection < self.dim) and np.all(
+                plane_projection >= 0
+            ), f"Plane projection axes must be between 0 and {self.dim - 1}, but found {plane_projection}"
+            if self.dim != 3:
+                raise ValueError(
+                    f"Plane projection requires 3D positions, but positions are {self.dim}d"
+                )
+
+            # fancy indexing does not work here -> use np.take to select and stack relevant axes
+            pos_temp = np.take(pos_temp, plane_projection, axis=1)
+            d_lens = np.take(d_lens, plane_projection).astype(np.float32)
+
+        # resolve gridnums and ensure it matches deposition dimension
+        dep_dim = pos_temp.shape[1]
+        gn = np.atleast_1d(gridnums).astype(np.int32)
+        if gn.size == 1:
+            gn = np.repeat(gn, dep_dim)
+        if gn.size != dep_dim:
+            raise ValueError(
+                f"Length of 'gridnums' ({gn.size}) must match deposition dimension ({dep_dim})"
+            )
+
         h, h_vals, h_vecs = self._prepare_deposition_smoothing(
             method,
-            kn_res,
             adaptive,
             pos_temp.shape[0],
             gn,
@@ -900,7 +1003,6 @@ class PointCloud:
         )
 
         # Post-processing
-        averaged = list(averaged) if isinstance(averaged, (list, tuple)) else [averaged]
         for i, avg in enumerate(averaged):
             if i < fields_grid.shape[-1] and avg:
                 fields_grid[..., i] /= weights_grid + 1e-10

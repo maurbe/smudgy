@@ -78,7 +78,7 @@ def test_openmp_toggle_consistency(dim, structure, kernel_name, dataset):
 
     fields_serial = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * len(fields),
+        averaged=False,
         gridnums=GRIDNUM,
         kernel_name=kernel_name,
         structure=structure,
@@ -88,7 +88,7 @@ def test_openmp_toggle_consistency(dim, structure, kernel_name, dataset):
 
     fields_omp = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * len(fields),
+        averaged=False,
         gridnums=GRIDNUM,
         kernel_name=kernel_name,
         structure=structure,
@@ -127,7 +127,7 @@ def test_openmp_thread_counts_consistency(dim, structure, kernel_name, dataset):
 
     fields_ref = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * len(fields),
+        averaged=False,
         gridnums=GRIDNUM,
         kernel_name=kernel_name,
         structure=structure,
@@ -139,7 +139,7 @@ def test_openmp_thread_counts_consistency(dim, structure, kernel_name, dataset):
     for threads in thread_counts[1:]:
         fields_test = sim.deposit_to_grid(
             fields=fields,
-            averaged=[False] * len(fields),
+            averaged=False,
             gridnums=GRIDNUM,
             kernel_name=kernel_name,
             structure=structure,

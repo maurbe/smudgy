@@ -629,8 +629,8 @@ void isotropic_kernel_deposition_2d_cpp(
         // compute inclusive index bounds within the kernel support
         int i_min = static_cast<int>(std::floor(x_cell - support_x_cell));
         int j_min = static_cast<int>(std::floor(y_cell - support_y_cell));
-        int i_max = static_cast<int>(std::ceil(x_cell + support_x_cell));
-        int j_max = static_cast<int>(std::ceil(y_cell + support_y_cell));
+        int i_max = static_cast<int>(std::ceil (x_cell + support_x_cell));
+        int j_max = static_cast<int>(std::ceil (y_cell + support_y_cell));
         const float* particle = quantities + n * num_fields;
         float wj = particle_weights[n];
 
@@ -789,7 +789,7 @@ void isotropic_kernel_deposition_3d_cpp(
     const float cellSize_y_inv = 1.0f / cellSize_y;
     const float cellSize_z_inv = 1.0f / cellSize_z;
 
-    // precompute max kernel support in cell units for clipping ( if periodic)
+    // precompute max kernel support in cell units for clipping (if periodic)
     float max_support_x = 0.5f * boxsize_x / kernel_support;
     float max_support_y = 0.5f * boxsize_y / kernel_support;
     float max_support_z = 0.5f * boxsize_z / kernel_support;

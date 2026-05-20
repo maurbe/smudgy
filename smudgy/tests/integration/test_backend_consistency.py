@@ -42,7 +42,7 @@ def test_python_cpp_backend_consistency(dim, structure, kernel_name):
 
     fields_py = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * len(fields),
+        averaged=False,
         gridnums=GRIDNUM,
         kernel_name=kernel_name,
         structure=structure,
@@ -52,7 +52,7 @@ def test_python_cpp_backend_consistency(dim, structure, kernel_name):
 
     fields_cpp = sim.deposit_to_grid(
         fields=fields,
-        averaged=[False] * len(fields),
+        averaged=False,
         gridnums=GRIDNUM,
         kernel_name=kernel_name,
         structure=structure,
