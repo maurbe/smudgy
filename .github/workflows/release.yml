@@ -37,6 +37,14 @@ jobs:
           echo "CFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
 
+      # Install helper tools for macOS repair (delocate)
+      # ------------------------------------------------------
+      - name: Install delocate (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install --upgrade pip
+          pip install delocate
+
       # ------------------------------------------------------
       # Build wheels via cibuildwheel
       # ------------------------------------------------------
