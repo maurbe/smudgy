@@ -6,7 +6,7 @@ on:
 
 jobs:
   # ==========================================================
-  # Build wheels (Linux + macOS + Windows)
+  # Build wheels
   # ==========================================================
   build-wheels:
     name: Build Wheels (${{ matrix.os }}${{ matrix.arch && format(' ({0})', matrix.arch) || '' }})
@@ -38,39 +38,7 @@ jobs:
         uses: actions/checkout@v5
 
       # ------------------------------------------------------
-      # Set up Python
-      # ------------------------------------------------------
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      # ------------------------------------------------------
-      # macOS: Install OpenMP
-      # ------------------------------------------------------
-      - name: Install OpenMP (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install libomp
-          OMP_PREFIX="$(brew --prefix libomp)"
-          echo "OMP_PREFIX=${OMP_PREFIX}" >> "$GITHUB_ENV"
-          echo "CPPFLAGS=-I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L${OMP_PREFIX}/lib -Wl,-rpath,${OMP_PREFIX}/lib" >> "$GITHUB_ENV"
-          echo "CFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
-          echo "CXXFLAGS=-Xpreprocessor -fopenmp -I${OMP_PREFIX}/include" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${OMP_PREFIX}/lib" >> "$GITHUB_ENV"
-
-      # ------------------------------------------------------
-      # Install delocate (macOS)
-      # ------------------------------------------------------
-      - name: Install delocate (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          python -m pip install --upgrade pip
-          pip install delocate
-
-      # ------------------------------------------------------
-      # Build wheels via cibuildwheel
+      # Build wheels
       # ------------------------------------------------------
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
@@ -78,20 +46,25 @@ jobs:
           # Build CPython wheels only
           CIBW_BUILD: "cp3*-*"
 
-          # IMPORTANT: explicitly disable universal2
-          CIBW_ARCHS: auto
-
-          # Per-platform architectures
-          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          # Explicit architectures
+          CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_ARCHS_WINDOWS: "AMD64"
 
-          # Deployment target
+          # macOS target
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
           # Skip musllinux
           CIBW_SKIP: "*-musllinux_*"
 
-          # Repair command
+          # Install OpenMP inside wheel env
+          CIBW_BEFORE_BUILD_MACOS: "brew install libomp"
+
+          # Prevent accidental universal2 builds
+          CIBW_ENVIRONMENT_MACOS: >
+            ARCHFLAGS="-arch ${{ matrix.arch }}"
+            CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}"
+
+          # Repair macOS wheels
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             delocate-wheel
             --require-archs {delocate_archs}
@@ -121,7 +94,7 @@ jobs:
 
     steps:
       # ------------------------------------------------------
-      # Download all wheel artifacts
+      # Download wheel artifacts
       # ------------------------------------------------------
       - name: Download built wheels
         uses: actions/download-artifact@v5
@@ -129,7 +102,7 @@ jobs:
           path: artifacts
 
       # ------------------------------------------------------
-      # Collect wheels into dist/
+      # Collect wheels
       # ------------------------------------------------------
       - name: Collect wheels into dist/
         run: |
