@@ -32,7 +32,9 @@ napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 
 autodoc_member_order = "bysource"
-# autodoc_typehints = "description"
+autodoc_mock_imports = [
+    "smudgy.core._cpp_functions_ext", # needed otherwise API docs fail to build
+]
 
 nb_execution_mode = "off"
 nb_execution_in_temp = True
