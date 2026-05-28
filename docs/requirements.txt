@@ -1,3 +1,7 @@
+numpy
+scipy
+matplotlib
+pybind11
 furo
 sphinx
 sphinx-copybutton
