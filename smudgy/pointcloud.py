@@ -1,5 +1,6 @@
 """Core SPH operations and PointCloud class for particle-based computations."""
 
+import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -20,6 +21,7 @@ from .utils import (
 
 STRUCTURES = ("separable", "isotropic", "anisotropic")
 Structure = Literal["separable", "isotropic", "anisotropic"]
+InterpolationMode = Literal["field", "gradient", "divergence", "curl"]
 
 
 class PointCloud:
@@ -550,53 +552,296 @@ class PointCloud:
         else:
             self.smoothing.density_iso = density
 
+    def _detect_field_types(self, field_sizes: list[int]) -> npt.NDArray[np.bool_]:
+        """Detect whether each field is scalar (1 component) or vector (≥2 components).
+
+        Parameters
+        ----------
+        field_sizes : list[int]
+            List of component counts for each field.
+
+        Returns
+        -------
+        npt.NDArray[np.bool_]
+            Boolean array where True indicates a vector field.
+
+        """
+        return np.array([size > 1 for size in field_sizes], dtype=np.bool_)
+
+    def _validate_field_dimensionality(
+        self,
+        mode: InterpolationMode,
+        field_sizes: list[int],
+        field_types: npt.NDArray[np.bool_],
+    ) -> None:
+        """Validate that field dimensions match the requested operation.
+
+        Parameters
+        ----------
+        mode : InterpolationMode
+            The interpolation mode ('field', 'gradient', 'divergence', 'curl').
+        field_sizes : list[int]
+            List of component counts for each field.
+        field_types : npt.NDArray[np.bool_]
+            Boolean array indicating vector fields (True) vs scalar fields (False).
+
+        Raises
+        ------
+        ValueError
+            If field type is incompatible with the requested operation.
+
+        """
+        if mode == "gradient":
+            # Gradients work on both scalars and vectors, but we compute per component
+            pass
+        elif mode == "divergence":
+            # Divergence requires vector fields with exactly D components (spatial dimension)
+            for i, (is_vec, size) in enumerate(zip(field_types, field_sizes)):
+                if not is_vec:
+                    raise ValueError(
+                        f"divergence requires vector fields (≥2 components), but field {i} has {size} component(s)"
+                    )
+                if size != self.dim:
+                    raise ValueError(
+                        f"divergence requires vector fields with {self.dim} components (spatial dimension), but field {i} has {size} component(s)"
+                    )
+        elif mode == "curl":
+            # Curl requires vector fields with exactly D components (spatial dimension)
+            for i, (is_vec, size) in enumerate(zip(field_types, field_sizes)):
+                if not is_vec:
+                    raise ValueError(
+                        f"curl requires vector fields (≥2 components), but field {i} has {size} component(s)"
+                    )
+                if size != self.dim:
+                    raise ValueError(
+                        f"curl requires vector fields with {self.dim} components (spatial dimension), but field {i} has {size} component(s)"
+                    )
+
+    def _compute_curl_2d(
+        self,
+        fields_: npt.NDArray[np.floating],
+        w_grad: npt.NDArray[np.floating],
+        weights: npt.NDArray[np.floating],
+    ) -> npt.NDArray[np.floating]:
+        """Compute 2D curl (scalar: ∂f_y/∂x - ∂f_x/∂y).
+
+        Parameters
+        ----------
+        fields_ : npt.NDArray[np.floating]
+            Field values at neighbors, shape (M, K, F) where F≥2.
+        w_grad : npt.NDArray[np.floating]
+            Kernel gradient at neighbors, shape (M, K, D).
+        weights : npt.NDArray[np.floating]
+            Interpolation weights, shape (M, K).
+
+        Returns
+        -------
+        npt.NDArray[np.floating]
+            2D curl results, shape (M, 1).
+
+        """
+        # For 2D: curl_z = ∂f_y/∂x - ∂f_x/∂y = ∑_j (m_j/ρ_j) * (f_y*∂W/∂x - f_x*∂W/∂y)
+        # Extract field components: f_x and f_y
+        f_x = fields_[:, :, 0]  # (M, K)
+        f_y = fields_[:, :, 1]  # (M, K)
+
+        # Extract gradient components: ∂W/∂x and ∂W/∂y
+        dW_dx = w_grad[:, :, 0]  # (M, K)
+        dW_dy = w_grad[:, :, 1]  # (M, K)
+
+        # Compute curl_z = ∑_j (m_j/ρ_j) * (f_y*∂W/∂x - f_x*∂W/∂y)
+        curl_z = np.sum(weights * (f_y * dW_dx - f_x * dW_dy), axis=1, keepdims=True)
+
+        return curl_z  # (M, 1)
+
+    def _compute_curl_3d(
+        self,
+        fields_: npt.NDArray[np.floating],
+        w_grad: npt.NDArray[np.floating],
+        weights: npt.NDArray[np.floating],
+    ) -> npt.NDArray[np.floating]:
+        """Compute 3D curl (vector: ∇ × f).
+
+        Parameters
+        ----------
+        fields_ : npt.NDArray[np.floating]
+            Field values at neighbors, shape (M, K, 3).
+        w_grad : npt.NDArray[np.floating]
+            Kernel gradient at neighbors, shape (M, K, 3).
+        weights : npt.NDArray[np.floating]
+            Interpolation weights, shape (M, K).
+
+        Returns
+        -------
+        npt.NDArray[np.floating]
+            3D curl results, shape (M, 3).
+
+        """
+        # Compute cross product: f_j × ∇W for each neighbor
+        # cross product shape: (M, K, 3)
+        cross_prod = np.cross(fields_, w_grad, axis=-1)
+
+        # Weight and sum over neighbors
+        # einsum: (M, K, 3) * (M, K, 1) -> (M, 3)
+        curl = np.einsum("...kd,...k->...d", cross_prod, weights)
+
+        return curl  # (M, 3)
+
     def interpolate_fields(
         self,
         fields: npt.ArrayLike | str | list[str],
         query_positions: npt.ArrayLike = None,
-        compute_gradients: bool = False,
+        mode: InterpolationMode = "field",
         structure: Structure | None = None,
+        # Deprecated parameters for backward compatibility
+        compute_gradients: bool | None = None,
+        compute_divergence: bool | None = None,
+        compute_curl: bool | None = None,
     ) -> npt.NDArray[np.floating]:
         """Interpolate particle fields to query positions using SPH.
+
+        Compute interpolated field values, gradients, divergence, or curl at query positions
+        using smoothed particle hydrodynamics (SPH).
 
         Parameters
         ----------
         fields : Union[npt.ArrayLike, str, List[str]]
             Field data to interpolate. Can be an array, string name, or list of both.
         query_positions : npt.ArrayLike, optional
-            Array of shape (M, D) with positions where fields are interpolated.
-        compute_gradients : bool, default False
-            Whether to compute field gradients instead of values.
+            Array of shape (M, D) with positions where quantities are computed.
+            If None, uses particle positions.
+        mode : InterpolationMode, default 'field'
+            Type of quantity to compute:
+
+            - 'field': Return interpolated field values
+            - 'gradient': Return field gradients ∇f
+            - 'divergence': Return divergence ∇·**f** (vector fields only)
+            - 'curl': Return curl ∇×**f** (vector fields only)
+
         structure : Structure, optional
             Smoothing structure for interpolation.
+        compute_gradients : bool, deprecated
+            Deprecated. Use `mode='gradient'` instead.
+        compute_divergence : bool, deprecated
+            Deprecated. Use `mode='divergence'` instead.
+        compute_curl : bool, deprecated
+            Deprecated. Use `mode='curl'` instead.
 
         Returns
         -------
         npt.NDArray[np.floating]
-            Interpolated field values (shape M, F) or gradients (shape M, F, D).
+            Interpolated quantities with shape depending on mode:
+
+            - 'field': (M, F) - interpolated field values
+            - 'gradient': (M, F, D) - field gradients
+            - 'divergence': (M, 1) - divergence of vector field
+            - 'curl': (M, 1) in 2D or (M, 3) in 3D - curl of vector field
+
+        Notes
+        -----
+        **Mathematical formulas (SPH interpolation)**:
+
+        For a scalar field:
+
+        $$f(x) = \\sum_j \\frac{m_j}{\\rho_j} f_j W(x-x_j,h)$$
+
+        Gradient:
+
+        $$\\nabla f(x) = \\sum_j \\frac{m_j}{\\rho_j} f_j \\nabla W(x-x_j,h)$$
+
+        For a vector field **f**:
+
+        **Divergence**:
+
+        $$\\nabla \\cdot \\mathbf{f}(x) = \\sum_j \\frac{m_j}{\\rho_j} \\mathbf{f}_j \\cdot \\nabla W(x-x_j,h)$$
+
+        **Curl (3D)**:
+
+        $$\\nabla \\times \\mathbf{f}(x) = \\sum_j \\frac{m_j}{\\rho_j} \\mathbf{f}_j \\times \\nabla W(x-x_j,h)$$
+
+        **Curl (2D)** (scalar):
+
+        $$(\\nabla \\times \\mathbf{f})_z = \\sum_j \\frac{m_j}{\\rho_j} \\left( f_{x,j}\\frac{\\partial W}{\\partial y} - f_{y,j}\\frac{\\partial W}{\\partial x} \\right)$$
+
+        Examples
+        --------
+        >>> pc = PointCloud(positions, weights=masses)
+        >>> pc.global_setup(kernel_name='cubic_spline', structure='isotropic', num_neighbors=32)
+        >>> pc.compute_smoothing()
+        >>> pc.compute_density()
+        >>> pc.add_fields('velocity', velocity_data)
+
+        Interpolate field values:
+
+        >>> values = pc.interpolate_fields('velocity', query_positions)
+
+        Compute gradients:
+
+        >>> grads = pc.interpolate_fields('velocity', query_positions, mode='gradient')
+
+        Compute divergence (for vector fields):
+
+        >>> div = pc.interpolate_fields('velocity', query_positions, mode='divergence')
+
+        Compute curl (for 3D vector fields):
+
+        >>> curl = pc.interpolate_fields('velocity', query_positions, mode='curl')
 
         """
+        # ===== Backward compatibility shim for deprecated parameters =====
+        num_deprecated_set = sum(
+            [
+                compute_gradients is not None,
+                compute_divergence is not None,
+                compute_curl is not None,
+            ]
+        )
+        if num_deprecated_set > 0:
+            warnings.warn(
+                "Parameters 'compute_gradients', 'compute_divergence', and 'compute_curl' are deprecated. "
+                "Use the 'mode' parameter instead: mode='field'|'gradient'|'divergence'|'curl'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Infer mode from deprecated parameters
+            if compute_curl:
+                mode = "curl"
+            elif compute_divergence:
+                mode = "divergence"
+            elif compute_gradients:
+                mode = "gradient"
+            else:
+                mode = "field"
+
+        # ===== Validation =====
+        if mode not in ("field", "gradient", "divergence", "curl"):
+            raise ValueError(
+                f"'mode' must be one of ('field', 'gradient', 'divergence', 'curl'), got '{mode}'"
+            )
+
         # check that structure is set either globally or via argument
         structure_temp = self._resolve_structure(structure)
 
         # check that density has been computed for the chosen structure
         self._check_density_computed(structure_temp)
 
-        # load kernel from the smoothing class, since it has been used to compute density already and we want to ensure consistency between density computation and interpolation
+        # load kernel from the smoothing class
         kernel_temp = get_kernel(self.smoothing.kernel_name, dim=self.dim)
 
         # cast fields to correct input format
         fields, fields_sizes = self._resolve_fields(fields)
 
-        # if query_positions is None, use particle positions for interpolation (i.e. return smoothed fields at particle positions)
-        # for compute_gradients = True, this allows to compute smoothed gradients at particle positions
+        # Detect field types (scalar vs vector)
+        field_types = self._detect_field_types(fields_sizes)
+
+        # Validate field dimensionality for the requested mode
+        self._validate_field_dimensionality(mode, fields_sizes, field_types)
+
+        # if query_positions is None, use particle positions
         if query_positions is None:
             query_positions = self.positions
-
-            # can re-use the neighbor indices and distances from the smoothing computation
             nn_inds = self.smoothing.nn_inds
             nn_dists = self.smoothing.nn_dists
-
         else:
             # for new query positions, need to perform a new neighbor search
             tree = self._ensure_tree()
@@ -607,7 +852,15 @@ class PointCloud:
             )
 
         # prepare interpolation weights and fields
-        fields_ = fields[nn_inds]
+        fields_ = fields[nn_inds]  # Shape: (M, K, total_components)
+
+        # For divergence and curl, reshape fields to (M, K, num_fields, D)
+        # This enables clean einsum patterns since all fields are validated to have self.dim components
+        if mode in ("divergence", "curl"):
+            num_fields = len(fields_sizes)
+            fields_ = fields_.reshape(
+                fields_.shape[0], fields_.shape[1], num_fields, self.dim
+            )
 
         if structure_temp == "anisotropic":
             density_temp = self.smoothing.density_aniso
@@ -616,20 +869,23 @@ class PointCloud:
 
         weights = self.weights[nn_inds] / (density_temp[nn_inds] + 1e-8)
 
-        # select kernel arguments
+        # ===== Kernel setup =====
         kwargs = dict(mode=structure_temp)
 
-        if structure_temp == "anisotropic" or compute_gradients:
+        # Always compute relative coordinates and gradients for modes other than 'field'
+        needs_gradients = (
+            mode in ("gradient", "divergence", "curl")
+            or structure_temp == "anisotropic"
+        )
+
+        if needs_gradients:
             rel_coords = self._get_rel_coords(
                 query_positions,
                 self.positions[nn_inds],
             )
-
-        kwargs["r_ij"] = (
-            rel_coords
-            if (structure_temp == "anisotropic" or compute_gradients)
-            else nn_dists
-        )
+            kwargs["r_ij"] = rel_coords
+        else:
+            kwargs["r_ij"] = nn_dists
 
         kwargs["h"] = (
             self.smoothing.smoTens[nn_inds]
@@ -638,22 +894,55 @@ class PointCloud:
         )
 
         if self.verbose:
-            grad_str = "gradients of " if compute_gradients else ""
+            mode_str = {
+                "field": "fields",
+                "gradient": "gradients of fields",
+                "divergence": "divergence of fields",
+                "curl": "curl of fields",
+            }[mode]
             print(
-                f"[smudgy] Interpolating {grad_str}fields at query positions using {structure_temp} '{kernel_temp.name}' kernel"
+                f"[smudgy] Interpolating {mode_str} at query positions using {structure_temp} '{kernel_temp.name}' kernel"
             )
 
-        w = (
-            kernel_temp.evaluate_gradient(**kwargs)
-            if compute_gradients
-            else kernel_temp.evaluate(**kwargs)
-        )
+        # ===== Compute kernel values or gradients =====
+        if needs_gradients:
+            w = kernel_temp.evaluate_gradient(**kwargs)  # (M, K, D)
+        else:
+            w = kernel_temp.evaluate(**kwargs)  # (M, K)
 
-        einsum_str = (
-            "...kf,...kd,...k->...fd" if compute_gradients else "...kf,...k,...k->...f"
-        )
+        # ===== Compute the requested quantity =====
+        if mode == "field":
+            # Standard field interpolation: ∑_j (m_j/ρ_j) f_j W
+            return np.einsum("...kf,...k,...k->...f", fields_, w, weights)
 
-        return np.einsum(einsum_str, fields_, w, weights)
+        elif mode == "gradient":
+            # Gradient: ∑_j (m_j/ρ_j) f_j ∇W
+            return np.einsum("...kf,...kd,...k->...fd", fields_, w, weights)
+
+        elif mode == "divergence":
+            # Divergence: ∑_j (m_j/ρ_j) f_j · ∇W (dot product of field with gradient)
+            # fields_ shape: (M, K, num_fields, D)
+            # w shape: (M, K, D)
+            # weights shape: (M, K)
+            # Result: (M, num_fields)
+            return np.einsum("...kfd,...kd,...k->...f", fields_, w, weights)
+
+        elif mode == "curl":
+
+            if self.dim == 2:
+                curl = (
+                    fields_[..., 0] * w[..., 1, None]
+                    - fields_[..., 1] * w[..., 0, None]
+                )
+                return np.einsum("...kf,...k->...f", curl, weights)
+
+            else:
+                curl = np.cross(
+                    fields_,
+                    w[..., None, :],
+                    axis=-1,
+                )
+                return np.einsum("...kfd,...k->...fd", curl, weights)
 
     def interpolate_gradient_fields(
         self,
