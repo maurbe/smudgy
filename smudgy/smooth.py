@@ -21,19 +21,19 @@ class SmoothingInfo:
         Distances to nearest neighbors for each particle.
     nn_dists_vec : np.ndarray
         Vector distances to nearest neighbors for each particle.
-    smoLens : np.ndarray
+    smoothing_lengths : np.ndarray
         Smoothing lengths for each particle.
-    smoTens : np.ndarray
+    smoothing_tensors : np.ndarray
         Smoothing tensors for each particle.
-    smoTens_eigvals : np.ndarray
+    smoothing_tensors_eigvals : np.ndarray
         Eigenvalues of the smoothing tensors.
-    smoTens_eigvecs : np.ndarray
+    smoothing_tensors_eigvecs : np.ndarray
         Eigenvectors of the smoothing tensors.
     kernel_name : str
         Name of the smoothing kernel used.
-    density_iso : np.ndarray
+    density_isotropic : np.ndarray
         Isotropic density estimates for each particle.
-    density_aniso : np.ndarray
+    density_covariant : np.ndarray
         Anisotropic density estimates for each particle.
 
     """
@@ -44,16 +44,11 @@ class SmoothingInfo:
     nn_dists: np.ndarray = None
     nn_dists_vec: np.ndarray = None
 
-    smoLens: np.ndarray = None
-
-    smoTens: np.ndarray = None
-    smoTens_eigvals: np.ndarray = None
-    smoTens_eigvecs: np.ndarray = None
-
-    # smoTens_projected: np.ndarray = None
-    # smoTens_projected_eigvals: np.ndarray = None
-    # smoTens_projected_eigvecs: np.ndarray = None
+    smoothing_lengths: np.ndarray = None
+    smoothing_tensors: np.ndarray = None
+    smoothing_tensors_eigvals: np.ndarray = None
+    smoothing_tensors_eigvecs: np.ndarray = None
 
     kernel_name: str = None
-    density_iso: np.ndarray = None
-    density_aniso: np.ndarray = None
+    density_isotropic: np.ndarray = None
+    density_covariant: np.ndarray = None

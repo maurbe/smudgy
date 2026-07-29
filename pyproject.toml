@@ -1,11 +1,20 @@
 [build-system]
-requires = ["setuptools", "wheel", "numpy", "pybind11"]
+requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "smudgy"
-version = "0.1.4"
-description = "Point Cloud smoothing and interpolation package with C++ and OpenMP backend."
+version = "0.2.0"
+description = "Point Cloud smoothing and interpolation package with numpy and Taichi backends."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy", 
+  "scipy", 
+  "taichi",
+  "mpi4py"
+  ]
+
 authors = [
     { name = "Mauro Bernardini"}, 
     { email = "mauro.bernardini1313@gmail.com" }
@@ -14,13 +23,11 @@ maintainers = [
   { name = "Mauro Bernardini" },
   { email = "mauro.bernardini1313@gmail.com" }
 ]
-dependencies = ["numpy", "scipy", "pybind11"]
-requires-python = ">=3.10"
 
 [project.urls]
 Homepage = "https://github.com/maurbe/smudgy"
 Repository = "https://github.com/maurbe/smudgy"
-Documentation = "https://smudgy.readthedocs.io/en/latest/quickstart.html"
+Documentation = "https://smudgy.readthedocs.io/en/latest/start/quickstart.html"
 
 [project.optional-dependencies]
 test = ["pytest"]
@@ -34,7 +41,7 @@ testpaths = ["smudgy/tests"]
 
 [tool.black]
 line-length = 88
-target-version = ['py310', 'py311', 'py312', 'py313', 'py314']
+target-version = ['py310', 'py311', 'py312', 'py313']
 
 [tool.ruff]
 line-length = 88

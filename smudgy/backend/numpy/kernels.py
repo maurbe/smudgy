@@ -1,9 +1,84 @@
-"""SPH kernel functions and their gradients for isotropic and anisotropic smoothing."""
+"""SPH kernel functions and their gradients for isotropic and covariant smoothing."""
 
 import math
 
 import numpy as np
 import numpy.typing as npt
+
+# =============================================================================
+# Utility functions
+# =============================================================================
+
+
+def _prepare_isotropic_inputs(kernel, r_ij, h, eps):
+    """Project relative vectors onto isotropic kernel coordinates."""
+    r_mag = np.linalg.norm(r_ij, axis=-1)
+    if h.ndim == r_ij.ndim - 2:
+        h = h[..., None]
+
+    q = r_mag / (h + eps)
+    scale = kernel._kernel_sigma() / (h**kernel.dim)
+
+    grad_q = np.zeros_like(r_ij)
+    np.divide(
+        r_ij,
+        (r_mag[..., None] + eps) * (h[..., None] + eps),
+        out=grad_q,
+        where=r_mag[..., None] > 0,
+    )
+
+    return q, grad_q, scale
+
+
+def _prepare_covariant_inputs(kernel, r_ij, H, eps):
+    """Project relative vectors onto covariant kernel coordinates."""
+    H_inv = np.linalg.inv(H)
+    det_H = np.linalg.det(H)
+
+    if H.ndim == r_ij.ndim + 1:
+        # One smoothing tensor per query-neighbor pair: (M, K, D, D).
+        xi = np.einsum("...ij,...j->...i", H_inv, r_ij)
+        H_inv_T = np.swapaxes(H_inv, -1, -2)
+        grad_numerator = np.einsum("...ij,...j->...i", H_inv_T, xi)
+        scale = kernel._kernel_sigma() / det_H
+    elif H.ndim == r_ij.ndim:
+        # One smoothing tensor per query, shared by all its neighbors:
+        # (M, D, D) with relative vectors shaped (M, K, D).
+        xi = np.einsum("...ij,...kj->...ki", H_inv, r_ij)
+        H_inv_T = np.swapaxes(H_inv, -1, -2)
+        grad_numerator = np.einsum("...ij,...kj->...ki", H_inv_T, xi)
+        scale = kernel._kernel_sigma() / det_H[..., None]
+    else:
+        raise ValueError(
+            "Covariant smoothing tensors must have shape (M, D, D) or "
+            "(M, K, D, D) for relative vectors shaped (M, K, D)."
+        )
+
+    q = np.linalg.norm(xi, axis=-1)
+    grad_q = grad_numerator / (q[..., None] + eps)
+    return q, grad_q, scale
+
+
+def prepare_kernel_inputs(kernel, structure, r_ij, h, dim, eps=1e-7):
+
+    if dim not in (1, 2, 3):
+        raise ValueError(f"Invalid dim '{dim}'. Must be 1, 2, or 3.")
+
+    if structure == "isotropic":
+        return _prepare_isotropic_inputs(kernel, r_ij, h, eps)
+    if structure == "covariant":
+        return _prepare_covariant_inputs(kernel, r_ij, h, eps)
+    if structure == "separable":
+        raise ValueError(
+            "structure='separable' is not supported for particle density "
+            "or interpolation; use 'isotropic' or 'covariant'."
+        )
+    raise ValueError(f"Invalid structure '{structure}'")
+
+
+# =============================================================================
+# Base kernel class
+# =============================================================================
 
 
 class BaseKernelClass:
@@ -20,159 +95,126 @@ class BaseKernelClass:
         self.eps = 1e-7
         self.name = "base_kernel"
 
-    def evaluate(self, r_ij, h, mode):
-        """Evaluate the kernel function for given relative positions, smoothing lengths, and mode."""
-        # assert that r_ij is a numpy array of floats with shape (..., dim)
-        if not isinstance(r_ij, np.ndarray) or r_ij.dtype.kind not in "fiu":
-            raise ValueError(
-                f"`r_ij` must be a numpy array of floats, ints, or unsigned ints, but found type {type(r_ij)} with dtype {getattr(r_ij, 'dtype', None)}"
-            )
-
-        # assert that h is a numpy array of floats
-        if not isinstance(h, np.ndarray) or h.dtype.kind not in "fiu":
-            raise ValueError(
-                f"`h` must be a numpy array of floats, ints, or unsigned ints, but found type {type(h)} with dtype {getattr(h, 'dtype', None)}"
-            )
-
-        if mode in ["separable", "isotropic"]:
-            res = self._evaluate_isotropic(r_ij, h)
-
-        elif mode == "anisotropic":
-            res = self._evaluate_anisotropic(r_ij, h)
-        else:
-            raise ValueError(f"Invalid mode '{mode}'")
-
-        # Cast back to input dtype if it is a floating point type to avoid
-        # promotion to float64 caused by internal constants or sigma values.
-        if r_ij.dtype.kind == "f":
-            return res.astype(r_ij.dtype, copy=False)
+    def evaluate_coords(self, q, scale):
+        """Evaluate the kernel from canonical coordinates and normalization scale."""
+        res = scale * self._kernel_values(q)
+        if q.dtype.kind == "f":
+            return res.astype(q.dtype, copy=False)
         return res
 
-    def evaluate_gradient(self, r_ij, h, mode):
-        """Evaluate the gradient of the kernel function for given relative positions, smoothing lengths, and mode."""
-        # assert that r_ij is a numpy array of floats with shape (..., dim)
-        if not isinstance(r_ij, np.ndarray) or r_ij.dtype.kind not in "fiu":
-            raise ValueError(
-                f"`r_ij` must be a numpy array of floats, ints, or unsigned ints, but found type {type(r_ij)} with dtype {getattr(r_ij, 'dtype', None)}"
-            )
-
-        # assert that h is a numpy array of floats
-        if not isinstance(h, np.ndarray) or h.dtype.kind not in "fiu":
-            raise ValueError(
-                f"`h` must be a numpy array of floats, ints, or unsigned ints, but found type {type(h)} with dtype {getattr(h, 'dtype', None)}"
-            )
-
-        if mode in ["separable", "isotropic"]:
-            res = self._evaluate_gradient_isotropic(r_ij, h)
-
-        elif mode == "anisotropic":
-            res = self._evaluate_gradient_anisotropic(r_ij, h)
-        else:
-            raise ValueError(f"Invalid mode '{mode}'")
-
-        # Cast back to input dtype if it is a floating point type to avoid
-        # promotion to float64 caused by internal constants or sigma values.
-        if r_ij.dtype.kind == "f":
-            return res.astype(r_ij.dtype, copy=False)
+    def evaluate_gradient_coords(self, q, grad_q, scale):
+        """Evaluate the kernel gradient from canonical coordinates and direction."""
+        print(scale.shape, self._kernel_gradient_values(q).shape, grad_q.shape)
+        res = scale[..., None] * self._kernel_gradient_values(q)[..., None] * grad_q
+        if q.dtype.kind == "f":
+            return res.astype(q.dtype, copy=False)
         return res
-
-    # =========================================================
-    # isotropic
-    # =========================================================
-
-    def _evaluate_isotropic(self, r_ij, h):
-
-        if h.ndim == r_ij.ndim - 1:
-            h = h[..., None]
-
-        q = np.abs(r_ij) / (h + self.eps)
-        norm = h**self.dim
-
-        return self._kernel_sigma() / norm * self._kernel_values(q)
-
-    def _evaluate_gradient_isotropic(self, r_ij, h):
-
-        h = h[..., None]
-
-        r_mag = np.linalg.norm(
-            r_ij,
-            axis=-1,
-            keepdims=True,
-        )
-
-        q = r_mag / (h + self.eps)
-
-        dW_dq = self._kernel_gradient_values(q)
-        dW_dr = dW_dq / (h + self.eps)
-
-        er = np.zeros_like(r_ij)
-
-        np.divide(
-            r_ij,
-            r_mag,
-            out=er,
-            where=r_mag > 0,
-        )
-
-        norm = h**self.dim
-
-        return self._kernel_sigma() / norm * dW_dr * er
-
-    # =========================================================
-    # anisotropic
-    # =========================================================
-
-    def _evaluate_anisotropic(self, r_ij, H):
-
-        H_inv = np.linalg.inv(H)
-        det_H = np.linalg.det(H)
-
-        xi = np.einsum(
-            "...ij,...j->...i",
-            H_inv,
-            r_ij,
-        )
-
-        q = np.linalg.norm(xi, axis=-1)
-
-        return self._kernel_sigma() / det_H * self._kernel_values(q)
-
-    def _evaluate_gradient_anisotropic(self, r_ij, H):
-
-        H_inv = np.linalg.inv(H)
-        H_inv_T = np.swapaxes(H_inv, -1, -2)
-        det_H = np.linalg.det(H)
-
-        xi = np.einsum(
-            "...ij,...j->...i",
-            H_inv,
-            r_ij,
-        )
-
-        q = np.linalg.norm(
-            xi,
-            axis=-1,
-            keepdims=True,
-        )
-
-        dK_dq = self._kernel_gradient_values(q)
-
-        grad_q = np.einsum(
-            "...ij,...j->...i",
-            H_inv_T,
-            xi,
-        ) / (q + self.eps)
-
-        return self._kernel_sigma() / det_H[..., None] * dK_dq * grad_q
 
     def _kernel_sigma(self):
         raise NotImplementedError("Must implement _kernel_sigma in subclass")
 
-    def _kernel_values(self):
+    def _kernel_values(self, q):
         raise NotImplementedError("Must implement _kernel_values in subclass")
 
-    def _kernel_gradient_values(self):
+    def _kernel_gradient_values(self, q):
         raise NotImplementedError("Must implement _kernel_gradient_values in subclass")
+
+
+# =============================================================================
+# Separable kernels
+# =============================================================================
+
+
+class TophatSepKernel(BaseKernelClass):
+    """Rectangular Tophat kernel (Product of 1D Tophats)."""
+
+    def __init__(self, dim):
+        """Initialize the Tophat separable kernel for the given spatial dimension."""
+        super().__init__(dim, support=0.5)
+        self.name = "tophat_separable"
+
+    def _kernel_sigma(self) -> float:
+        return 1.0
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        # For TophatRect, support is 0.5 in each dimension.
+        q = np.abs(q)
+        mask = q <= self.support
+        return np.where(mask, 1.0, 0.0)
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        return np.zeros_like(q)
+
+
+class TSCSepKernel(BaseKernelClass):
+    """Separable triangle (tent) kernel with support 1.5 (not B-spline TSC)."""
+
+    def __init__(self, dim):
+        """Initialize the TSC separable kernel for the given spatial dimension."""
+        super().__init__(dim, support=1.5)
+        self.name = "tsc_separable"
+
+    def _kernel_sigma(self) -> float:
+        # normalization so that integral over 1D = 1
+        # ∫_{-h}^{h} (1 - |q|/h) dq = h
+        # => need 1/h scaling
+        return 1.0 / self.support**self.dim
+
+    def _kernel_values(self, q):
+        q_abs = np.abs(q)
+        val = np.zeros_like(q_abs)
+
+        mask = q_abs <= self.support
+        val[mask] = 1.0 - q_abs[mask] / self.support
+
+        return val
+
+    def _kernel_gradient_values(self, q):
+        q_abs = np.abs(q)
+        sign = np.sign(q)
+
+        grad = np.zeros_like(q)
+
+        mask = q_abs <= self.support
+        grad[mask] = -(1.0 / self.support) * sign[mask]
+
+        return grad
+
+
+class GaussianSepKernel(BaseKernelClass):
+    """Gaussian kernel implementation for SPH."""
+
+    def __init__(self, dim: int) -> None:
+        """Initialize the Gaussian separable kernel for the given spatial dimension."""
+        super().__init__(dim=dim, support=3.0)
+        self.name = "gaussian_separable"
+
+    def _kernel_sigma(self) -> float:
+        if self.dim == 1:
+            return 1.0 / math.pi**0.5
+        elif self.dim == 2:
+            return 1.0 / math.pi
+        elif self.dim == 3:
+            return 1.0 / math.pi**1.5
+
+    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        q = np.abs(q)
+        mask = q <= self.support
+        return np.where(mask, np.exp(-(q**2)), 0.0)
+
+    def _kernel_gradient_values(
+        self, q: npt.NDArray[np.floating]
+    ) -> npt.NDArray[np.floating]:
+        q = np.abs(q)
+        mask = q <= self.support
+        return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
+
+
+# =============================================================================
+# Spherical kernels
+# =============================================================================
 
 
 class TophatKernel(BaseKernelClass):
@@ -199,29 +241,6 @@ class TophatKernel(BaseKernelClass):
         self, q: npt.NDArray[np.floating]
     ) -> npt.NDArray[np.floating]:
         # Gradient of Tophat is a delta function at q=1, numerically problematic.
-        return np.zeros_like(q)
-
-
-class TophatSepKernel(BaseKernelClass):
-    """Rectangular Tophat kernel (Product of 1D Tophats)."""
-
-    def __init__(self, dim):
-        """Initialize the Tophat separable kernel for the given spatial dimension."""
-        super().__init__(dim, support=0.5)
-        self.name = "tophat_separable"
-
-    def _kernel_sigma(self) -> float:
-        return 1.0
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        # For TophatRect, support is 0.5 in each dimension.
-        q = np.abs(q)
-        mask = q <= self.support
-        return np.where(mask, 1.0, 0.0)
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
         return np.zeros_like(q)
 
 
@@ -261,41 +280,6 @@ class TSCKernel(BaseKernelClass):
         return grad
 
 
-class TSCSepKernel(BaseKernelClass):
-    """Separable triangle (tent) kernel with support 1.5 (not B-spline TSC)."""
-
-    def __init__(self, dim):
-        """Initialize the TSC separable kernel for the given spatial dimension."""
-        super().__init__(dim, support=1.5)
-        self.name = "tsc_separable"
-
-    def _kernel_sigma(self) -> float:
-        # normalization so that integral over 1D = 1
-        # ∫_{-h}^{h} (1 - |q|/h) dq = h
-        # => need 1/h scaling
-        return 1.0 / self.support**self.dim
-
-    def _kernel_values(self, q):
-        q_abs = np.abs(q)
-        val = np.zeros_like(q_abs)
-
-        mask = q_abs <= self.support
-        val[mask] = 1.0 - q_abs[mask] / self.support
-
-        return val
-
-    def _kernel_gradient_values(self, q):
-        q_abs = np.abs(q)
-        sign = np.sign(q)
-
-        grad = np.zeros_like(q)
-
-        mask = q_abs <= self.support
-        grad[mask] = -(1.0 / self.support) * sign[mask]
-
-        return grad
-
-
 class GaussianKernel(BaseKernelClass):
     """Gaussian kernel implementation for SPH."""
 
@@ -319,35 +303,6 @@ class GaussianKernel(BaseKernelClass):
     def _kernel_gradient_values(
         self, q: npt.NDArray[np.floating]
     ) -> npt.NDArray[np.floating]:
-        mask = q <= self.support
-        return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
-
-
-class GaussianSepKernel(BaseKernelClass):
-    """Gaussian kernel implementation for SPH."""
-
-    def __init__(self, dim: int) -> None:
-        """Initialize the Gaussian separable kernel for the given spatial dimension."""
-        super().__init__(dim=dim, support=3.0)
-        self.name = "gaussian_separable"
-
-    def _kernel_sigma(self) -> float:
-        if self.dim == 1:
-            return 1.0 / math.pi**0.5
-        elif self.dim == 2:
-            return 1.0 / math.pi
-        elif self.dim == 3:
-            return 1.0 / math.pi**1.5
-
-    def _kernel_values(self, q: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        q = np.abs(q)
-        mask = q <= self.support
-        return np.where(mask, np.exp(-(q**2)), 0.0)
-
-    def _kernel_gradient_values(
-        self, q: npt.NDArray[np.floating]
-    ) -> npt.NDArray[np.floating]:
-        q = np.abs(q)
         mask = q <= self.support
         return np.where(mask, -2 * q * np.exp(-(q**2)), 0.0)
 
@@ -574,6 +529,10 @@ class WendlandC6Kernel(BaseKernelClass):
             )
         return np.where(mask, df * g + f * dg, 0.0)
 
+
+# =============================================================================
+# Registries
+# =============================================================================
 
 KERNEL_CLASSES = {
     "tophat_separable": TophatSepKernel,
