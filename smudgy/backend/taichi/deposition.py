@@ -148,6 +148,7 @@ QUADRATURE_POINTS_3D = {
 def _isotropic_cell_integral_1d(
     evaluate_fn: ti.template(),
     quad_points: ti.template(),
+    dim: ti.template(),
     a: ti.i32,
     x_cell: ti.f32,
     hsm_phys: ti.f32,
@@ -155,16 +156,12 @@ def _isotropic_cell_integral_1d(
     cellSize_x: ti.f32,
 ) -> ti.f32:
     """Quadrature-integrated kernel mass over cell a."""
-    DIM = 1
     s = 0.0
 
     for ox, coeff in ti.static(quad_points):
-
         dx = (x_cell - (a + ox)) * cellSize_x
-
         q = ti.abs(dx) / hsm_phys
-
-        s += coeff * kernel_prefactor * evaluate_fn(q, DIM)
+        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x
 
@@ -173,6 +170,7 @@ def _isotropic_cell_integral_1d(
 def _isotropic_cell_integral_2d(
     evaluate_fn: ti.template(),
     quad_points: ti.template(),
+    dim: ti.template(),
     a: ti.i32,
     b: ti.i32,
     x_cell: ti.f32,
@@ -185,7 +183,6 @@ def _isotropic_cell_integral_2d(
     """Quadrature-integrated kernel mass over cell (a, b), matching the
     C++ `eval` lambda + integrate_cell_2d(...) * cellSize_x * cellSize_y.
     """
-    DIM = 2
     s = 0.0
 
     for ox, oy, coeff in ti.static(quad_points):
@@ -196,7 +193,7 @@ def _isotropic_cell_integral_2d(
         r = ti.sqrt(dx * dx + dy * dy)
         q = r / hsm_phys
 
-        s += coeff * kernel_prefactor * evaluate_fn(q, DIM)
+        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x * cellSize_y
 
@@ -205,6 +202,7 @@ def _isotropic_cell_integral_2d(
 def _isotropic_cell_integral_3d(
     evaluate_fn: ti.template(),
     quad_points: ti.template(),
+    dim: ti.template(),
     a: ti.i32,
     b: ti.i32,
     c: ti.i32,
@@ -218,7 +216,6 @@ def _isotropic_cell_integral_3d(
     cellSize_z: ti.f32,
 ) -> ti.f32:
     """Quadrature-integrated kernel mass over cell (a, b, c)."""
-    DIM = ti.static(3)
     s = 0.0
 
     for ox, oy, oz, coeff in ti.static(quad_points):
@@ -230,7 +227,7 @@ def _isotropic_cell_integral_3d(
         r = ti.sqrt(dx * dx + dy * dy + dz * dz)
         q = r / hsm_phys
 
-        s += coeff * kernel_prefactor * evaluate_fn(q, DIM)
+        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x * cellSize_y * cellSize_z
 
@@ -239,6 +236,7 @@ def _isotropic_cell_integral_3d(
 def _covariant_cell_integral_1d(
     evaluate_fn: ti.template(),
     quad_points: ti.template(),
+    dim: ti.template(),
     a: ti.i32,
     x_cell: ti.f32,
     e0x: ti.f32,
@@ -247,7 +245,6 @@ def _covariant_cell_integral_1d(
     cellSize_x: ti.f32,
 ) -> ti.f32:
 
-    DIM = ti.static(1)
     s = 0.0
 
     for ox, coeff in ti.static(quad_points):
@@ -258,7 +255,7 @@ def _covariant_cell_integral_1d(
         # turns the isotropic q = |d| / h into the ellipsoidal q
         xi0 = (e0x * dx) / eval0
         q = xi0
-        s += coeff * kernel_prefactor * evaluate_fn(q, DIM)
+        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x
 
@@ -267,6 +264,7 @@ def _covariant_cell_integral_1d(
 def _covariant_cell_integral_2d(
     evaluate_fn: ti.template(),
     quad_points: ti.template(),
+    dim: ti.template(),
     a: ti.i32,
     b: ti.i32,
     x_cell: ti.f32,
@@ -282,7 +280,6 @@ def _covariant_cell_integral_2d(
     cellSize_y: ti.f32,
 ) -> ti.f32:
 
-    DIM = ti.static(2)
     s = 0.0
 
     for ox, oy, coeff in ti.static(quad_points):
@@ -297,7 +294,7 @@ def _covariant_cell_integral_2d(
 
         q = ti.sqrt(xi0 * xi0 + xi1 * xi1)
 
-        s += coeff * kernel_prefactor * evaluate_fn(q, DIM)
+        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x * cellSize_y
 
@@ -306,6 +303,7 @@ def _covariant_cell_integral_2d(
 def _covariant_cell_integral_3d(
     evaluate_fn: ti.template(),
     quad_points: ti.template(),
+    dim: ti.template(),
     a: ti.i32,
     b: ti.i32,
     c: ti.i32,
@@ -330,7 +328,6 @@ def _covariant_cell_integral_3d(
     cellSize_z: ti.f32,
 ) -> ti.f32:
 
-    DIM = ti.static(3)
     s = 0.0
 
     for ox, oy, oz, coeff in ti.static(quad_points):
@@ -347,7 +344,7 @@ def _covariant_cell_integral_3d(
 
         q = ti.sqrt(xi0 * xi0 + xi1 * xi1 + xi2 * xi2)
 
-        s += coeff * kernel_prefactor * evaluate_fn(q, DIM)
+        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x * cellSize_y * cellSize_z
 
@@ -1281,6 +1278,7 @@ def _separable_1d(
     F_1d_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     periodic: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1293,9 +1291,8 @@ def _separable_1d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
 ):
-    DIM = ti.static(1)
     F = fields.shape[1]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
 
@@ -1360,6 +1357,7 @@ def _separable_2d(
     F_1d_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     periodic: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1374,9 +1372,8 @@ def _separable_2d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
 ):
-    DIM = ti.static(2)
     F = fields.shape[2]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
 
@@ -1463,6 +1460,7 @@ def _separable_3d(
     F_1d_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     periodic: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1479,9 +1477,8 @@ def _separable_3d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
 ):
-    DIM = ti.static(3)
     F = fields.shape[3]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
 
@@ -1596,6 +1593,7 @@ def _isotropic_1d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -1613,9 +1611,8 @@ def _isotropic_1d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx)
 ):
-    DIM = ti.static(1)
     F = fields.shape[1]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
         x_phys = positions[n, 0]
@@ -1668,6 +1665,7 @@ def _isotropic_1d(
                 integral = _isotropic_cell_integral_1d(
                     evaluate_fn,
                     quad_points,
+                    dim,
                     a,
                     x_cell,
                     hsm_phys,
@@ -1688,6 +1686,7 @@ def _isotropic_1d(
                     integral = _isotropic_cell_integral_1d(
                         evaluate_fn,
                         quad_points,
+                        dim,
                         a,
                         x_cell,
                         hsm_phys,
@@ -1706,6 +1705,7 @@ def _isotropic_2d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -1726,9 +1726,8 @@ def _isotropic_2d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
 ):
-    DIM = ti.static(2)
     F = fields.shape[2]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
         x_phys = positions[n, 0]
@@ -1793,6 +1792,7 @@ def _isotropic_2d(
                     integral = _isotropic_cell_integral_2d(
                         evaluate_fn,
                         quad_points,
+                        dim,
                         a,
                         b,
                         x_cell,
@@ -1821,6 +1821,7 @@ def _isotropic_2d(
                         integral = _isotropic_cell_integral_2d(
                             evaluate_fn,
                             quad_points,
+                            dim,
                             a,
                             b,
                             x_cell,
@@ -1842,6 +1843,7 @@ def _isotropic_3d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -1865,9 +1867,8 @@ def _isotropic_3d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
 ):
-    DIM = ti.static(3)
     F = fields.shape[3]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
         x_phys = positions[n, 0]
@@ -1946,6 +1947,7 @@ def _isotropic_3d(
                         integral = _isotropic_cell_integral_3d(
                             evaluate_fn,
                             quad_points,
+                            dim,
                             a,
                             b,
                             c,
@@ -1982,6 +1984,7 @@ def _isotropic_3d(
                             integral = _isotropic_cell_integral_3d(
                                 evaluate_fn,
                                 quad_points,
+                                dim,
                                 a,
                                 b,
                                 c,
@@ -2011,6 +2014,7 @@ def _covariant_1d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -2029,9 +2033,8 @@ def _covariant_1d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx,F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
 ):
-    DIM = ti.static(1)
     F = fields.shape[1]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
 
@@ -2102,6 +2105,7 @@ def _covariant_1d(
                 integral = _covariant_cell_integral_1d(
                     evaluate_fn,
                     quad_points,
+                    dim,
                     a,
                     x_cell,
                     e0,
@@ -2125,6 +2129,7 @@ def _covariant_1d(
                     integral = _covariant_cell_integral_1d(
                         evaluate_fn,
                         quad_points,
+                        dim,
                         a,
                         x_cell,
                         e0,
@@ -2149,6 +2154,7 @@ def _covariant_2d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -2170,9 +2176,8 @@ def _covariant_2d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx,Ny,F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx,Ny)
 ):
-    DIM = ti.static(2)
     F = fields.shape[2]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
 
@@ -2268,6 +2273,7 @@ def _covariant_2d(
                     integral = _covariant_cell_integral_2d(
                         evaluate_fn,
                         quad_points,
+                        dim,
                         a,
                         b,
                         x_cell,
@@ -2304,6 +2310,7 @@ def _covariant_2d(
                         integral = _covariant_cell_integral_2d(
                             evaluate_fn,
                             quad_points,
+                            dim,
                             a,
                             b,
                             x_cell,
@@ -2335,6 +2342,7 @@ def _covariant_3d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
+    dim: ti.template(),   # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -2359,9 +2367,8 @@ def _covariant_3d(
     fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
     weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
 ):
-    DIM = ti.static(3)
     F = fields.shape[3]
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for n in range(positions.shape[0]):
         x_phys = positions[n, 0]
@@ -2496,6 +2503,7 @@ def _covariant_3d(
                         integral = _covariant_cell_integral_3d(
                             evaluate_fn,
                             quad_points,
+                            dim,
                             a,
                             b,
                             c,
@@ -2543,6 +2551,7 @@ def _covariant_3d(
                             integral = _covariant_cell_integral_3d(
                                 evaluate_fn,
                                 quad_points,
+                                dim,
                                 a,
                                 b,
                                 c,
@@ -2691,6 +2700,7 @@ def _prepare_separable(
         kspec.F_1d,
         kspec.sigma,
         support,
+        DIM,
         bool(periodic),
         particle_positions,
         particle_fields,
@@ -2710,7 +2720,6 @@ def _prepare_separable(
         grid_fields=grid_fields,
         grid_weights=grid_weights,
         structure="separable",
-        dim=DIM,
         kernel_name=kernel_name,
         support=support,
         periodic=bool(periodic),
@@ -2774,6 +2783,7 @@ def _prepare_isotropic(
         kspec.evaluate,
         kspec.sigma,
         support,
+        DIM,
         quad_points,
         bool(periodic),
         float(eta_crit),
@@ -2798,7 +2808,6 @@ def _prepare_isotropic(
         grid_fields=grid_fields,
         grid_weights=grid_weights,
         structure="isotropic",
-        dim=DIM,
         kernel_name=kernel_name,
         support=support,
         periodic=bool(periodic),
@@ -2872,6 +2881,7 @@ def _prepare_covariant(
         kspec.evaluate,
         kspec.sigma,
         support,
+        DIM,
         quad_points,
         bool(periodic),
         float(eta_crit),
@@ -2897,7 +2907,6 @@ def _prepare_covariant(
         grid_fields=grid_fields,
         grid_weights=grid_weights,
         structure="covariant",
-        dim=DIM,
         kernel_name=kernel_name,
         support=support,
         periodic=bool(periodic),

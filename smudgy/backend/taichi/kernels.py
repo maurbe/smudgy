@@ -1096,19 +1096,19 @@ def _build_kernel_sample_grid_1d(
     evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
     support: ti.f32,
+    dim: ti.template(),          # <-- new: passed in, not assigned inside
     n_q: ti.i32,
     coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q, 1)
     q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (n_q,)
     integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (n_q,)
 ):
-    DIM = ti.static(1)
     dq = support / n_q
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
     for iq in range(n_q):
         q0 = iq * dq
         q = q0 + 0.5 * dq
         q1 = q0 + dq
-        integral = sig * 2.0 * evaluate_integral_fn(q0, q1, DIM)
+        integral = sig * 2.0 * evaluate_integral_fn(q0, q1, dim)
         coords_out[iq, 0] = q
         q_out[iq] = q
         integrals_out[iq] = integral
@@ -1119,16 +1119,16 @@ def _build_kernel_sample_grid_2d(
     evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
     support: ti.f32,
+    dim: ti.template(),          # <-- new: passed in, not assigned inside
     n_q: ti.i32,
     n_phi: ti.i32,
     coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q*n_phi, 2)
     q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
     integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
 ):
-    DIM = ti.static(2)
     dq = support / n_q
     dphi = 2.0 * pi / n_phi
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for iq, it in ti.ndrange(n_q, n_phi):
         q0 = iq * dq
@@ -1139,7 +1139,7 @@ def _build_kernel_sample_grid_2d(
         x = q * ti.cos(phiC)
         y = q * ti.sin(phiC)
 
-        integral = sig * dphi * evaluate_integral_fn(q0, q1, DIM)
+        integral = sig * dphi * evaluate_integral_fn(q0, q1, dim)
 
         idx = iq * n_phi + it
         coords_out[idx, 0] = x
@@ -1153,6 +1153,7 @@ def _build_kernel_sample_grid_3d(
     evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
     support: ti.f32,
+    dim: ti.template(),          # <-- new: passed in, not assigned inside
     n_q: ti.i32,
     n_theta: ti.i32,
     n_phi: ti.i32,
@@ -1160,11 +1161,10 @@ def _build_kernel_sample_grid_3d(
     q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
     integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
 ):
-    DIM = ti.static(3)
     dq = support / n_q
     dtheta = pi / n_theta
     dphi = 2.0 * pi / n_phi
-    sig = sigma_fn(DIM)
+    sig = sigma_fn(dim)
 
     for iq, it, ip in ti.ndrange(n_q, n_theta, n_phi):
         q0 = iq * dq
@@ -1187,7 +1187,7 @@ def _build_kernel_sample_grid_3d(
             sig
             * dphi
             * (-ti.cos(theta1) + ti.cos(theta0))
-            * evaluate_integral_fn(q0, q1, DIM)
+            * evaluate_integral_fn(q0, q1, dim)
         )
 
         idx = (iq * n_theta + it) * n_phi + ip
@@ -1222,6 +1222,7 @@ def build_kernel_sample_grid(
             kspec.evaluate_integral,
             kspec.sigma,
             kspec.support,
+            dim,
             n,
             coords,
             q,
@@ -1232,6 +1233,7 @@ def build_kernel_sample_grid(
             kspec.evaluate_integral,
             kspec.sigma,
             kspec.support,
+            dim,
             n,
             n,
             coords,
@@ -1243,6 +1245,7 @@ def build_kernel_sample_grid(
             kspec.evaluate_integral,
             kspec.sigma,
             kspec.support,
+            dim,
             n,
             n,
             n,

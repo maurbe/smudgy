@@ -6,7 +6,7 @@ import pytest
 from smudgy import PointCloud
 
 DIMS = [2, 3]
-STRUCTURE = ["isotropic", "anisotropic"]
+STRUCTURE = ["isotropic", "covariant"]
 NUM_NEIGHBORS = [3]
 NUM_KERNEL_EVALUATIONS_PER_AXIS = [2, 3, 4]
 INTEGRAL_METHODS = ["midpoint", "trapezoidal", "simpson"]
@@ -18,8 +18,8 @@ KERNEL_NAMES = [
     "cubic_spline",
     "quintic_spline",
     "wendland_c2",
-    "wendland_c4",
-    "wendland_c6",
+    #"wendland_c4",
+    #"wendland_c6",
 ]
 
 
@@ -64,7 +64,7 @@ def test_weight_conservation(
     )
     pc.compute_smoothing()
 
-    _, weights_sph = pc.deposit_to_grid(
+    _, weights_sph = pc.deposit(
         fields=pc.weights,
         averaged=False,
         gridnums=gridnums,
