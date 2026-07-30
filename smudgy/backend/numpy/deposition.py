@@ -75,7 +75,6 @@ def _ngp_1d(
         )
 
     x_idx = x_idx[valid]
-    y_idx = y_idx[valid]
     particle_fields = particle_fields[valid]
     particle_weights = particle_weights[valid]
 

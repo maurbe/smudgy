@@ -7,7 +7,7 @@ from smudgy import PointCloud
 
 DIMS = [1, 2, 3]
 GRIDNUM = 64
-KERNEL_NAME = "cic"
+KERNEL_NAMES = ["ngp", "cic", "tsc", "pcs", "pqs"]
 
 
 def _generate_dataset(dim: int):
@@ -21,7 +21,8 @@ def _generate_dataset(dim: int):
 
 
 @pytest.mark.parametrize("dim", DIMS)
-def test_backend_consistency(dim):
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
+def test_backend_consistency(dim, kernel_name):
     """Test consistency between backends."""
     data = _generate_dataset(dim)
 
@@ -35,7 +36,7 @@ def test_backend_consistency(dim):
         "averaged": False,
         "adaptive": False,
         "gridnums": GRIDNUM,
-        "kernel_name": KERNEL_NAME,
+        "kernel_name": kernel_name,
     }
 
     pc = PointCloud(
