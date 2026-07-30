@@ -11,9 +11,9 @@ NUM_NEIGHBORS = [3]  # , 4, 5]
 NUM_KERNEL_EVALUATIONS_PER_AXIS = [2]  # , 3, 4]
 INTEGRAL_METHODS = ["midpoint"]  # , "trapezoidal", "simpson"]
 KERNEL_NAMES = [
-    "tophat",
-    "tsc",
-    "gaussian",
+    "tophat_separable",
+    "tsc_separable",
+    "gaussian_separable",
 ]
 
 
@@ -57,13 +57,12 @@ def test_weight_conservation(
     )
     pc.compute_smoothing()
 
-    _, weights_sph = pc.deposit_to_grid(
+    _, weights_sph = pc.deposit(
         fields=pc.weights,
         averaged=False,
         gridnums=gridnums,
         kernel_name=kernel_name,
         structure=structure,
-        adaptive=False,
         num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
         integration_method=integral_method,
         return_weights=True,

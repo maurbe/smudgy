@@ -972,19 +972,19 @@ class SphericalKernelSpec:
 
 
 SEPARABLE_KERNELS = {
-    "tophat_sep": SeparableKernelSpec(
+    "tophat_separable": SeparableKernelSpec(
         evaluate_1d=tophat_sep_evaluate_1d,
         F_1d=tophat_sep_F_1d,
         sigma=tophat_sep_sigma,
         support=TOPHAT_RECT_SUPPORT,
     ),
-    "tsc_sep": SeparableKernelSpec(
+    "tsc_separable": SeparableKernelSpec(
         evaluate_1d=tsc_sep_evaluate_1d,
         F_1d=tsc_sep_F_1d,
         sigma=tsc_sep_sigma,
         support=TSC_RECT_SUPPORT,
     ),
-    "gaussian_sep": SeparableKernelSpec(
+    "gaussian_separable": SeparableKernelSpec(
         evaluate_1d=gaussian_sep_evaluate_1d,
         F_1d=gaussian_sep_F_1d,
         sigma=gaussian_sep_sigma,

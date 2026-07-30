@@ -18,8 +18,8 @@ KERNEL_NAMES = [
     "cubic_spline",
     "quintic_spline",
     "wendland_c2",
-    #"wendland_c4",
-    #"wendland_c6",
+    "wendland_c4",
+    "wendland_c6",
 ]
 
 

@@ -1332,7 +1332,7 @@ def _separable_1d(
             wx[si] = (
                 wj
                 * sig
-                * _separable_integrate_1d(F_1d_fn, kernel_support, DIM, q_left, q_right)
+                * _separable_integrate_1d(F_1d_fn, kernel_support, dim, q_left, q_right)
             )  # sig here!
 
         for si in ti.ndrange(nx):
@@ -1423,7 +1423,7 @@ def _separable_2d(
             q_left = (i - x_cell) * inv_hx
             q_right = ((i + 1) - x_cell) * inv_hx
             wx[si] = sig * _separable_integrate_1d(
-                F_1d_fn, kernel_support, DIM, q_left, q_right
+                F_1d_fn, kernel_support, dim, q_left, q_right
             )  # sig here!
 
         ny = j_max - j_min + 1
@@ -1432,7 +1432,7 @@ def _separable_2d(
             q_left = (j - y_cell) * inv_hy
             q_right = ((j + 1) - y_cell) * inv_hy
             wy[sj] = wj * _separable_integrate_1d(
-                F_1d_fn, kernel_support, DIM, q_left, q_right
+                F_1d_fn, kernel_support, dim, q_left, q_right
             )  # wj here!
 
         for si, sj in ti.ndrange(nx, ny):
@@ -1540,7 +1540,7 @@ def _separable_3d(
             q_left = (i - x_cell) * inv_hx
             q_right = ((i + 1) - x_cell) * inv_hx
             wx[si] = sig * _separable_integrate_1d(
-                F_1d_fn, kernel_support, DIM, q_left, q_right
+                F_1d_fn, kernel_support, dim, q_left, q_right
             )
 
         ny = j_max - j_min + 1
@@ -1549,7 +1549,7 @@ def _separable_3d(
             q_left = (j - y_cell) * inv_hy
             q_right = ((j + 1) - y_cell) * inv_hy
             wy[sj] = wj * _separable_integrate_1d(
-                F_1d_fn, kernel_support, DIM, q_left, q_right
+                F_1d_fn, kernel_support, dim, q_left, q_right
             )
 
         nz = k_max - k_min + 1
@@ -1558,7 +1558,7 @@ def _separable_3d(
             q_left = (k - z_cell) * inv_hz
             q_right = ((k + 1) - z_cell) * inv_hz
             wz[sk] = _separable_integrate_1d(
-                F_1d_fn, kernel_support, DIM, q_left, q_right
+                F_1d_fn, kernel_support, dim, q_left, q_right
             )
 
         for si, sj, sk in ti.ndrange(nx, ny, nz):
