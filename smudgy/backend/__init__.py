@@ -6,6 +6,7 @@ _BACKEND_ROUTINES = {
     "compute_hsml": ("smoothing", "compute_hsml"),
     "compute_hmat": ("smoothing", "compute_hmat"),
     "compute_density": ("interpolation", "density"),
+    "project_2d": ("tensor_utils", "project_2d"),
 }
 
 
@@ -14,7 +15,7 @@ def _check_backend(backend: str):
         raise ValueError(f"Unknown backend: {backend!r}. Expected 'numpy' or 'taichi'.")
 
 
-def dispatch(routine: str, *args, backend: str, **kwargs):
+def _dispatch(routine: str, *args, backend: str, **kwargs):
     """Call a routine from the selected backend without importing both backends."""
     _check_backend(backend)
     try:

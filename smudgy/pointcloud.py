@@ -10,8 +10,8 @@ from mpi4py import MPI
 from . import execution
 from .backend.neighbors import (
     build_kdtree,
-    coordinate_difference_with_pbc,
     query_kdtree,
+    coordinate_difference_with_pbc,
 )
 from .backend.taichi import init as taichi_init
 from .smooth import SmoothingInfo
@@ -493,7 +493,7 @@ class PointCloud:
             )
 
         if structure_temp in ("separable", "isotropic"):
-            self.smoothing.smoothing_lengths = execution.dispatch(
+            self.smoothing.smoothing_lengths = execution._dispatch(
                 "compute_hsml",
                 backend=self.backend,
                 nn_dists=nn_dists,
@@ -504,7 +504,7 @@ class PointCloud:
                 smoothing_tensors_eigvals,
                 smoothing_tensors_eigvecs,
                 nn_dists_vec,
-            ) = execution.dispatch(
+            ) = execution._dispatch(
                 "compute_hmat",
                 backend=self.backend,
                 query_positions=qpos,
@@ -547,7 +547,7 @@ class PointCloud:
         if self.verbose:
             print(f"[smudgy] Computing density using " f"{st} '{kn}' kernel")
 
-        density = execution.dispatch(
+        density = execution._dispatch(
             "compute_density",
             backend=self.backend,
             kernel_name=kn,
@@ -751,7 +751,7 @@ class PointCloud:
 
         if structure == "covariant":
             if plane_projection is not None or plane_projection_basis is not None:
-                _, vals, vecs = execution.dispatch(
+                _, vals, vecs = execution._dispatch(
                     "project_2d",
                     backend=self.backend,
                     h_tensor=self.smoothing.smoothing_tensors[mask],
@@ -931,7 +931,7 @@ class PointCloud:
                 f"{structure_temp} '{self.smoothing.kernel_name}' kernel"
             )
 
-        return execution.dispatch(
+        return execution._dispatch(
             "interpolate",
             backend=self.backend,
             kernel_name=self.smoothing.kernel_name,
@@ -1118,7 +1118,7 @@ class PointCloud:
                 f"{structure_temp} '{self.smoothing.kernel_name}' kernel"
             )
 
-        fields_grid, weights_grid = execution.dispatch(
+        fields_grid, weights_grid = execution._dispatch(
             "deposit",
             backend=self.backend,
             **deposit_kwargs,

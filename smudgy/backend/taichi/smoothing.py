@@ -4,20 +4,24 @@ import taichi as ti
 
 _EPS = 1e-7
 
+def _as_float32(array):
+    """Return a C-contiguous float32 array. No copy if `array` is
+    already float32 and C-contiguous; copies otherwise.
+    """
+    return np.ascontiguousarray(array, dtype=np.float32)
 
 def compute_hsml(nn_dists: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(nn_dists[:, -1], dtype=np.float32)
 
 
 @ti.func
-def _wrap(d: ti.f32, box: ti.f32, periodic: ti.template()) -> ti.f32:
+def _coordinate_difference_with_pbc(d: ti.f32, box: ti.f32, periodic: ti.template()) -> ti.f32:
     r = d
     if ti.static(periodic):
         half = 0.5 * box
-        if r > half:
-            r -= box
-        elif r < -half:
-            r += box
+        shifted = r + half
+        wrapped = shifted - box * ti.floor(shifted / box)  # folds into [0, box)
+        r = wrapped - half
     return r
 
 
@@ -47,7 +51,7 @@ def _compute_hmat_kernel(
             w = neighbor_weights[q, k]
             d = ti.Vector.zero(ti.f32, dim)
             for a in ti.static(range(dim)):
-                diff = _wrap(
+                diff = _coordinate_difference_with_pbc(
                     neighbor_positions[q, k, a] - query_positions[q, a],
                     boxsize[a],
                     periodic,
@@ -60,6 +64,32 @@ def _compute_hmat_kernel(
         Sigma += eps * Sigma.trace() * ti.Matrix.identity(ti.f32, dim)
 
         eigvals, eigvecs = ti.sym_eig(Sigma, ti.f32)
+
+        # ==========================================================================================
+        # Fix for annyoing taichi bug in 2D: 
+        # eigvals/vecs are returned in descending order, 3D is fine and follows numpy backend
+        if ti.static(dim == 2):
+            if eigvals[0] > eigvals[1]:
+                eigvals[0], eigvals[1] = eigvals[1], eigvals[0]
+                for a in ti.static(range(2)):
+                    eigvecs[a, 0], eigvecs[a, 1] = eigvecs[a, 1], eigvecs[a, 0]
+
+            # Eigenvector orientation convention:
+            # Numpy and Taichi have no convention about the sign of the eigenvectors,
+            # impose a consistent sign convention for comparison with Taichi backend 
+            # (largest-magnitude component of each eigenvector is positive).
+            for col in ti.static(range(2)):
+                max_abs = 0.0
+                sign = 1.0
+                for row in ti.static(range(2)):
+                    v = eigvecs[row, col]
+                    if ti.abs(v) > max_abs:
+                        max_abs = ti.abs(v)
+                        sign = 1.0 if v >= 0.0 else -1.0
+                for row in ti.static(range(2)):
+                    eigvecs[row, col] *= sign
+        # ==========================================================================================
+
         for a in ti.static(range(dim)):
             eigvals_out[q, a] = ti.sqrt(ti.max(eigvals[a], 0.0))
 
@@ -86,13 +116,13 @@ def compute_hmat(
             "[smudgy] Only 2D and 3D positions are supported for anisotropic smoothing tensors."
         )
 
-    query_positions = np.ascontiguousarray(query_positions, dtype=np.float32)
-    neighbor_positions = np.ascontiguousarray(neighbor_positions, dtype=np.float32)
-    neighbor_weights = np.ascontiguousarray(neighbor_weights, dtype=np.float32)
+    query_positions = _as_float32(query_positions)
+    neighbor_positions = _as_float32(neighbor_positions)
+    neighbor_weights = _as_float32(neighbor_weights)
 
     periodic = boxsize is not None
     box = (
-        np.ascontiguousarray(boxsize, dtype=np.float32)
+        _as_float32(boxsize)
         if periodic
         else np.zeros(dim, dtype=np.float32)
     )

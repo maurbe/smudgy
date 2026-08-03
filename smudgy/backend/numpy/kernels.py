@@ -104,7 +104,6 @@ class BaseKernelClass:
 
     def evaluate_gradient_coords(self, q, grad_q, scale):
         """Evaluate the kernel gradient from canonical coordinates and direction."""
-        print(scale.shape, self._kernel_gradient_values(q).shape, grad_q.shape)
         res = scale[..., None] * self._kernel_gradient_values(q)[..., None] * grad_q
         if q.dtype.kind == "f":
             return res.astype(q.dtype, copy=False)

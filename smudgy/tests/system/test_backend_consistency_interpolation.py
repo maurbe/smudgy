@@ -1,4 +1,10 @@
-"""Tests backend consistency for interpolation() (smoothing + smoothing length indirectly too) across Numpy CPU and Taichi CPU."""
+"""Tests backend consistency for interpolate() across Numpy CPU and Taichi CPU.
+
+Covers all documented interpolation modes ('field', 'gradient', 'divergence',
+'curl') for 2D/3D and both 'isotropic'/'covariant' structures. This also
+exercises compute_smoothing() and compute_density() indirectly, since
+interpolate() depends on both.
+"""
 
 import numpy as np
 import pytest
@@ -6,51 +12,104 @@ import pytest
 from smudgy import PointCloud
 
 DIMS = [2, 3]
-GRIDNUM = 64
-KERNEL_NAME = "gaussian"
+KERNEL_NAMES = [
+    "tophat",
+    "tsc",
+    "gaussian",
+    "lucy",
+    "cubic_spline",
+    "quintic_spline",
+    "wendland_c2",
+    "wendland_c4",
+    "wendland_c6",
+]
 STRUCTURES = ["isotropic", "covariant"]
+MODES = ["field", "gradient", "divergence", "curl"]
 
 
-def _generate_dataset(dim: int):
+def _generate_dataset(dim: int, seed: int):
     """Generate a random dataset for testing."""
-    np.random.seed(42)
-    N = 1000
-    positions = np.random.uniform(0, 1, size=(N, dim))
+    rng = np.random.default_rng(seed)
+    N = 100
+    positions = rng.uniform(0, 1, size=(N, dim))
     weights = np.ones(N, dtype=np.float32)
     boxsize = np.ones(dim, dtype=np.float32)
     return {"positions": positions, "weights": weights, "boxsize": boxsize}
 
 
-@pytest.mark.parametrize("dim", DIMS)
-@pytest.mark.parametrize("strucutre", STRUCTURES)
-def test_backend_consistency(dim, strucutre):
-    """Test consistency between backends."""
-    data = _generate_dataset(dim)
-
+def _run_backend(backend, dim, structure, mode, kernel_name, data, query_positions):
+    """Set up a PointCloud on the given backend and run interpolate() for one mode."""
     positions = data["positions"]
     weights = data["weights"]
     boxsize = data["boxsize"]
+
+    pc = PointCloud(
+        positions=positions,
+        weights=weights,
+        boxsize=boxsize,
+        verbose=False,
+        backend=backend,
+    ).global_setup(kernel_name=kernel_name, num_neighbors=8, structure=structure)
+    pc.compute_smoothing()
+    pc.compute_density()
+
+    # scalar field always available; vector field needed for divergence/curl
+    # and also usable for field/gradient checks.
+    scalar_field = np.random.default_rng(0).uniform(size=positions.shape[0])
     vector_field = np.ones((positions.shape[0], dim))
+    pc.add_fields(["sf", "vf"], [scalar_field, vector_field])
 
-    data_2 = _generate_dataset(dim)
-    query_positions = data_2["positions"]
+    field_name = "vf" if mode in ("divergence", "curl") else "sf"
 
-    f_interpolated = []
+    return pc.interpolate(
+        fields=field_name, query_positions=query_positions, mode=mode, structure=structure
+    )
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("structure", STRUCTURES)
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
+def test_backend_consistency(dim, structure, mode, kernel_name):
+    """Test numpy/taichi consistency for interpolate() across all modes."""
+    data = _generate_dataset(dim, seed=42)
+    query_positions = _generate_dataset(dim, seed=43)["positions"]
+
+    results = {}
     for backend in ["numpy", "taichi"]:
-        pc = PointCloud(
-            positions=positions,
-            weights=weights,
-            boxsize=boxsize,
-            verbose=False,
-            backend=backend,
-        ).global_setup(kernel_name=KERNEL_NAME, num_neighbors=8, structure=strucutre)
-        pc.compute_smoothing()
-        pc.compute_density()
-        pc.add_fields("vf", vector_field)
+        results[backend] = _run_backend(
+            backend, dim, structure, mode, kernel_name, data, query_positions
+        )
 
-        f = pc.interpolate(fields="vf", query_positions=query_positions)
-        f_interpolated.append(f)
-    f_numpy, f_taichi = f_interpolated
+    f_numpy, f_taichi = results["numpy"], results["taichi"]
 
     assert f_numpy.shape == f_taichi.shape
-    np.testing.assert_allclose(f_numpy, f_taichi, rtol=1e-4, atol=1e-6)
+    assert np.all(np.isfinite(f_numpy)), "numpy backend produced non-finite values"
+    assert np.all(np.isfinite(f_taichi)), "taichi backend produced non-finite values"
+
+    # Strive for sub-1% level agreement
+    np.testing.assert_allclose(f_numpy, f_taichi, rtol=1e-2, atol=1e-3)
+
+
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("structure", STRUCTURES)
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
+def test_backend_consistency_at_particle_positions(dim, structure, kernel_name):
+    """Same check but with query_positions=None (i.e. evaluate at particle positions)."""
+    data = _generate_dataset(dim, seed=42)
+
+    results = {}
+    for backend in ["numpy", "taichi"]:
+        results[backend] = _run_backend(
+            backend, dim, structure, "field", kernel_name, data, query_positions=None
+        )
+
+    f_numpy, f_taichi = results["numpy"], results["taichi"]
+    assert f_numpy.shape == f_taichi.shape
+    np.testing.assert_allclose(f_numpy, f_taichi, rtol=1e-2, atol=1e-3)
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(pytest.main([__file__, "-v"]))

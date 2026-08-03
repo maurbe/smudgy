@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from smudgy.grid import (
+from smudgy.utils import (
     create_grid_1d,
     create_grid_2d,
     create_grid_3d,

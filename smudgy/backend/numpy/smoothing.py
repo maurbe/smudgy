@@ -9,8 +9,25 @@ IntArray = npt.NDArray[np.int32]
 
 _EPS = 1e-7
 
+def _as_float32(array):
+    """Return a float32 view of ``array`` without copying when possible.
+
+    Parameters
+    ----------
+    array
+        Input array-like object.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``float32`` view or copy of ``array``.
+
+    """
+    return np.asarray(array, dtype=np.float32)
+
 
 def compute_hsml(nn_dists: FloatArray) -> FloatArray:
+    nn_dists = _as_float32(nn_dists)
     return nn_dists[:, -1]
 
 
@@ -27,8 +44,10 @@ def compute_hmat(
             "[smudgy] Only 2D and 3D positions are supported for anisotropic smoothing tensors."
         )
 
-    # weights = weights.ravel()
-    # neighbor_weights = weights[nn_inds]
+    query_positions = _as_float32(query_positions)
+    neighbor_positions = _as_float32(neighbor_positions)
+    neighbor_weights = _as_float32(neighbor_weights)
+    boxsize = _as_float32(boxsize)
 
     rel_coords = coordinate_difference_with_pbc(
         neighbor_positions, query_positions[:, np.newaxis, :], boxsize
@@ -44,6 +63,12 @@ def compute_hmat(
 
     eigvals, eigvecs = np.linalg.eigh(Sigma)
     eigvals = np.sqrt(np.clip(eigvals, 0, None))
+    # eigvals, eigvecs should be in descending order
+    # numpy: already ascending, but be explicit
+    #order = np.argsort(eigvals, axis=-1, descending=True)
+    #eigvals = np.take_along_axis(eigvals, order, axis=-1)
+    #eigvecs = np.take_along_axis(eigvecs, order[..., None, :], axis=-2)
+
     H = np.einsum("nij,nj,nkj->nik", eigvecs, eigvals, eigvecs, optimize=True)
 
     return (

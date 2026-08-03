@@ -447,23 +447,19 @@ def lucy_gradient(q: ti.f32, grad_q, dim: ti.template()):
 
 
 # --- CubicSpline -----------------------------------------------------------
-CUBIC_SPLINE_SUPPORT = 2.0
-CUBIC_SPLINE_NODE_1 = 1.0
+CUBIC_SPLINE_SUPPORT = 1.0
+CUBIC_SPLINE_NODE_1 = 0.5
 CUBIC_SPLINE_EPS = 1e-6
 
 
 @ti.func
 def cubic_spline_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
     result = 0.0
-    if q < CUBIC_SPLINE_SUPPORT:
-        r = 2.0 - q
-        r3 = r * r * r
-        h = 1.0 - q
-        h3 = h * h * h
-        if q <= CUBIC_SPLINE_NODE_1:
-            result = r3 - 4.0 * h3
-        else:
-            result = r3
+    if q <= CUBIC_SPLINE_NODE_1:
+        result = 1.0 - 6.0 * q * q + 6.0 * q * q * q
+    elif q <= CUBIC_SPLINE_SUPPORT:
+        r = 1.0 - q
+        result = 2.0 * r * r * r
     return result
 
 
@@ -471,11 +467,11 @@ def cubic_spline_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
 def cubic_spline_sigma(dim: ti.template()) -> ti.f32:
     result = 0.0
     if ti.static(dim == 1):
-        result = 1.0 / 6.0
+        result = 4.0 / 3.0
     elif ti.static(dim == 2):
-        result = 15.0 / (14.0 * 3.0 * pi)
+        result = 40.0 / (7.0 * pi)
     elif ti.static(dim == 3):
-        result = 1.0 / (4.0 * pi)
+        result = 8.0 / pi
     return result
 
 
@@ -486,21 +482,24 @@ def cubic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     result = 0.0
     if ti.static(dim == 1):
         if q <= CUBIC_SPLINE_NODE_1:
-            result = q * (4.0 - 2.0 * q**2 + 0.75 * q**3)
+            result = q - 2.0 * q**3 + 1.5 * q**4
         else:
-            result = -0.25 * (2.0 - q) ** 4
+            result = 0.375 - 0.5 * (1.0 - q) ** 4
     elif ti.static(dim == 2):
         if q <= CUBIC_SPLINE_NODE_1:
-            result = q**2 * (2.0 - 1.5 * q**2 + 0.6 * q**3)
+            result = 0.5 * q**2 - 1.5 * q**4 + 1.2 * q**5
         else:
-            result = q**2 * (4.0 - 4.0 * q + 1.5 * q**2 - 0.2 * q**3)
+            result = 0.0875 - 0.5 * (1.0 - q) ** 4 + 0.4 * (1.0 - q) ** 5
     elif ti.static(dim == 3):
-        q2 = q * q
-        q3 = q2 * q
         if q <= CUBIC_SPLINE_NODE_1:
-            result = q3 * (4.0 / 3.0 - 1.2 * q2 + 0.5 * q3)
+            result = q**3 / 3.0 - 1.2 * q**5 + q**6
         else:
-            result = q3 * (8.0 / 3.0 - 3.0 * q + 1.2 * q2 - q3 / 6.0)
+            result = (
+                0.03125
+                - 0.5 * (1.0 - q) ** 4
+                + 0.8 * (1.0 - q) ** 5
+                - (1.0 / 3.0) * (1.0 - q) ** 6
+            )
     return result
 
 
@@ -526,9 +525,9 @@ def cubic_spline_evaluate_integral(
 @ti.func
 def cubic_spline_gradient(q: ti.f32, grad_q, dim: ti.template()):
     dWdq = 0.0
-    if q <= 0.5:
+    if q <= CUBIC_SPLINE_NODE_1:
         dWdq = -6.0 * q * (2.0 - 3.0 * q)
-    elif q <= 1.0:
+    elif q <= CUBIC_SPLINE_SUPPORT:
         dWdq = -6.0 * (1.0 - q) ** 2
     return dWdq * grad_q
 
@@ -1271,6 +1270,7 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
     For separable kernels the box integral is the product of the 1D integral
     over [-support, support] taken `dim` times.
     """
+    ti.init(arch='cpu')
     kspec = create_separable_kernel(kernel_name)
 
     @ti.kernel
@@ -1292,6 +1292,7 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
 def compute_total_integral_spherical(
     kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
 ) -> float:
+    ti.init(arch='cpu')
     grid = build_kernel_sample_grid(kernel_name, dim, num_kernel_evaluations_per_axis)
     return float(np.sum(grid["integrals"]))
 
@@ -1335,6 +1336,7 @@ def _sample_separable_1d(
 
 
 def get_spherical_kernel_values_1D(kernel_name: str):
+    ti.init(arch='cpu')
     kspec = create_spherical_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)
@@ -1346,6 +1348,7 @@ def get_spherical_kernel_values_1D(kernel_name: str):
 
 
 def get_separable_kernel_values_1D(kernel_name: str):
+    ti.init(arch='cpu')
     kspec = create_separable_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)

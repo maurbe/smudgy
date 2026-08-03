@@ -66,19 +66,19 @@ def _reduce_sum(comm, local_result):
     return comm.allreduce(local_result, op=MPI.SUM)
 
 
-def dispatch(func: str, *, backend: str, **kwargs):
+def _dispatch(func: str, *, backend: str, **kwargs):
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
 
     if size == 1:
-        return backend_module.dispatch(func, backend=backend, **kwargs)
+        return backend_module._dispatch(func, backend=backend, **kwargs)
 
     if func not in REDUCTION:
         raise ValueError(f"No MPI reduction strategy registered for '{func}'")
 
     rank = comm.Get_rank()
     local_kwargs = _scatter(func, kwargs, rank, size)
-    local_result = backend_module.dispatch(func, backend=backend, **local_kwargs)
+    local_result = backend_module._dispatch(func, backend=backend, **local_kwargs)
 
     reduction = REDUCTION[func]
     if reduction == "gather":

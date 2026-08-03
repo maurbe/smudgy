@@ -972,7 +972,7 @@ def _pcs_1d(
 
     weighted_fields = particle_fields * particle_weights[:, None]
 
-    for ox, oy in product(range(4), repeat=2):
+    for ox in range(4):
 
         xi = ixs[ox]
         w = wx[ox]
@@ -1005,9 +1005,7 @@ def _pcs_1d(
 
     return (
         grid_fields.reshape(F, Nx),
-        grid_weights.reshape(
-            Nx,
-        ),
+        grid_weights.reshape(Nx,),
     )
 
 
