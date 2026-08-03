@@ -13,12 +13,10 @@ from scipy.interpolate import RegularGridInterpolator
 # =============================================================================
 # Plotting helpers
 # =============================================================================
-
 Float32Array = npt.NDArray[np.float32]
 IntArray = npt.NDArray[np.int_]
 BoxInput = float | Sequence[float] | npt.ArrayLike
 CellInput = int | Sequence[int] | npt.ArrayLike
-
 
 def _resolve_boxsize(boxsize: BoxInput, dim: int) -> npt.NDArray[np.floating]:
     """Return per-dimension box lengths given scalar or array-like input.
@@ -214,7 +212,6 @@ def grid_lines(edges, nx, ny=None, include_edges=True):
         hlines,
         (ymin, ymax, xmin, xmax),
     )  # switched order here is correct for plotting
-
 
 
 # =============================================================================
