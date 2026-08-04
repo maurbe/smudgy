@@ -4,6 +4,6 @@
 :maxdepth: 1
 
 deposition/walkthrough
-deposition/structure_comparison
+deposition/fixed_adaptive_methods
 deposition/gradients
 deposition/projections

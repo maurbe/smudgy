@@ -2,11 +2,10 @@
 
 import numpy as np
 import taichi as ti
-import smudgy as sm
-import pytest
 
-from smudgy.backend.taichi.tensor_utils import project_2d as project_2d_taichi
+import smudgy as sm
 from smudgy.backend.numpy.tensor_utils import project_2d as project_2d_numpy
+from smudgy.backend.taichi.tensor_utils import project_2d as project_2d_taichi
 
 
 def _generate_dataset(dim: int):
@@ -28,7 +27,7 @@ def test_backend_consistency():
         weights=data["weights"],
         boxsize=data["boxsize"],
         verbose=False,
-    ).global_setup(num_neighbors=8, structure="covariant", kernel_name='lucy')
+    ).global_setup(num_neighbors=8, structure="covariant", kernel_name="lucy")
     pc.compute_smoothing()
 
     ti.init(arch=ti.cpu)

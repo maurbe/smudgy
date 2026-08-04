@@ -1,3 +1,5 @@
+"""Execution module for smudgy, providing parallelized dispatching of computational functions across MPI ranks."""
+
 import numpy as np
 from mpi4py import MPI
 

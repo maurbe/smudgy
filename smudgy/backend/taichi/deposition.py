@@ -1278,7 +1278,7 @@ def _separable_1d(
     F_1d_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     periodic: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1357,7 +1357,7 @@ def _separable_2d(
     F_1d_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     periodic: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1460,7 +1460,7 @@ def _separable_3d(
     F_1d_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     periodic: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1593,7 +1593,7 @@ def _isotropic_1d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -1705,7 +1705,7 @@ def _isotropic_2d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -1843,7 +1843,7 @@ def _isotropic_3d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -2014,7 +2014,7 @@ def _covariant_1d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -2154,7 +2154,7 @@ def _covariant_2d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
@@ -2342,7 +2342,7 @@ def _covariant_3d(
     evaluate_fn: ti.template(),
     sigma_fn: ti.template(),
     kernel_support: ti.f32,
-    dim: ti.template(),   # only new line in the signature
+    dim: ti.template(),  # only new line in the signature
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,

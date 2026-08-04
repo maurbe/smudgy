@@ -37,11 +37,11 @@ def test_backend_consistency(dim, structure):
             boxsize=boxsize,
             verbose=False,
             backend=backend,
-        ).global_setup(num_neighbors=8, structure=structure, kernel_name='lucy')
+        ).global_setup(num_neighbors=8, structure=structure, kernel_name="lucy")
         pc.compute_smoothing()
         pc.compute_density()
 
-        if structure == 'isotropic':
+        if structure == "isotropic":
             dens = pc.smoothing.density_isotropic
             density_objects.append(dens)
 

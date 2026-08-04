@@ -9,6 +9,7 @@ IntArray = npt.NDArray[np.int32]
 
 _EPS = 1e-7
 
+
 def _as_float32(array):
     """Return a float32 view of ``array`` without copying when possible.
 
@@ -65,9 +66,9 @@ def compute_hmat(
     eigvals = np.sqrt(np.clip(eigvals, 0, None))
     # eigvals, eigvecs should be in descending order
     # numpy: already ascending, but be explicit
-    #order = np.argsort(eigvals, axis=-1, descending=True)
-    #eigvals = np.take_along_axis(eigvals, order, axis=-1)
-    #eigvecs = np.take_along_axis(eigvecs, order[..., None, :], axis=-2)
+    # order = np.argsort(eigvals, axis=-1, descending=True)
+    # eigvals = np.take_along_axis(eigvals, order, axis=-1)
+    # eigvecs = np.take_along_axis(eigvecs, order[..., None, :], axis=-2)
 
     H = np.einsum("nij,nj,nkj->nik", eigvecs, eigvals, eigvecs, optimize=True)
 

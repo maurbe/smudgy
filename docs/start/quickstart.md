@@ -2,7 +2,9 @@
 
 Welcome to the `smudgy` documentation!
 
-`smudgy` is a python package with a C++ backend and optional OpenMP acceleration for point cloud smoothing, interpolation and grid deposition -- lightning fast, scalable and memory-efficient.
+`smudgy` is a high-performance Python package for smoothing, interpolation, and grid deposition of point-cloud data -- lightning fast, scalable and memory-efficient.
+
+Whether you’re working on a laptop or an HPC cluster, `smudgy` is built to make efficient use of your hardware. It leverages the [taichi](https://www.taichi-lang.org/) programming language for automatic CPU and GPU parallelization, and can seamlessly scale to multiple nodes using MPI through [mpi4py](https://mpi4py.github.io/mpi4py/stable/html/index.html).
 
 A typical workflow may look like this:
 
@@ -12,23 +14,39 @@ import smudgy as sm
 
 N = 1000
 boxsize = 1.0
-num_fields = 3
 
-positions       = np.random.uniform(0, boxsize, (N, 3))
-field_values    = np.random.normal(0, 1, (N, num_fields))
-weights         = np.ones(N)
+positions = np.random.uniform(0, boxsize, (N, 3))
+weights = np.ones(N)
+field = np.random.normal(size=(N, 3))
 
-points = sm.PointCloud(positions=positions, weights=weights, boxsize=boxsize)
+pc = sm.PointCloud(
+    positions=positions,
+    weights=weights,
+    boxsize=boxsize,
+    backend="taichi",
+    arch="gpu",
+)
 
-grid = points.deposit_to_grid(
-    fields=field_values,
+pc.global_setup(
+    num_neighbors=32,
+    structure="covariant",
+    kernel_name="cubic_spline",
+)
+
+pc.compute_smoothing()
+pc.compute_density()
+
+grid = pc.deposit(
+    field,
     averaged=True,
-    gridnums=64,
+    gridnums=128,
+)
 
-    # e.g. perform cloud-in-cell deposition
-    kernel_name='tophat',
-    structure='separable'
-    )
+print(grid.shape) # (1, 128, 128, 128)
+```
 
-print(grid.shape)  # (64, 64, 64, num_fields)
+To launch the same script on 8 MPI ranks (e.g. on an HPC cluster), run:
+
+```bash
+srun -n 8 python3 my_script.py
 ```

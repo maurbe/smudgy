@@ -7,13 +7,13 @@ from smudgy import PointCloud
 
 DIMS = [2, 3]
 STRUCTURE = ["separable"]
-NUM_NEIGHBORS = [3]  # , 4, 5]
-NUM_KERNEL_EVALUATIONS_PER_AXIS = [2]  # , 3, 4]
-INTEGRAL_METHODS = ["midpoint"]  # , "trapezoidal", "simpson"]
+NUM_NEIGHBORS = [3, 4, 5]
+NUM_KERNEL_EVALUATIONS_PER_AXIS = [2, 3, 4]
+INTEGRAL_METHODS = ["midpoint", "trapezoidal", "simpson"]
 KERNEL_NAMES = [
-    "tophat_separable",
-    "tsc_separable",
-    "gaussian_separable",
+    "tophat",
+    "tsc",
+    "gaussian",
 ]
 
 

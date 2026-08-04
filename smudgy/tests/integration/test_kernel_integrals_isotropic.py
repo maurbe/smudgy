@@ -19,6 +19,7 @@ KERNEL_NAMES = [
     "wendland_c6",
 ]
 
+
 @pytest.mark.parametrize("dim", DIMS)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 @pytest.mark.parametrize(
@@ -31,9 +32,11 @@ def test_kernel_integrals(
     integral = compute_total_integral_spherical(
         kernel_name,
         dim,
-        num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis
+        num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
     )
     assert np.allclose(
         # 0.1% accuracy constraint
-        integral, 1.0, atol=1e-3
+        integral,
+        1.0,
+        atol=1e-3,
     ), f"Kernel integral failed for {kernel_name} in {dim}D -- integral = {integral}"

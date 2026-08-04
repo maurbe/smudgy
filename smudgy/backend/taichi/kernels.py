@@ -954,6 +954,21 @@ def wendland_c6_gradient(q: ti.f32, grad_q, dim: ti.template()):
 # =============================================================================
 @dataclass(frozen=True)
 class SeparableKernelSpec:
+    """Specification for a separable kernel.
+
+    Parameters
+    ----------
+    evaluate_1d : Callable
+        A function that evaluates the kernel at a given distance in 1D.
+    F_1d : Callable
+        A function that evaluates the kernel function at a given distance in 1D.
+    sigma : Callable
+        A function that returns the scale parameter for a given dimension.
+    support : float
+        The support radius of the kernel.
+
+    """
+
     evaluate_1d: Callable  # ti.func(q, dim) -> f32
     F_1d: Callable  # ti.func(q, dim) -> f32
     sigma: Callable  # ti.func(dim) -> f32
@@ -962,6 +977,25 @@ class SeparableKernelSpec:
 
 @dataclass(frozen=True)
 class SphericalKernelSpec:
+    """Specification for a spherical kernel.
+
+    Parameters
+    ----------
+    evaluate : Callable
+        A function that evaluates the kernel at a given distance.
+    F : Callable
+        A function that evaluates the kernel function at a given distance.
+    sigma : Callable
+        A function that returns the scale parameter for a given dimension.
+    evaluate_integral : Callable
+        A function that evaluates the integral of the kernel over a given range.
+    gradient : Callable
+        A function that evaluates the gradient of the kernel at a given distance.
+    support : float
+        The support radius of the kernel.
+
+    """
+
     evaluate: Callable  # ti.func(q, dim) -> f32
     F: Callable  # ti.func(q, dim) -> f32
     sigma: Callable  # ti.func(dim) -> f32
@@ -971,19 +1005,19 @@ class SphericalKernelSpec:
 
 
 SEPARABLE_KERNELS = {
-    "tophat_separable": SeparableKernelSpec(
+    "tophat": SeparableKernelSpec(
         evaluate_1d=tophat_sep_evaluate_1d,
         F_1d=tophat_sep_F_1d,
         sigma=tophat_sep_sigma,
         support=TOPHAT_RECT_SUPPORT,
     ),
-    "tsc_separable": SeparableKernelSpec(
+    "tsc": SeparableKernelSpec(
         evaluate_1d=tsc_sep_evaluate_1d,
         F_1d=tsc_sep_F_1d,
         sigma=tsc_sep_sigma,
         support=TSC_RECT_SUPPORT,
     ),
-    "gaussian_separable": SeparableKernelSpec(
+    "gaussian": SeparableKernelSpec(
         evaluate_1d=gaussian_sep_evaluate_1d,
         F_1d=gaussian_sep_F_1d,
         sigma=gaussian_sep_sigma,
@@ -1068,6 +1102,24 @@ SPHERICAL_KERNELS = {
 
 
 def create_separable_kernel(name: str) -> SeparableKernelSpec:
+    """Create a SeparableKernelSpec from a kernel name.
+
+    Parameters
+    ----------
+    name : str
+        The name of the kernel. Must be one of the keys in SEPARABLE_KERNELS.
+
+    Returns
+    -------
+    SeparableKernelSpec
+        The kernel spec corresponding to the given name.
+
+    Raises
+    ------
+    ValueError
+        If the kernel name is not found in SEPARABLE_KERNELS.
+
+    """
     try:
         return SEPARABLE_KERNELS[name]
     except KeyError:
@@ -1075,6 +1127,24 @@ def create_separable_kernel(name: str) -> SeparableKernelSpec:
 
 
 def create_spherical_kernel(name: str) -> SphericalKernelSpec:
+    """Create a SphericalKernelSpec from a kernel name.
+
+    Parameters
+    ----------
+    name : str
+        The name of the kernel. Must be one of the keys in SPHERICAL_KERNELS.
+
+    Returns
+    -------
+    SphericalKernelSpec
+        The kernel spec corresponding to the given name.
+
+    Raises
+    ------
+    ValueError
+        If the kernel name is not found in SPHERICAL_KERNELS.
+
+    """
     try:
         return SPHERICAL_KERNELS[name]
     except KeyError:
@@ -1095,7 +1165,7 @@ def _build_kernel_sample_grid_1d(
     evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
     support: ti.f32,
-    dim: ti.template(),          # <-- new: passed in, not assigned inside
+    dim: ti.template(),  # <-- new: passed in, not assigned inside
     n_q: ti.i32,
     coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q, 1)
     q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (n_q,)
@@ -1118,7 +1188,7 @@ def _build_kernel_sample_grid_2d(
     evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
     support: ti.f32,
-    dim: ti.template(),          # <-- new: passed in, not assigned inside
+    dim: ti.template(),  # <-- new: passed in, not assigned inside
     n_q: ti.i32,
     n_phi: ti.i32,
     coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q*n_phi, 2)
@@ -1152,7 +1222,7 @@ def _build_kernel_sample_grid_3d(
     evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
     support: ti.f32,
-    dim: ti.template(),          # <-- new: passed in, not assigned inside
+    dim: ti.template(),  # <-- new: passed in, not assigned inside
     n_q: ti.i32,
     n_theta: ti.i32,
     n_phi: ti.i32,
@@ -1201,7 +1271,27 @@ def build_kernel_sample_grid(
     kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
 ):
     """Python-level equivalent of build_kernel_sample_grid(kernel, n).
-    Returns a dict mirroring the C++ SphericalKernelSampleGrid struct.
+
+    Parameters
+    ----------
+    kernel_name : str
+        Name of the kernel to sample.
+    dim : int
+        Dimension of the kernel (1, 2, or 3).
+    num_kernel_evaluations_per_axis : int
+        Number of kernel evaluations per axis for the numerical integration.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the following keys:
+        - "dim": int, the dimension of the kernel.
+        - "count": int, the total number of samples.
+        - "coords": np.ndarray of shape (count, dim), the coordinates of the samples.
+        - "q": np.ndarray of shape (count,), the radial distances of the samples.
+        - "integrals": np.ndarray of shape (count,), the integrals of the kernel
+          over the corresponding spherical shells.
+
     """
     if num_kernel_evaluations_per_axis <= 0:
         raise ValueError("num_kernel_evaluations_per_axis must be > 0")
@@ -1267,10 +1357,21 @@ def build_kernel_sample_grid(
 # =============================================================================
 def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
     """Sigma * evaluate_integral(bounds) over the box [-support, support]^dim.
-    For separable kernels the box integral is the product of the 1D integral
-    over [-support, support] taken `dim` times.
+
+    Parameters
+    ----------
+    kernel_name : str
+        Name of the kernel to integrate.
+    dim : int
+        Dimension of the kernel (1, 2, or 3).
+
+    Returns
+    -------
+    float
+        Total integral of the kernel over the box [-support, support]^dim.
+
     """
-    ti.init(arch='cpu')
+    ti.init(arch="cpu")
     kspec = create_separable_kernel(kernel_name)
 
     @ti.kernel
@@ -1292,7 +1393,24 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
 def compute_total_integral_spherical(
     kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
 ) -> float:
-    ti.init(arch='cpu')
+    """Sigma * evaluate_integral(bounds) over the box [-support, support]^dim.
+
+    Parameters
+    ----------
+    kernel_name : str
+        Name of the kernel to integrate.
+    dim : int
+        Dimension of the kernel (1, 2, or 3).
+    num_kernel_evaluations_per_axis : int
+        Number of kernel evaluations per axis for the numerical integration.
+
+    Returns
+    -------
+    float
+        Total integral of the kernel over the box [-support, support]^dim.
+
+    """
+    ti.init(arch="cpu")
     grid = build_kernel_sample_grid(kernel_name, dim, num_kernel_evaluations_per_axis)
     return float(np.sum(grid["integrals"]))
 
@@ -1336,7 +1454,22 @@ def _sample_separable_1d(
 
 
 def get_spherical_kernel_values_1D(kernel_name: str):
-    ti.init(arch='cpu')
+    """Get 1D values of a separable kernel for testing and plotting.
+
+    Parameters
+    ----------
+    kernel_name : str
+        Name of the separable kernel to sample.
+
+    Returns
+    -------
+    q : np.ndarray
+        1D array of sample points in the range [-support, support].
+    values : np.ndarray
+        1D array of kernel values corresponding to the sample points.
+
+    """
+    ti.init(arch="cpu")
     kspec = create_spherical_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)
@@ -1348,7 +1481,22 @@ def get_spherical_kernel_values_1D(kernel_name: str):
 
 
 def get_separable_kernel_values_1D(kernel_name: str):
-    ti.init(arch='cpu')
+    """Get 1D values of a separable kernel for testing and plotting.
+
+    Parameters
+    ----------
+    kernel_name : str
+        Name of the separable kernel to sample.
+
+    Returns
+    -------
+    q : np.ndarray
+        1D array of sample points in the range [-support, support].
+    values : np.ndarray
+        1D array of kernel values corresponding to the sample points.
+
+    """
+    ti.init(arch="cpu")
     kspec = create_separable_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)

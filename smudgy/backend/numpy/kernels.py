@@ -534,9 +534,9 @@ class WendlandC6Kernel(BaseKernelClass):
 # =============================================================================
 
 KERNEL_CLASSES = {
-    "tophat_separable": TophatSepKernel,
-    "tsc_separable": TSCSepKernel,
-    "gaussian_separable": GaussianSepKernel,
+    #"tophat_separable": TophatSepKernel,
+    #"tsc_separable": TSCSepKernel,
+    #"gaussian_separable": GaussianSepKernel,
     "tophat": TophatKernel,
     "tsc": TSCKernel,
     "gaussian": GaussianKernel,

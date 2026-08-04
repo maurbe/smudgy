@@ -1,21 +1,37 @@
-# backend/taichi/smoothing.py
+"""Smoothing module for smudgy, providing functions to compute smoothing lengths and anisotropic smoothing tensors using Taichi."""
+
 import numpy as np
 import taichi as ti
 
 _EPS = 1e-7
 
+
 def _as_float32(array):
-    """Return a C-contiguous float32 array. No copy if `array` is
-    already float32 and C-contiguous; copies otherwise.
-    """
+    """Return a C-contiguous float32 array. No copy if `array` is already float32 and C-contiguous; copies otherwise."""
     return np.ascontiguousarray(array, dtype=np.float32)
 
+
 def compute_hsml(nn_dists: np.ndarray) -> np.ndarray:
+    """Compute smoothing lengths from nearest-neighbor distances.
+
+    Parameters
+    ----------
+    nn_dists : np.ndarray
+        Array of nearest-neighbor distances.
+
+    Returns
+    -------
+    np.ndarray
+        Array of smoothing lengths.
+
+    """
     return np.ascontiguousarray(nn_dists[:, -1], dtype=np.float32)
 
 
 @ti.func
-def _coordinate_difference_with_pbc(d: ti.f32, box: ti.f32, periodic: ti.template()) -> ti.f32:
+def _coordinate_difference_with_pbc(
+    d: ti.f32, box: ti.f32, periodic: ti.template()
+) -> ti.f32:
     r = d
     if ti.static(periodic):
         half = 0.5 * box
@@ -66,7 +82,7 @@ def _compute_hmat_kernel(
         eigvals, eigvecs = ti.sym_eig(Sigma, ti.f32)
 
         # ==========================================================================================
-        # Fix for annyoing taichi bug in 2D: 
+        # Fix for annyoing taichi bug in 2D:
         # eigvals/vecs are returned in descending order, 3D is fine and follows numpy backend
         if ti.static(dim == 2):
             if eigvals[0] > eigvals[1]:
@@ -76,7 +92,7 @@ def _compute_hmat_kernel(
 
             # Eigenvector orientation convention:
             # Numpy and Taichi have no convention about the sign of the eigenvectors,
-            # impose a consistent sign convention for comparison with Taichi backend 
+            # impose a consistent sign convention for comparison with Taichi backend
             # (largest-magnitude component of each eigenvector is positive).
             for col in ti.static(range(2)):
                 max_abs = 0.0
@@ -110,6 +126,31 @@ def compute_hmat(
     neighbor_weights: np.ndarray,
     boxsize: np.ndarray | None = None,
 ):
+    """Compute anisotropic smoothing tensors from neighbor positions and weights.
+
+    Parameters
+    ----------
+    query_positions : np.ndarray
+        Array of query positions.
+    neighbor_positions : np.ndarray
+        Array of neighbor positions for each query position.
+    neighbor_weights : np.ndarray
+        Array of neighbor weights for each query position.
+    boxsize : np.ndarray, optional
+        Array of box sizes for periodic boundary conditions. If None, no periodicity is applied.
+
+    Returns
+    -------
+    H : np.ndarray
+        Array of smoothing tensors for each query position.
+    eigvals : np.ndarray
+        Array of eigenvalues of the smoothing tensors for each query position.
+    eigvecs : np.ndarray
+        Array of eigenvectors of the smoothing tensors for each query position.
+    rel_coords : np.ndarray
+        Array of relative coordinates of neighbors with respect to query positions.
+
+    """
     dim = query_positions.shape[-1]
     if dim not in (2, 3):
         raise ValueError(
@@ -121,11 +162,7 @@ def compute_hmat(
     neighbor_weights = _as_float32(neighbor_weights)
 
     periodic = boxsize is not None
-    box = (
-        _as_float32(boxsize)
-        if periodic
-        else np.zeros(dim, dtype=np.float32)
-    )
+    box = _as_float32(boxsize) if periodic else np.zeros(dim, dtype=np.float32)
 
     Nq, K = neighbor_weights.shape
     H = np.zeros((Nq, dim, dim), dtype=np.float32)

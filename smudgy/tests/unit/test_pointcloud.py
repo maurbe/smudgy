@@ -18,11 +18,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from smudgy import execution
+
 # ---------------------------------------------------------------------------
 # Adjust this import to match the actual package name/path.
 # ---------------------------------------------------------------------------
-from smudgy.pointcloud import PointCloud, STRUCTURES, INTERPOLATION_MODES
-from smudgy import execution
+from smudgy.pointcloud import INTERPOLATION_MODES, STRUCTURES, PointCloud
 
 
 # =============================================================================
@@ -215,7 +216,9 @@ class TestSetupProperties:
 
     def test_global_setup_returns_self_for_chaining(self, rng):
         pc = PointCloud(make_positions(rng), verbose=False)
-        result = pc.global_setup(structure="isotropic", kernel_name="cubic_spline", num_neighbors=16)
+        result = pc.global_setup(
+            structure="isotropic", kernel_name="cubic_spline", num_neighbors=16
+        )
         assert result is pc
         assert pc.structure == "isotropic"
         assert pc.kernel_name == "cubic_spline"
@@ -308,7 +311,9 @@ class TestComputeDensity:
     def test_density_shape_matches_num_particles(self, rng):
         n = 25
         pc = PointCloud(make_positions(rng, n=n), verbose=False)
-        pc.global_setup(structure="isotropic", kernel_name="cubic_spline", num_neighbors=8)
+        pc.global_setup(
+            structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
+        )
         pc.compute_smoothing()
         pc.compute_density()
         assert pc.smoothing.density_isotropic.shape == (n,)
@@ -378,7 +383,9 @@ class TestFieldManagement:
 class TestInterpolate:
     def _setup_ready_pc(self, rng, n=30, dim=3, structure="isotropic"):
         pc = PointCloud(make_positions(rng, n=n, dim=dim), verbose=False)
-        pc.global_setup(structure=structure, kernel_name="cubic_spline", num_neighbors=8)
+        pc.global_setup(
+            structure=structure, kernel_name="cubic_spline", num_neighbors=8
+        )
         pc.compute_smoothing()
         pc.compute_density()
         return pc
@@ -434,7 +441,9 @@ class TestInterpolate:
     def test_interpolate_before_density_raises_attribute_error(self, rng):
         n, dim = 30, 3
         pc = PointCloud(make_positions(rng, n=n, dim=dim), verbose=False)
-        pc.global_setup(structure="isotropic", kernel_name="cubic_spline", num_neighbors=8)
+        pc.global_setup(
+            structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
+        )
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(AttributeError):
             pc.interpolate("scalar_field")
@@ -463,8 +472,12 @@ class TestInterpolate:
 # =============================================================================
 class TestDeposit:
     def _setup_ready_pc(self, rng, n=40, dim=3, structure="isotropic", boxsize=1.0):
-        pc = PointCloud(make_positions(rng, n=n, dim=dim), boxsize=boxsize, verbose=False)
-        pc.global_setup(structure=structure, kernel_name="cubic_spline", num_neighbors=8)
+        pc = PointCloud(
+            make_positions(rng, n=n, dim=dim), boxsize=boxsize, verbose=False
+        )
+        pc.global_setup(
+            structure=structure, kernel_name="cubic_spline", num_neighbors=8
+        )
         pc.compute_smoothing()
         return pc
 
@@ -481,7 +494,11 @@ class TestDeposit:
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         result = pc.deposit(
-            "scalar_field", averaged=False, gridnums=8, adaptive=True, return_weights=True
+            "scalar_field",
+            averaged=False,
+            gridnums=8,
+            adaptive=True,
+            return_weights=True,
         )
         assert isinstance(result, tuple)
         fields_grid, weights_grid = result
@@ -493,14 +510,20 @@ class TestDeposit:
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         result = pc.deposit(
-            "scalar_field", averaged=False, gridnums=8, adaptive=True, return_weights=False
+            "scalar_field",
+            averaged=False,
+            gridnums=8,
+            adaptive=True,
+            return_weights=False,
         )
         assert isinstance(result, np.ndarray)
 
     def test_deposit_no_boxsize_no_extent_raises_value_error(self, rng):
         n, dim = 40, 3
         pc = PointCloud(make_positions(rng, n=n, dim=dim), boxsize=None, verbose=False)
-        pc.global_setup(structure="isotropic", kernel_name="cubic_spline", num_neighbors=8)
+        pc.global_setup(
+            structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
+        )
         pc.compute_smoothing()
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(ValueError):
@@ -579,7 +602,9 @@ class TestDeposit:
         n, dim = 40, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
-        grid = pc.deposit("scalar_field", averaged=False, gridnums=[4, 6, 8], adaptive=True)
+        grid = pc.deposit(
+            "scalar_field", averaged=False, gridnums=[4, 6, 8], adaptive=True
+        )
         assert grid.shape[1:] == (4, 6, 8)
 
 

@@ -3,4 +3,5 @@
 ```{toctree}
 :maxdepth: 1
 
-interpolation/walkthrough
+interpolation/interpolation_1d
+interpolation/interpolation_2d

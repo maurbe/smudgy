@@ -10,8 +10,8 @@ from mpi4py import MPI
 from . import execution
 from .backend.neighbors import (
     build_kdtree,
-    query_kdtree,
     coordinate_difference_with_pbc,
+    query_kdtree,
 )
 from .backend.taichi import init as taichi_init
 from .smooth import SmoothingInfo
@@ -49,6 +49,8 @@ class PointCloud:
             Verbosity flag.
         backend : str, default "taichi"
             String to determine backend.
+        **kwargs : dict
+            Additional keyword arguments for backend initialization.
 
         """
         # Initialize backend
@@ -110,7 +112,7 @@ class PointCloud:
     # Set utilities
     # =============================================================================
     def set_backend(self, backend: str = "taichi", **kwargs) -> None:
-        """Set the backend for computations, one of [numpy, taichi]"""
+        """Set the backend for computations, one of [numpy, taichi]."""
         assert isinstance(
             backend, str
         ), f"'kernel_name' must be a string but found {type(backend)}"
@@ -388,7 +390,7 @@ class PointCloud:
             gn = np.repeat(gn, dim)
         if gn.size != dim:
             raise ValueError(
-                f"Length of 'gridnums' ({gn.size}) must match deposition dimension ({dep_dim})"
+                f"Length of 'gridnums' ({gn.size}) must match deposition dimension ({dim})"
             )
         return gn
 
@@ -425,6 +427,10 @@ class PointCloud:
             Name of the SPH kernel.
         num_neighbors : int, optional
             Number of neighbors for smoothing length computation.
+        backend : str, optional
+            Backend to use for computations ('numpy' or 'taichi').
+        kwargs : dict
+            Additional keyword arguments for backend initialization.
 
         Returns
         -------
@@ -775,7 +781,7 @@ class PointCloud:
         mode: InterpolationMode = "field",
         structure: Structure | None = None,
     ) -> npt.NDArray[np.floating]:
-        """Interpolate particle fields to query positions using SPH.
+        r"""Interpolate particle fields to query positions using SPH.
 
         Compute interpolated field values, gradients, divergence, or curl at query positions
         using smoothed particle hydrodynamics (SPH).
@@ -794,6 +800,8 @@ class PointCloud:
             - 'gradient': Return field gradients ∇f
             - 'divergence': Return divergence ∇·**f** (vector fields only)
             - 'curl': Return curl ∇×**f** (vector fields only)
+        structure : Structure, optional
+            Smoothing structure to use for interpolation. If None, uses the globally set structure.
 
         Returns
         -------
@@ -866,6 +874,10 @@ class PointCloud:
 
         # check that structure is set either globally or via argument
         structure_temp = self._resolve_structure(structure)
+        if structure_temp not in ['isotropic', 'covariant']:
+            raise ValueError(
+                f"For interpolation, 'structure' must be one of ['isotropic', 'covariant'], got '{structure_temp}'"
+            )
 
         # check that density has been computed for the chosen structure
         self._check_density_computed(structure_temp)
@@ -1115,7 +1127,7 @@ class PointCloud:
         if self.verbose:
             print(
                 f"[smudgy] Depositing using "
-                f"{structure_temp} '{self.smoothing.kernel_name}' kernel"
+                f"{structure_temp} '{kernel_name_temp}' kernel"
             )
 
         fields_grid, weights_grid = execution._dispatch(

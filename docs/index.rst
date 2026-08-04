@@ -11,6 +11,7 @@
     :maxdepth: 1
 
     wiki/overview
+    wiki/backend
     wiki/kernel_structures
     wiki/numerical_quadrature
 
@@ -27,7 +28,5 @@
     :maxdepth: 2
 
     api/pointcloud
-    api/kernels
-    api/grid
     api/smooth
     api/utils

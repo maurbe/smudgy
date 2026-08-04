@@ -3,7 +3,7 @@ import mpl_toolkits.mplot3d.art3d as art3d
 import numpy as np
 from matplotlib.patches import Ellipse
 
-from smudgy.utils import project_smoTens_to_2d
+from smudgy.backend.numpy.tensor_utils import project_2d
 
 np.random.seed(0)
 
@@ -39,7 +39,7 @@ def plot_ellipsoid(ax, center, H, color, n=20):
     Y = ellipsoid[..., 1] + center[1]
     Z = ellipsoid[..., 2] + center[2]
 
-    ax.plot_surface(X, Y, Z, color=color, alpha=0.8, linewidth=0)
+    ax.plot_surface(X, Y, Z, color=color, alpha=0.8, linewidth=0, zorder=10)
 
 # -----------------------------
 # 3) plotting function
@@ -58,7 +58,7 @@ def plot_projection_demo(N, projection_plane='xy'):
     plane_idx, zdir, z_wall = get_plane_indices(projection_plane)
 
     # projection
-    proj = project_smoTens_to_2d(H, plane=plane_idx)[0]
+    proj = project_2d(H)[0]
 
     fig = plt.figure(figsize=(3, 3))
     ax3d = fig.add_subplot(111, projection="3d")

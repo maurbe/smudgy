@@ -2,8 +2,6 @@ from itertools import product
 
 import numpy as np
 
-FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "pcs", "pqs"]
-
 
 def _as_float32(array):
     """Return a float32 view of ``array`` without copying when possible.
@@ -1005,7 +1003,9 @@ def _pcs_1d(
 
     return (
         grid_fields.reshape(F, Nx),
-        grid_weights.reshape(Nx,),
+        grid_weights.reshape(
+            Nx,
+        ),
     )
 
 
@@ -1497,6 +1497,8 @@ def _pqs_3d(
 # =============================================================================
 # Python-level dispatch
 # =============================================================================
+FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "pcs", "pqs"]
+
 _KERNELS = {
     ("ngp", 1): _ngp_1d,
     ("ngp", 2): _ngp_2d,

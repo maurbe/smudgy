@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from .pointcloud import PointCloud
 from .backend.taichi.kernels import (
-    compute_total_integral_separable, 
+    compute_total_integral_separable,
     compute_total_integral_spherical,
     get_separable_kernel_values_1D,
-    get_spherical_kernel_values_1D
+    get_spherical_kernel_values_1D,
 )
+from .pointcloud import PointCloud
+
 
 def get_kernel_shapes_1D(kernel_name: str) -> tuple[list[float], list[float]]:
-   """Get the 1D kernel shapes (q values and kernel values)."""
-   if "separable" in kernel_name:
-       return get_separable_kernel_values_1D(kernel_name)
-   else:
-       return get_spherical_kernel_values_1D(kernel_name)
+    """Get the 1D kernel shapes (q values and kernel values)."""
+    if "separable" in kernel_name:
+        return get_separable_kernel_values_1D(kernel_name)
+    else:
+        return get_spherical_kernel_values_1D(kernel_name)
+
 
 __all__ = [
     "PointCloud",

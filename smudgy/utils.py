@@ -1,14 +1,11 @@
 """Visualization utilities."""
 
 from __future__ import annotations
+
 from collections.abc import Sequence
 
 import numpy as np
 import numpy.typing as npt
-import matplotlib.pyplot as plt
-
-from tqdm.notebook import tqdm, trange
-from scipy.interpolate import RegularGridInterpolator
 
 # =============================================================================
 # Plotting helpers
@@ -17,6 +14,7 @@ Float32Array = npt.NDArray[np.float32]
 IntArray = npt.NDArray[np.int_]
 BoxInput = float | Sequence[float] | npt.ArrayLike
 CellInput = int | Sequence[int] | npt.ArrayLike
+
 
 def _resolve_boxsize(boxsize: BoxInput, dim: int) -> npt.NDArray[np.floating]:
     """Return per-dimension box lengths given scalar or array-like input.
@@ -40,6 +38,7 @@ def _resolve_boxsize(boxsize: BoxInput, dim: int) -> npt.NDArray[np.floating]:
     if box_array.shape != (dim,):
         raise ValueError(f"'boxsize' must have length {dim}")
     return box_array
+
 
 def _resolve_ncells(n_cells: CellInput, dim: int) -> IntArray:
     """Return per-dimension integer counts given scalar or array-like input.
@@ -82,6 +81,7 @@ def _resolve_ncells(n_cells: CellInput, dim: int) -> IntArray:
         raise ValueError("Grid resolution values must be strictly positive")
     return n_cells_full
 
+
 def _create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32Array:
     """Generate N-dimensional grid cell centers.
 
@@ -112,6 +112,7 @@ def _create_grid_nd(n_cells: CellInput, boxsize: BoxInput, dim: int) -> Float32A
     grid_positions = np.stack([m.ravel() for m in mesh], axis=-1).astype("float32")
     return grid_positions
 
+
 def create_grid_1d(n_cells: int, boxsize: BoxInput) -> Float32Array:
     """Generate 1D grid cell centers. Calls ``create_grid_nd`` with 1D parameters.
 
@@ -129,6 +130,7 @@ def create_grid_1d(n_cells: int, boxsize: BoxInput) -> Float32Array:
 
     """
     return _create_grid_nd(n_cells, boxsize, dim=1)
+
 
 def create_grid_2d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
     """Generate 2D grid cell centers. Calls ``create_grid_nd`` with 2D parameters.
@@ -148,6 +150,7 @@ def create_grid_2d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
     """
     return _create_grid_nd(n_cells, boxsize, dim=2)
 
+
 def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
     """Generate 3D grid cell centers. Calls ``create_grid_nd`` with 3D parameters.
 
@@ -165,6 +168,7 @@ def create_grid_3d(n_cells: CellInput, boxsize: BoxInput) -> Float32Array:
 
     """
     return _create_grid_nd(n_cells, boxsize, dim=3)
+
 
 def grid_lines(edges, nx, ny=None, include_edges=True):
     """Create 2D grid lines for plotting.

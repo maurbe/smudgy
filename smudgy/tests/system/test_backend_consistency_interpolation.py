@@ -62,7 +62,10 @@ def _run_backend(backend, dim, structure, mode, kernel_name, data, query_positio
     field_name = "vf" if mode in ("divergence", "curl") else "sf"
 
     return pc.interpolate(
-        fields=field_name, query_positions=query_positions, mode=mode, structure=structure
+        fields=field_name,
+        query_positions=query_positions,
+        mode=mode,
+        structure=structure,
     )
 
 
