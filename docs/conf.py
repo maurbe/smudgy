@@ -79,5 +79,5 @@ html_theme_options = {
            "font-stack--monospace": "'Roboto Mono', monospace",
     },
 }
-#pygments_style = "github-light"        # Style for light mode
-#pygments_dark_style = "one-dark"  # Style for dark mode (Furo specific)
+pygments_style = "github-light"        # Style for light mode
+pygments_dark_style = "one-dark"  # Style for dark mode (Furo specific)

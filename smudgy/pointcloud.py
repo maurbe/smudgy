@@ -737,7 +737,6 @@ class PointCloud:
         mask: npt.NDArray[np.bool_],
         dim: int,
         plane_projection: list[int] | None = None,
-        plane_projection_basis: npt.NDArray[np.float32] | None = None,
     ) -> tuple[
         npt.NDArray[np.float32] | None,
         npt.NDArray[np.float32] | None,
@@ -756,13 +755,12 @@ class PointCloud:
             return self.smoothing.smoothing_lengths[mask], None, None
 
         if structure == "covariant":
-            if plane_projection is not None or plane_projection_basis is not None:
+            if plane_projection is not None:
                 _, vals, vecs = execution._dispatch(
                     "project_2d",
                     backend=self.backend,
                     h_tensor=self.smoothing.smoothing_tensors[mask],
                     plane=plane_projection,
-                    basis=plane_projection_basis,
                 )
             else:
                 vals = self.smoothing.smoothing_tensors_eigvals[mask]
@@ -966,9 +964,6 @@ class PointCloud:
         kernel_name: str | None = None,
         structure: Structure | None = None,
         plane_projection: list[int] | None = None,
-        plane_projection_basis: (
-            list[Sequence[float] | npt.NDArray[np.float32]] | None
-        ) = None,
         integration_method: str = "midpoint",
         num_kernel_evaluations_per_axis: int = 4,
         eta_crit: float = 1.0,
@@ -1001,8 +996,6 @@ class PointCloud:
             fixed-grid stencil and do not consult smoothing data.
         plane_projection : List[int], optional
             Indices of the axes to project onto for 3D to 2D deposition.
-        plane_projection_basis : List[Sequence[float] | npt.NDArray[np.float32]], optional
-            This feature is currently not supported. Placeholder for future functionality to specify a custom projection basis.
         integration_method : str, default 'midpoint'
             Kernel integration method.
         num_kernel_evaluations_per_axis : int, default 4
@@ -1029,12 +1022,6 @@ class PointCloud:
         )
         fields, fields_sizes = self._resolve_fields(fields)
         averaged = self._resolve_averaged(averaged, fields_sizes)
-
-        # validate mutual exclusivity of projection arguments
-        if plane_projection_basis is not None:
-            raise ValueError(
-                "Specifying 'plane_projection_basis' is currently not supported."
-            )
 
         # construct the mask of particles falling into extent
         if extent is None:
@@ -1127,8 +1114,8 @@ class PointCloud:
         if self.verbose:
             print(
                 f"[smudgy] Depositing using "
-                f"{structure_temp} '{kernel_name_temp}' kernel"
-            )
+                f"{structure_temp if structure_temp else ''} '{kernel_name_temp}' kernel"
+                )
 
         fields_grid, weights_grid = execution._dispatch(
             "deposit",
