@@ -27,7 +27,7 @@ KERNEL_NAMES = [
 def create_uniform_point_cloud(dim: int) -> PointCloud:
     """Create a uniform point cloud in [0, 1]^dim with uniform weights."""
     boxsize = 1.0
-    num_points = int(1e3)
+    num_points = int(1e4)
     eps = 1e-6
     positions = np.random.uniform(eps, boxsize - eps, size=(num_points, dim)).astype(
         np.float32

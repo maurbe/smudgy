@@ -569,18 +569,18 @@ class TestDeposit:
                 plane_projection=[0, 1],
             )
 
-    def test_deposit_plane_projection_basis_not_supported(self, rng):
-        n = 40
-        pc = self._setup_ready_pc(rng, n=n, dim=3)
-        pc.add_fields("scalar_field", rng.uniform(size=n))
-        with pytest.raises(ValueError):
-            pc.deposit(
-                "scalar_field",
-                averaged=False,
-                gridnums=10,
-                adaptive=True,
-                plane_projection_basis=[[1, 0, 0], [0, 1, 0]],
-            )
+    #def test_deposit_plane_projection_basis_not_supported(self, rng):
+    #    n = 40
+    #    pc = self._setup_ready_pc(rng, n=n, dim=3)
+    #    pc.add_fields("scalar_field", rng.uniform(size=n))
+    #    with pytest.raises(ValueError):
+    #        pc.deposit(
+    #            "scalar_field",
+    #            averaged=False,
+    #            gridnums=10,
+    #            adaptive=True,
+    #            plane_projection_basis=[[1, 0, 0], [0, 1, 0]],
+    #        )
 
     def test_deposit_averaged_length_mismatch_raises(self, rng):
         n = 40

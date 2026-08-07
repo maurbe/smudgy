@@ -36,6 +36,7 @@ from math import pi
 import numpy as np
 import taichi as ti
 
+from .math import erf_precise_f32
 
 # =============================================================================
 # Helper functions for projections onto canonical coordinates
@@ -77,26 +78,6 @@ def prepare_covariant_inputs(
 # =============================================================================
 # Shared low-level helpers
 # =============================================================================
-@ti.func
-def _erf(x: ti.f32) -> ti.f32:
-    """Abramowitz & Stegun 7.1.26 approximation, max abs error ~1.5e-7.
-    Taichi has no built-in erf, needed for the Gaussian kernels' F(q).
-    """
-    sign = 1.0
-    if x < 0.0:
-        sign = -1.0
-    ax = ti.abs(x)
-    a1 = 0.254829592
-    a2 = -0.284496736
-    a3 = 1.421413741
-    a4 = -1.453152027
-    a5 = 1.061405429
-    p = 0.3275911
-    t = 1.0 / (1.0 + p * ax)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * ti.exp(-ax * ax)
-    return sign * y
-
-
 @ti.func
 def _spherical_evaluate_integral_default(
     F_fn: ti.template(), support: ti.f32, dim: ti.template(), q1: ti.f32, q2_in: ti.f32
@@ -224,7 +205,7 @@ def gaussian_sep_sigma(dim: ti.template()) -> ti.f32:
 def gaussian_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     q = ti.max(q_in, 0.0)
     q = ti.min(q, GAUSSIAN_RECT_SUPPORT)
-    return 0.5 * ti.sqrt(pi) * _erf(q)
+    return 0.5 * ti.sqrt(pi) * erf_precise_f32(q)
 
 
 # =============================================================================
@@ -367,11 +348,11 @@ def gaussian_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     q = ti.min(q, GAUSSIAN_SUPPORT)
     result = 0.0
     if ti.static(dim == 1):
-        result = 0.5 * ti.sqrt(pi) * _erf(q)
+        result = 0.5 * ti.sqrt(pi) * erf_precise_f32(q)
     elif ti.static(dim == 2):
         result = -0.5 * ti.exp(-q * q)
     elif ti.static(dim == 3):
-        result = 0.25 * (ti.sqrt(pi) * _erf(q) - 2.0 * q * ti.exp(-q * q))
+        result = 0.25 * (ti.sqrt(pi) * erf_precise_f32(q) - 2.0 * q * ti.exp(-q * q))
     return result
 
 
