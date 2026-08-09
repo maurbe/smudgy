@@ -4,7 +4,7 @@ In the following sections we summarize the core class and methods exposed by `sm
 
 ## The `PointCloud` class
 
-The primary user object is `PointCloud`, which is initialized with a set of particle positions, weights (optional, e.g. particle masses) and, if applicable, boxsize information.
+The primary user object is `PointCloud`, which is initialized with a set of particle positions, weights (optional, e.g. particle masses) and, if applicable, boxsize information
 
 ```python
 pc = sm.PointCloud(positions=positions, weights=weights, boxsize=boxsize)
@@ -49,13 +49,13 @@ from backend.neighbors import build_kdtree
 tree = build_kdtree(positions=positions, boxsize=boxsize)
 ```
 
-This can be helpful when oerating with multiple distinct point clouds, e.g. particles groups carrying different labels.
+This can be helpful when operating with multiple distinct point clouds, e.g. particles groups carrying different labels.
 
 ### Computing smoothing lengths and tensors
 
 With the kd-tree instance, we can now compute the relevant smoothing information that is used in most `smudgy` core operations. Based on the queried nearest neighbors, the code computes the following smoothing quantities based on the selected structure:
 
-+ For `separable` and `isotropic` structures, the smoothing length is equal to the distance to the $n^{\rm th}$ nearest neighbor particle, i.e. $h = \|\mathbf r - \mathbf r_n\|$ where $n$ = `num_neighbors`. For `separable` kernels, the kernel shape is a square where $h$ is used along every axis. In the `isotropic` case, this results in spherically symmetric kernels.
++ For `separable` and `isotropic` structures, the smoothing length is equal to the distance to the n-th nearest neighbor particle, i.e. $h = \|\mathbf r - \mathbf r_n\|$ where $n$ = `num_neighbors`. For `separable` kernels, the kernel shape is a square where $h$ is used along every axis. In the `isotropic` case, this results in spherically symmetric kernels.
 
 + For `covariant` structures, the smoothing length is promoted to a **smoothing tensor** $H$. Instead of a spherical kernel, we now have elliptical (in 2D) or ellipsoidal (in 3D) kernel structures. Using the kd-tree, the code first identifies a cluster $C$ of nearest neighbors with positions $\mathbf r_j$ and weights $w_j$. Then, with the center of mass $\mathbf r_C$, it estimates the local covariance matrix via
 
@@ -121,7 +121,7 @@ $$
 
 ## Core methods
 
-Using the `PointCloud` instance, we can directly access the core functionalities of the package: continuous field **interpolation** and / or **deposition** onto structured grids. The following sections walk through the required methods and steps. More involved workflows can be found in the tutorial section on the left.
+Using the `PointCloud` instance, we can directly access the core functionalities of the package: continuous field **interpolation** and / or **deposition** onto structured grids. The following sections walk through the required methods and steps. More involved workflows can be found in the tutorial section.
 
 ### Density computation
 
@@ -209,7 +209,7 @@ curl_v_i = pc.interpolate(fields=v, query_positions=query_positions,
                           mode='curl')                         
 ```
 
-The method can also process multiple fields which can be passed directly, by attribute or by name:
+For a single mode, the method can also process multiple fields which can be passed directly, by attribute or by name:
 
 ```python
 multi_f_i = pc.interpolate(fields=[f, self.temperature, 'velocity'])
@@ -217,7 +217,7 @@ multi_f_i = pc.interpolate(fields=[f, self.temperature, 'velocity'])
 
 ### Deposition to structured grids
 
-Grid deposition is a core operation in many modern analysis workflows that involve particle data. `smudgy` provides a flexible, modular implementation covering standard *non-adaptive* (i.e. fixed kernel size) mass-assignment schemes, such as Nearest Grid Point (NGP) and Cloud-in-Cell (CIC), etc.
+Grid deposition is a core operation in many modern analysis workflows that involve particle data. `smudgy` provides a flexible, modular implementation covering standard *non-adaptive* (i.e. fixed kernel size) mass-assignment schemes, such as Nearest Grid Point (NGP), Cloud-in-Cell (CIC), etc.
 
 For methods *adaptive* to the local point-cloud density, the code maps particle fields onto a regular grid by integrating each particle’s kernel over all cells within the kernel support. The integration type depends on the on selected structure:
 
@@ -243,7 +243,7 @@ The figure below illustrates a single particle (black), its kernel (blue), and t
 :align: center
 ```
 
-The central method is `deposit`. The most important arguments include:
+The central method for this kind of operation is `deposit`. The most important arguments include:
 
 + `fields`: the fields to deposit. We can pass a single or a list of fields, either directly, by attribute or by name, similar to `interpolate`.
 + `averaged`: defines which fields represent averaged and which cumulative quantities. E.g. when depositing temperatures we want the average in a cell, while mass is a cumulative quantity.

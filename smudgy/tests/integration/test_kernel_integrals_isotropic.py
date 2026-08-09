@@ -38,5 +38,5 @@ def test_kernel_integrals(
         # 0.1% accuracy constraint
         integral,
         1.0,
-        atol=1e-4,
+        atol=1e-3,
     ), f"Kernel integral failed for {kernel_name} in {dim}D -- integral = {integral}"

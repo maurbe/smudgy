@@ -76,8 +76,15 @@ html_theme_options = {
 
            "font-stack": "'Roboto', -apple-system, sans-serif",
            "font-stack--headings": "'Roboto', -apple-system, sans-serif",
-           "font-stack--monospace": "'Roboto Mono', monospace",
+           "font-stack--monospace": "'Inconsolata', monospace",
+
+           #"color-code-background": "#282c34",
+           #"color-code-foreground": "#e6e6e6",
+    },
+       "dark_css_variables": {
+           #"color-code-background": "#1e2127",
+           #"color-code-foreground": "#e6e6e6",
     },
 }
-pygments_style = "github-light"        # Style for light mode
-pygments_dark_style = "one-dark"  # Style for dark mode (Furo specific)
+pygments_style = "catppuccin-latte"        # Style for light mode (dark code panel now used in both modes)
+pygments_dark_style = "catppuccin-mocha"  # Style for dark mode (Furo specific)

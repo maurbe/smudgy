@@ -1660,7 +1660,7 @@ def _isotropic_1d(
                 i_max = ti.min(i_max, Nx - 1)
 
             # pass 1: total mass over the affected cells (no per-cell storage)
-            total_weight = 0.0
+            total_integral = 0.0
             for a in range(i_min, i_max + 1):
                 integral = _isotropic_cell_integral_1d(
                     evaluate_fn,
@@ -1672,10 +1672,10 @@ def _isotropic_1d(
                     kernel_prefactor,
                     cellSize_x,
                 )
-                total_weight += wj * integral
+                total_integral += integral
 
-            if total_weight > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_weight
+            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
+                correction = 1.0 / total_integral
 
                 # pass 2: recompute (cheap) + deposit normalized weight
                 for a in range(i_min, i_max + 1):
@@ -1786,7 +1786,7 @@ def _isotropic_2d(
                 j_max = ti.min(j_max, Ny - 1)
 
             # pass 1: total mass over the affected cells (no per-cell storage)
-            total_weight = 0.0
+            total_integral = 0.0
             for a in range(i_min, i_max + 1):
                 for b in range(j_min, j_max + 1):
                     integral = _isotropic_cell_integral_2d(
@@ -1802,10 +1802,10 @@ def _isotropic_2d(
                         cellSize_x,
                         cellSize_y,
                     )
-                    total_weight += wj * integral
+                    total_integral += integral
 
-            if total_weight > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_weight
+            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
+                correction = 1.0 / total_integral
 
                 # pass 2: recompute (cheap) + deposit normalized weight
                 for a in range(i_min, i_max + 1):
@@ -1940,7 +1940,7 @@ def _isotropic_3d(
                 k_max = ti.min(k_max, Nz - 1)
 
             # pass 1: total mass over the affected cells (no per-cell storage)
-            total_weight = 0.0
+            total_integral = 0.0
             for a in range(i_min, i_max + 1):
                 for b in range(j_min, j_max + 1):
                     for c in range(k_min, k_max + 1):
@@ -1960,10 +1960,10 @@ def _isotropic_3d(
                             cellSize_y,
                             cellSize_z,
                         )
-                        total_weight += wj * integral
+                        total_integral += integral
 
-            if total_weight > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_weight
+            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
+                correction = 1.0 / total_integral
 
                 # pass 2: recompute (cheap) + deposit normalized weight
                 for a in range(i_min, i_max + 1):
@@ -2083,7 +2083,6 @@ def _covariant_1d(
                             )
 
         else:
-
             x_cell = x_phys * cellSize_x_inv
 
             detH = eval0
@@ -2098,7 +2097,7 @@ def _covariant_1d(
                 i_min = ti.max(i_min, 0)
                 i_max = ti.min(i_max, Nx - 1)
 
-            total_weight = 0.0
+            total_integral = 0.0
 
             for a in range(i_min, i_max + 1):
 
@@ -2114,11 +2113,11 @@ def _covariant_1d(
                     cellSize_x,
                 )
 
-                total_weight += wj * integral
+                total_integral += integral
 
-            if total_weight > 0.0:
+            if total_integral > 0.0:
 
-                correction = 1.0 / total_weight
+                correction = 1.0 / total_integral
 
                 for a in range(i_min, i_max + 1):
 
@@ -2265,7 +2264,7 @@ def _covariant_2d(
                 j_min = ti.max(j_min, 0)
                 j_max = ti.min(j_max, Ny - 1)
 
-            total_weight = 0.0
+            total_integral = 0.0
 
             for a in range(i_min, i_max + 1):
                 for b in range(j_min, j_max + 1):
@@ -2289,11 +2288,11 @@ def _covariant_2d(
                         cellSize_y,
                     )
 
-                    total_weight += wj * integral
+                    total_integral += integral
 
-            if total_weight > 0.0:
+            if total_integral > 0.0:
 
-                correction = 1.0 / total_weight
+                correction = 1.0 / total_integral
 
                 for a in range(i_min, i_max + 1):
 
@@ -2496,7 +2495,7 @@ def _covariant_3d(
                 k_max = ti.min(k_max, Nz - 1)
 
             # pass 1: total mass over the affected cells (no per-cell storage)
-            total_weight = 0.0
+            total_integral = 0.0
             for a in range(i_min, i_max + 1):
                 for b in range(j_min, j_max + 1):
                     for c in range(k_min, k_max + 1):
@@ -2527,10 +2526,10 @@ def _covariant_3d(
                             cellSize_y,
                             cellSize_z,
                         )
-                        total_weight += wj * integral
+                        total_integral += integral
 
-            if total_weight > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_weight
+            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
+                correction = 1.0 / total_integral
 
                 # pass 2: recompute (cheap) + deposit normalized weight
                 for a in range(i_min, i_max + 1):
@@ -2945,7 +2944,7 @@ def deposit(
     # --- required by adaptive isotropic / covariant deposition ---
     integration_method="midpoint",
     num_kernel_evaluations_per_axis=5,
-    eta_crit=1.0,
+    eta_crit=10.0,
 ):
     """Deposit particle data onto a grid.
 
@@ -3098,7 +3097,7 @@ if __name__ == "__main__":
         kernel_name=kernel_name,
         integration_method="midpoint",
         num_kernel_evaluations_per_axis=5,
-        eta_crit=1.0,
+        eta_crit=10.0,
     )
 
     fields, weights = deposit(**kwargs)

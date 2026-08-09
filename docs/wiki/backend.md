@@ -109,9 +109,7 @@ This data-parallel execution model is particularly well suited for interpolation
 
 ## Distributed parallelization with MPI
 
-While Taichi efficiently utilizes the resources of a *single* machine, many scientific datasets are simply too large to fit into the memory of a single computer or to be processed efficiently on one machine alone.
-
-For these cases, `smudgy` provides MPI wrappers based on
+While Taichi efficiently utilizes the resources of a *single* machine, many scientific datasets are simply too large to fit into the memory of a single computer or to be processed efficiently on one machine alone. For these cases, `smudgy` provides MPI wrappers based on
 [`mpi4py`](https://mpi4py.github.io/),
 allowing computations to be distributed across many independent MPI processes (often called *ranks*).
 
@@ -133,7 +131,7 @@ Rank 7   particles 87,500,000 – 99,999,999
 
 Each rank then performs the requested operations, where the sub-problems are further parallelized using the Taichi backend as described above. Most distributed operations follow three stages:
 
-1. **Scatter** -- the particle data is divided among all MPI ranks, and each process receives only its local subset of particles:
+1. **Scatter** -- the particle data is divided among all MPI ranks (here R0 to R3), and each process receives only its local subset of particles:
 
 ```text
 Global particle set

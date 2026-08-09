@@ -32,9 +32,7 @@ pc.global_setup(
     structure="covariant",
     kernel_name="cubic_spline",
 )
-
 pc.compute_smoothing()
-pc.compute_density()
 
 grid = pc.deposit(
     field,

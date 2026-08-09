@@ -10,3 +10,5 @@ myst-parser
 myst-nb
 jupyter
 ipykernel
+pygments-styles
+catppuccin[pygments]
