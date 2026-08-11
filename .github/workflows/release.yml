@@ -56,9 +56,6 @@ jobs:
           # Skip musllinux
           CIBW_SKIP: "*-musllinux_*"
 
-          # Install OpenMP inside wheel env
-          CIBW_BEFORE_BUILD_MACOS: "brew install libomp"
-
           # Prevent accidental universal2 builds
           CIBW_ENVIRONMENT_MACOS: >
             ARCHFLAGS="-arch ${{ matrix.arch }}"
