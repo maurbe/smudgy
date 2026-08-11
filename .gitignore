@@ -193,3 +193,7 @@ temp.*/
 
 # Data files
 .vscode/
+
+# Convenience/developemnt scripts -- not intended for users to see/use
+install.sh
+test_debugging.ipynb
