@@ -37,6 +37,7 @@ def test_backend_consistency(dim, structure):
             boxsize=boxsize,
             verbose=False,
             backend=backend,
+            arch="cpu",
         ).global_setup(num_neighbors=8, structure=structure, kernel_name="lucy")
         pc.compute_smoothing()
         pc.compute_density()
