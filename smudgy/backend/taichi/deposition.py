@@ -1626,7 +1626,10 @@ def _isotropic_1d(
 
         x_cell = x_phys * cellSize_x_inv
 
-        eta = hsm_phys * cellSize_x_inv
+        support_phys = kernel_support * hsm_phys
+        support_x_cell = support_phys * cellSize_x_inv
+
+        eta = support_x_cell
 
         wj = particle_weights[n]
 
@@ -1649,9 +1652,6 @@ def _isotropic_1d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            support_phys = kernel_support * hsm_phys
-            support_x_cell = support_phys * cellSize_x_inv
-
             i_min = ti.floor(x_cell - support_x_cell, int)
             i_max = ti.ceil(x_cell + support_x_cell, int)
 
@@ -1743,7 +1743,11 @@ def _isotropic_2d(
         x_cell = x_phys * cellSize_x_inv
         y_cell = y_phys * cellSize_y_inv
 
-        eta = ti.min(hsm_phys * cellSize_x_inv, hsm_phys * cellSize_y_inv)
+        support_phys = kernel_support * hsm_phys
+        support_x_cell = support_phys * cellSize_x_inv
+        support_y_cell = support_phys * cellSize_y_inv
+
+        eta = ti.min(support_x_cell, support_y_cell)
 
         wj = particle_weights[n]
 
@@ -1770,10 +1774,6 @@ def _isotropic_2d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            support_phys = kernel_support * hsm_phys
-            support_x_cell = support_phys * cellSize_x_inv
-            support_y_cell = support_phys * cellSize_y_inv
-
             i_min = ti.floor(x_cell - support_x_cell, int)
             i_max = ti.ceil(x_cell + support_x_cell, int)
             j_min = ti.floor(y_cell - support_y_cell, int)
@@ -1886,10 +1886,12 @@ def _isotropic_3d(
         y_cell = y_phys * cellSize_y_inv
         z_cell = z_phys * cellSize_z_inv
 
-        eta = ti.min(
-            hsm_phys * cellSize_x_inv,
-            ti.min(hsm_phys * cellSize_y_inv, hsm_phys * cellSize_z_inv),
-        )
+        support_phys = kernel_support * hsm_phys
+        support_x_cell = support_phys * cellSize_x_inv
+        support_y_cell = support_phys * cellSize_y_inv
+        support_z_cell = support_phys * cellSize_z_inv
+
+        eta = ti.min(support_x_cell, ti.min(support_y_cell, support_z_cell))
         wj = particle_weights[n]
 
         if eta < eta_crit:
@@ -1919,11 +1921,6 @@ def _isotropic_3d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            support_phys = kernel_support * hsm_phys
-            support_x_cell = support_phys * cellSize_x_inv
-            support_y_cell = support_phys * cellSize_y_inv
-            support_z_cell = support_phys * cellSize_z_inv
-
             i_min = ti.floor(x_cell - support_x_cell, int)
             i_max = ti.ceil(x_cell + support_x_cell, int)
             j_min = ti.floor(y_cell - support_y_cell, int)
@@ -2051,7 +2048,10 @@ def _covariant_1d(
 
         eval0_cell = eval0 * cellSize_x_inv
 
-        eta = eval0_cell
+        x_cell = x_phys * cellSize_x_inv
+        support_x_cell = kernel_support * ti.abs(eval0_cell)
+
+        eta = support_x_cell
         wj = particle_weights[n]
 
         if eta < eta_crit:
@@ -2083,12 +2083,8 @@ def _covariant_1d(
                             )
 
         else:
-            x_cell = x_phys * cellSize_x_inv
-
             detH = eval0
             kernel_prefactor = sig / detH
-
-            support_x_cell = kernel_support * ti.abs(eval0_cell)
 
             i_min = ti.floor(x_cell - support_x_cell, int)
             i_max = ti.ceil(x_cell + support_x_cell, int)
@@ -2203,7 +2199,14 @@ def _covariant_2d(
         eval0_cell = eval0 * cellSize_x_inv
         eval1_cell = eval1 * cellSize_y_inv
 
-        eta = ti.min(eval0_cell, eval1_cell)
+        support_x_cell = kernel_support * ti.sqrt(
+            (e0x * eval0_cell) ** 2 + (e1x * eval1_cell) ** 2
+        )
+        support_y_cell = kernel_support * ti.sqrt(
+            (e0y * eval0_cell) ** 2 + (e1y * eval1_cell) ** 2
+        )
+
+        eta = ti.min(support_x_cell, support_y_cell)
 
         wj = particle_weights[n]
 
@@ -2243,14 +2246,6 @@ def _covariant_2d(
 
             detH = eval0 * eval1
             kernel_prefactor = sig / detH
-
-            support_x_cell = kernel_support * ti.sqrt(
-                (e0x * eval0_cell) ** 2 + (e1x * eval1_cell) ** 2
-            )
-
-            support_y_cell = kernel_support * ti.sqrt(
-                (e0y * eval0_cell) ** 2 + (e1y * eval1_cell) ** 2
-            )
 
             i_min = ti.floor(x_cell - support_x_cell, int)
             i_max = ti.ceil(x_cell + support_x_cell, int)
@@ -2405,7 +2400,23 @@ def _covariant_3d(
         eval1_cell = eval1 * cellSize_y_inv
         eval2_cell = eval2 * cellSize_z_inv
 
-        eta = ti.min(eval0_cell, ti.min(eval1_cell, eval2_cell))
+        support_x_cell = kernel_support * ti.sqrt(
+            (e0x * eval0_cell) ** 2
+            + (e1x * eval1_cell) ** 2
+            + (e2x * eval2_cell) ** 2
+        )
+        support_y_cell = kernel_support * ti.sqrt(
+            (e0y * eval0_cell) ** 2
+            + (e1y * eval1_cell) ** 2
+            + (e2y * eval2_cell) ** 2
+        )
+        support_z_cell = kernel_support * ti.sqrt(
+            (e0z * eval0_cell) ** 2
+            + (e1z * eval1_cell) ** 2
+            + (e2z * eval2_cell) ** 2
+        )
+
+        eta = ti.min(support_x_cell, ti.min(support_y_cell, support_z_cell))
         wj = particle_weights[n]
 
         if eta < eta_crit:
@@ -2462,22 +2473,6 @@ def _covariant_3d(
 
             detH = eval0 * eval1 * eval2
             kernel_prefactor = sig / detH
-
-            support_x_cell = kernel_support * ti.sqrt(
-                (e0x * eval0_cell) ** 2
-                + (e1x * eval1_cell) ** 2
-                + (e2x * eval2_cell) ** 2
-            )
-            support_y_cell = kernel_support * ti.sqrt(
-                (e0y * eval0_cell) ** 2
-                + (e1y * eval1_cell) ** 2
-                + (e2y * eval2_cell) ** 2
-            )
-            support_z_cell = kernel_support * ti.sqrt(
-                (e0z * eval0_cell) ** 2
-                + (e1z * eval1_cell) ** 2
-                + (e2z * eval2_cell) ** 2
-            )
 
             i_min = ti.floor(x_cell - support_x_cell, int)
             i_max = ti.ceil(x_cell + support_x_cell, int)
