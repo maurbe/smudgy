@@ -2,9 +2,9 @@
 
 In the following sections we summarize the core class and methods exposed by `smudgy`, the mathematical model for kernels and smoothing, as well as the principal parameters you will pass through the pipeline.
 
-## The `PointCloud` class
+## The {py:class}`~smudgy.pointcloud.PointCloud` class
 
-The primary user object is `PointCloud`, which is initialized with a set of particle positions, weights (optional, e.g. particle masses) and, if applicable, boxsize information
+The primary user object is {py:class}`~smudgy.pointcloud.PointCloud`, which is initialized with a set of particle positions, weights (optional, e.g. particle masses) and, if applicable, boxsize information
 
 ```python
 pc = sm.PointCloud(positions=positions, weights=weights, boxsize=boxsize)
@@ -18,7 +18,7 @@ pc = sm.PointCloud(..., boxsize=[1.0, 2.0, 0.5]) # for a 3D periodic box
 
 ## Setting basic SPH parameters
 
-The primary class exposes the utility method `global_setup` to easily set three global parameters, `structure`, `kernel_name` and `num_neighbors`, which are shared between most methods.
+The primary class exposes the utility method {py:meth}`~smudgy.pointcloud.PointCloud.global_setup` to easily set three global parameters, `structure`, `kernel_name` and `num_neighbors`, which are shared between most methods.
 
 ```python
 pc = pc.global_setup(structure='separable', kernel_name='gaussian', num_neighbors=num_neighbors)
@@ -33,7 +33,7 @@ The user can choose from a collection of kernels (all support 1D, 2D and 3D oper
 + `num_neighbors` refers to the number of neighbor particles to use in computations (e.g. smoothing).
 
 :::{tip}
-With the `global_setup` method we can set these parameters globally, but they can also be passed individually to all relevant methods as shown below.
+With the {py:meth}`~smudgy.pointcloud.PointCloud.global_setup` method we can set these parameters globally, but they can also be passed individually to all relevant methods as shown below.
 :::
 
 ## Smoothing the point cloud
@@ -63,7 +63,7 @@ With the kd-tree instance, we can now compute the relevant smoothing information
 
     where $H = \sqrt{\Sigma_C}$. Then, the eigenvalues $h_i$ and -vectors $e_i$ of $H$ represent the smoothing lengths and principal axes of the kernel.
 
-In `smudgy`, we can compute this informaton via the `compute_smoothing()` method as
+In `smudgy`, we can compute this informaton via the {py:meth}`~smudgy.pointcloud.PointCloud.compute_smoothing` method as
 
 ```python
 # if `structure` and `num_neighbors` have alread been set globally
@@ -85,7 +85,7 @@ e = pc.smoothing.smoothing_tensors_eigvecs # shape = (N, dim, dim)
 h = pc.smoothing.smoothing_tensors_eigvals # shape = (N, dim)
 ```
 
-In case we already have precomputed smoothing lengths or tensors, this information can also be set manually via the `set_smoothing()` method.
+In case we already have precomputed smoothing lengths or tensors, this information can also be set manually via the {py:meth}`~smudgy.pointcloud.PointCloud.set_smoothing` method.
 
 ```python
 pc.set_smoothing(smoothing_lengths=my_h)
@@ -121,12 +121,12 @@ $$
 
 ## Core methods
 
-Using the `PointCloud` instance, we can directly access the core functionalities of the package: continuous field **interpolation** and / or **deposition** onto structured grids. The following sections walk through the required methods and steps. More involved workflows can be found in the tutorial section.
+Using the {py:class}`~smudgy.pointcloud.PointCloud` instance, we can directly access the core functionalities of the package: continuous field **interpolation** and / or **deposition** onto structured grids. The following sections walk through the required methods and steps. More involved workflows can be found in the tutorial section.
 
 ### Density computation
 
 For interpolation purposes, we need the density estimates at the particle positions.
-For this, we can use the `compute_density` method from the `PointCloud` instance. This method requires that `compute_smoothing` has been called with the correct structure, otherwise an error will be raised.
+For this, we can use the {py:meth}`~smudgy.pointcloud.PointCloud.compute_density` method from the {py:class}`~smudgy.pointcloud.PointCloud` instance. This method requires that {py:meth}`~smudgy.pointcloud.PointCloud.compute_smoothing` has been called with the correct structure, otherwise an error will be raised.
 We can access the density arrays based on the selected structure
 
 ```python
@@ -147,7 +147,7 @@ The density attribute differentiation is done by design, so that users can compu
 
 ### Adding and deleting particle fields
 
-The `PointCloud` instance makes it easy to register additional particle fields that can be accessed as class attributes during later operations. The method to do this is `add_fields` and accepts either a single array or a list of fields and names to register:
+The {py:class}`~smudgy.pointcloud.PointCloud` instance makes it easy to register additional particle fields that can be accessed as class attributes during later operations. The method to do this is {py:meth}`~smudgy.pointcloud.PointCloud.add_fields` and accepts either a single array or a list of fields and names to register:
 
 ```python
 temperature = np.ones(N,)
@@ -163,7 +163,7 @@ Every field is set as a class attribute and can be accessed with its name identi
 temperature = pc.temperature
 ```
 
-Similarly, using `delete_fields` we can delete fields from the class instance via their attribute names:
+Similarly, using {py:meth}`~smudgy.pointcloud.PointCloud.delete_fields` we can delete fields from the class instance via their attribute names:
 
 ```python
 pc.delete_fields(names='temperature')               # single field 
@@ -185,7 +185,7 @@ $$
 \sum_{j}^{n} \frac{w_j}{\rho_j} \, f_j \, \nabla W\big(\mathbf{x}_i - \mathbf{x}_j;\ h_j \, \text{or} \, H_j \big)
 $$
 
-In `smudgy` these values can be computed using the `interpolate` method by passing the particle field ($f_j$) and the query positions ($\mathbf{x}_i$),
+In `smudgy` these values can be computed using the {py:meth}`~smudgy.pointcloud.PointCloud.interpolate` method by passing the particle field ($f_j$) and the query positions ($\mathbf{x}_i$),
 
 ```python
 f = np.random.randn(N,)
@@ -243,9 +243,9 @@ The figure below illustrates a single particle (black), its kernel (blue), and t
 :align: center
 ```
 
-The central method for this kind of operation is `deposit`. The most important arguments include:
+The central method for this kind of operation is {py:meth}`~smudgy.pointcloud.PointCloud.deposit`. The most important arguments include:
 
-+ `fields`: the fields to deposit. We can pass a single or a list of fields, either directly, by attribute or by name, similar to `interpolate`.
++ `fields`: the fields to deposit. We can pass a single or a list of fields, either directly, by attribute or by name, similar to {py:meth}`~smudgy.pointcloud.PointCloud.interpolate`.
 + `averaged`: defines which fields represent averaged and which cumulative quantities. E.g. when depositing temperatures we want the average in a cell, while mass is a cumulative quantity.
 + `gridnums`: numbers of grid cells to use in each spatial dimension. If a single number is passed, the code uses this number for every dimension, otherwise, a list of numbers for every axis must be passed.
 + `extent`: if `boxsize` is `None`, this argument must be provided. If provided, deposit particles only within the given extent. Can be used to quickly generate images of subgroups of the cloud.

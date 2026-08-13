@@ -6,12 +6,14 @@ Run directly under MPI:
 Run via pytest (the test spawns mpiexec itself):
     pytest test_mpi_ranks.py
 """
+
 import subprocess
 import sys
 
 
 def _run_under_mpi():
     from mpi4py import MPI
+
     comm = MPI.COMM_WORLD
     print(f"RANK {comm.Get_rank()} SIZE {comm.Get_size()}")
     if comm.Get_size() != 2:

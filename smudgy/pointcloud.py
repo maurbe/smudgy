@@ -873,7 +873,7 @@ class PointCloud:
 
         # check that structure is set either globally or via argument
         structure_temp = self._resolve_structure(structure)
-        if structure_temp not in ['isotropic', 'covariant']:
+        if structure_temp not in ["isotropic", "covariant"]:
             raise ValueError(
                 f"For interpolation, 'structure' must be one of ['isotropic', 'covariant'], got '{structure_temp}'"
             )
@@ -1133,7 +1133,7 @@ class PointCloud:
             print(
                 f"[smudgy] Depositing using "
                 f"{structure_temp if structure_temp else ''} '{kernel_name_temp}' kernel"
-                )
+            )
 
         fields_grid, weights_grid = execution._dispatch(
             "deposit",

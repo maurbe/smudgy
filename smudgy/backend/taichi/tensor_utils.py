@@ -1,6 +1,6 @@
 """Utilities for tensor operations in Taichi backend."""
 
-from typing import Tuple
+
 import numpy as np
 import taichi as ti
 
@@ -64,8 +64,7 @@ def _project_2d_kernel(
                 eigvecs_out[n, a, b] = eigvecs[a, b]
 
 
-def project_2d(h_tensor: np.ndarray, 
-               plane: Tuple[int, int] = (0, 1)):
+def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
     """Project a 3D smoothing tensor to 2D and compute its eigenvalues and eigenvectors.
 
     Parameters

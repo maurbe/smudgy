@@ -1,5 +1,5 @@
 # backend/numpy/tensor_utils.py
-from typing import Tuple
+
 import numpy as np
 
 E1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
@@ -17,8 +17,7 @@ def _fix_eigvec_sign(eigvecs: np.ndarray) -> np.ndarray:
     return eigvecs * sign
 
 
-def project_2d(h_tensor: np.ndarray, 
-               plane: Tuple[int, int] = (0, 1)):
+def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
 
     ea = BASIS_VECTORS[plane[0]]
     eb = BASIS_VECTORS[plane[1]]

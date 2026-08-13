@@ -569,7 +569,7 @@ class TestDeposit:
                 plane_projection=[0, 1],
             )
 
-    #def test_deposit_plane_projection_basis_not_supported(self, rng):
+    # def test_deposit_plane_projection_basis_not_supported(self, rng):
     #    n = 40
     #    pc = self._setup_ready_pc(rng, n=n, dim=3)
     #    pc.add_fields("scalar_field", rng.uniform(size=n))

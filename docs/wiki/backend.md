@@ -11,7 +11,7 @@
 | `"taichi"` (default) | High-performance backend supporting multi-core CPUs and GPUs. Recommended for all workloads. |
 | `"numpy"` | Reference implementation based on NumPy. Useful for debugging, validation and environments where Taichi is unavailable. |
 
-The backend can be selected when constructing a `PointCloud`:
+The backend can be selected when constructing a {py:class}`~smudgy.pointcloud.PointCloud`:
 
 ```python
 import smudgy as sm
@@ -122,7 +122,7 @@ These ranks may reside
 Each rank executes the same Python program but operates only on a subset of the data. Conceptually, a dataset containing one hundred million particles might be divided as
 
 ```text
-Rank 0   particles      0 – 12,499,999
+Rank 0   particles          0 – 12,499,999
 Rank 1   particles 12,500,000 – 24,999,999
 Rank 2   ...
 ...
@@ -138,17 +138,17 @@ Global particle set
                 │
                 ▼
 ┌──────┬──────┬──────┬──────┐
-│  R0  │  R1  │  R2  │  R3  │
+   R0     R1     R2     R3  
 └──────┴──────┴──────┴──────┘
 ```
 
 2. **Local computation** -- each rank independently performs the requested operation. Since the ranks do not interact during this stage, all computations proceed simultaneously. For instance, when depositing particles onto a grid, every rank creates a **local grid** and deposits its own chunk of particles:
 
 ```text
-   Rank 0  → local grid
-   Rank 1  → local grid
-   Rank 2  → local grid
-   Rank 3  → local grid
+Rank 0  → local grid
+Rank 1  → local grid
+Rank 2  → local grid
+Rank 3  → local grid
 ```
 
 3. **Reduction** -- the local results are combined into the final output. Most operations compute per-point quantities, e.g. smoothing lengths, interpolated values, etc., and thus the local results only need to be appended to one another to form the final output. These operations gather arrays back to a single rank using collective communication such as `MPI.Gather` or `MPI.Gatherv`, depending on the operation and data layout. For additive quantities such as grid deposition, the reduction is performed using one of the MPI operations (e.g. `MPI.Allreduce` or `MPI.Reduce`), which sum the contributions from all local grids from every rank.

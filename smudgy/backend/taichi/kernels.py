@@ -36,6 +36,7 @@ from math import pi
 import numpy as np
 import taichi as ti
 
+
 # =============================================================================
 # Helper functions for projections onto canonical coordinates
 # Used for density computation and interpolation workflow (deposit does it internally)

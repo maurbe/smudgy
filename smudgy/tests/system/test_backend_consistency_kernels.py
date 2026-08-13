@@ -77,7 +77,7 @@ class TestKernelRegistryConsistency:
         missing = taichi_names - numpy_names
         assert not missing, f"Kernel names in taichi but not numpy: {sorted(missing)}"
 
-    #def test_no_kernel_registered_as_both_separable_and_spherical(self):
+    # def test_no_kernel_registered_as_both_separable_and_spherical(self):
     #    overlap = set(SEPARABLE_KERNELS.keys()) & set(SPHERICAL_KERNELS.keys())
     #    assert (
     #        not overlap
