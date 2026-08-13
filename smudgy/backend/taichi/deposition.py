@@ -3008,7 +3008,14 @@ def deposit(
             f"Available: {ADAPTIVE_STRUCTURES}"
         )
 
-    missing = [name for name in _REQUIRED_KWARGS[structure] if locals()[name] is None]
+    provided_kwargs = {
+        "particle_hsml": particle_hsml,
+        "particle_hmat_eigvecs": particle_hmat_eigvecs,
+        "particle_hmat_eigvals": particle_hmat_eigvals,
+    }
+    missing = [
+        name for name in _REQUIRED_KWARGS[structure] if provided_kwargs[name] is None
+    ]
     if missing:
         raise ValueError(
             f"structure={structure!r} requires: {', '.join(missing)} (got None)."
