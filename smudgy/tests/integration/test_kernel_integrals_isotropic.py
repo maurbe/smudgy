@@ -6,7 +6,7 @@ import pytest
 from smudgy import compute_total_integral_spherical
 
 DIMS = [1, 2, 3]
-NUM_KERNEL_EVALUATIONS_PER_AXIS = [1, 17, 23]
+ETA_CRIT = [1, 4, 10]
 KERNEL_NAMES = [
     "tophat",
     "tsc",
@@ -22,17 +22,13 @@ KERNEL_NAMES = [
 
 @pytest.mark.parametrize("dim", DIMS)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
-@pytest.mark.parametrize(
-    "num_kernel_evaluations_per_axis", NUM_KERNEL_EVALUATIONS_PER_AXIS
-)
-def test_kernel_integrals(
-    kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
-):
+@pytest.mark.parametrize("eta_crit", ETA_CRIT)
+def test_kernel_integrals(kernel_name: str, dim: int, eta_crit: float):
     """Test that the integrals of the kernels are close to 1.0."""
     integral = compute_total_integral_spherical(
         kernel_name,
         dim,
-        num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
+        eta_crit=eta_crit,
     )
     assert np.allclose(
         # 0.1% accuracy constraint

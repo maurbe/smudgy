@@ -1629,7 +1629,7 @@ def _isotropic_1d(
         support_phys = kernel_support * hsm_phys
         support_x_cell = support_phys * cellSize_x_inv
 
-        eta = support_x_cell
+        eta = 2.0 * support_x_cell  # diameter convention
 
         wj = particle_weights[n]
 
@@ -1747,7 +1747,7 @@ def _isotropic_2d(
         support_x_cell = support_phys * cellSize_x_inv
         support_y_cell = support_phys * cellSize_y_inv
 
-        eta = ti.min(support_x_cell, support_y_cell)
+        eta = 2.0 * ti.min(support_x_cell, support_y_cell)  # diameter convention
 
         wj = particle_weights[n]
 
@@ -1891,7 +1891,9 @@ def _isotropic_3d(
         support_y_cell = support_phys * cellSize_y_inv
         support_z_cell = support_phys * cellSize_z_inv
 
-        eta = ti.min(support_x_cell, ti.min(support_y_cell, support_z_cell))
+        eta = 2.0 * ti.min(
+            support_x_cell, ti.min(support_y_cell, support_z_cell)
+        )  # diameter convention
         wj = particle_weights[n]
 
         if eta < eta_crit:
@@ -2051,7 +2053,7 @@ def _covariant_1d(
         x_cell = x_phys * cellSize_x_inv
         support_x_cell = kernel_support * ti.abs(eval0_cell)
 
-        eta = support_x_cell
+        eta = 2.0 * support_x_cell  # diameter convention
         wj = particle_weights[n]
 
         if eta < eta_crit:
@@ -2206,7 +2208,7 @@ def _covariant_2d(
             (e0y * eval0_cell) ** 2 + (e1y * eval1_cell) ** 2
         )
 
-        eta = ti.min(support_x_cell, support_y_cell)
+        eta = 2.0 * ti.min(support_x_cell, support_y_cell)  # diameter convention
 
         wj = particle_weights[n]
 
@@ -2401,22 +2403,18 @@ def _covariant_3d(
         eval2_cell = eval2 * cellSize_z_inv
 
         support_x_cell = kernel_support * ti.sqrt(
-            (e0x * eval0_cell) ** 2
-            + (e1x * eval1_cell) ** 2
-            + (e2x * eval2_cell) ** 2
+            (e0x * eval0_cell) ** 2 + (e1x * eval1_cell) ** 2 + (e2x * eval2_cell) ** 2
         )
         support_y_cell = kernel_support * ti.sqrt(
-            (e0y * eval0_cell) ** 2
-            + (e1y * eval1_cell) ** 2
-            + (e2y * eval2_cell) ** 2
+            (e0y * eval0_cell) ** 2 + (e1y * eval1_cell) ** 2 + (e2y * eval2_cell) ** 2
         )
         support_z_cell = kernel_support * ti.sqrt(
-            (e0z * eval0_cell) ** 2
-            + (e1z * eval1_cell) ** 2
-            + (e2z * eval2_cell) ** 2
+            (e0z * eval0_cell) ** 2 + (e1z * eval1_cell) ** 2 + (e2z * eval2_cell) ** 2
         )
 
-        eta = ti.min(support_x_cell, ti.min(support_y_cell, support_z_cell))
+        eta = 2.0 * ti.min(
+            support_x_cell, ti.min(support_y_cell, support_z_cell)
+        )  # diameter convention
         wj = particle_weights[n]
 
         if eta < eta_crit:
@@ -2733,7 +2731,6 @@ def _prepare_isotropic(
     kernel_name,
     particle_hsml,  # (N,) -- single smoothing length
     integration_method,
-    num_kernel_evaluations_per_axis,
     eta_crit,
 ):
     DIM = particle_positions.shape[1]
@@ -2757,7 +2754,7 @@ def _prepare_isotropic(
         )
     quad_points = quad_table[integration_method]
 
-    grid = build_kernel_sample_grid(kernel_name, DIM, num_kernel_evaluations_per_axis)
+    grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
     sample_coords, sample_integrals, num_samples = (
         grid["coords"],
         grid["integrals"],
@@ -2823,7 +2820,6 @@ def _prepare_covariant(
     particle_hmat_eigvecs,  # (N, D, D)
     particle_hmat_eigvals,  # (N, D)
     integration_method,
-    num_kernel_evaluations_per_axis,
     eta_crit,
 ):
     DIM = particle_positions.shape[1]
@@ -2855,7 +2851,7 @@ def _prepare_covariant(
         )
     quad_points = quad_table[integration_method]
 
-    grid = build_kernel_sample_grid(kernel_name, DIM, num_kernel_evaluations_per_axis)
+    grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
     sample_coords, sample_integrals, num_samples = (
         grid["coords"],
         grid["integrals"],
@@ -2938,8 +2934,7 @@ def deposit(
     particle_hmat_eigvals=None,  # (N, D)
     # --- required by adaptive isotropic / covariant deposition ---
     integration_method="midpoint",
-    num_kernel_evaluations_per_axis=5,
-    eta_crit=10.0,
+    eta_crit=4.0,
 ):
     """Deposit particle data onto a grid.
 
@@ -2959,8 +2954,7 @@ def deposit(
         - separable: needs `particle_hsml` (N, D). Integrated exactly;
           `integration_method` is ignored.
         - isotropic: needs `particle_hsml` (N,), a spherical kernel such as
-          "cubic_spline", `integration_method`,
-          `num_kernel_evaluations_per_axis`, `eta_crit`.
+          "cubic_spline", `integration_method`, `eta_crit`.
         - covariant: needs `particle_hmat_eigvecs` (N, D, D),
           `particle_hmat_eigvals` (N, D), plus the same kernel/quadrature
           options as "isotropic".
@@ -3037,7 +3031,6 @@ def deposit(
             **common,
             particle_hsml=particle_hsml,
             integration_method=integration_method,
-            num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
             eta_crit=eta_crit,
         )
     else:  # "covariant"
@@ -3046,7 +3039,6 @@ def deposit(
             particle_hmat_eigvecs=particle_hmat_eigvecs,
             particle_hmat_eigvals=particle_hmat_eigvals,
             integration_method=integration_method,
-            num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
             eta_crit=eta_crit,
         )
 
@@ -3091,8 +3083,7 @@ if __name__ == "__main__":
         structure=structure,
         kernel_name=kernel_name,
         integration_method="midpoint",
-        num_kernel_evaluations_per_axis=5,
-        eta_crit=10.0,
+        eta_crit=4.0,
     )
 
     fields, weights = deposit(**kwargs)

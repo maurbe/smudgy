@@ -87,9 +87,9 @@ mjx-container[jax="CHTML"] {
    the line. Force these blocks to a single plain monospace font instead
    of Inconsolata, so every character (letters, digits, box-drawing
    symbols alike) comes from the same font file and lines up exactly. */
-.highlight-text pre {
+/*.highlight-text pre {
     font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-}
+}*/
 
 /* Inline backtick code (`like this`) uses a separate, smaller Furo rule
    by default (--font-size--small--2, ~81% of body text) -- bump it to

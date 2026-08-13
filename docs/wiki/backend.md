@@ -135,11 +135,9 @@ Each rank then performs the requested operations, where the sub-problems are fur
 
 ```text
 Global particle set
-                │
-                ▼
-┌──────┬──────┬──────┬──────┐
-   R0     R1     R2     R3  
-└──────┴──────┴──────┴──────┘
+            │
+            ▼
+    R0 | R1 | R2 | R3  
 ```
 
 2. **Local computation** -- each rank independently performs the requested operation. Since the ranks do not interact during this stage, all computations proceed simultaneously. For instance, when depositing particles onto a grid, every rank creates a **local grid** and deposits its own chunk of particles:

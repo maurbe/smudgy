@@ -8,7 +8,6 @@ from smudgy import PointCloud
 DIMS = [2, 3]
 STRUCTURE = ["isotropic", "covariant"]
 NUM_NEIGHBORS = [3]
-NUM_KERNEL_EVALUATIONS_PER_AXIS = [2, 3, 4]
 INTEGRAL_METHODS = ["midpoint", "trapezoidal", "simpson"]
 KERNEL_NAMES = [
     "tophat",
@@ -39,16 +38,12 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
 @pytest.mark.parametrize("dim", DIMS)
 @pytest.mark.parametrize("structure", STRUCTURE)
 @pytest.mark.parametrize("num_neighbors", NUM_NEIGHBORS)
-@pytest.mark.parametrize(
-    "num_kernel_evaluations_per_axis", NUM_KERNEL_EVALUATIONS_PER_AXIS
-)
 @pytest.mark.parametrize("integral_method", INTEGRAL_METHODS)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 def test_weight_conservation(
     dim: int,
     structure: str,
     num_neighbors: int,
-    num_kernel_evaluations_per_axis: int,
     integral_method: str,
     kernel_name: str,
 ):
@@ -70,7 +65,6 @@ def test_weight_conservation(
         gridnums=gridnums,
         kernel_name=kernel_name,
         structure=structure,
-        num_kernel_evaluations_per_axis=num_kernel_evaluations_per_axis,
         integration_method=integral_method,
         eta_crit=10,  # for anti-aliasing tophat kernel
         return_weights=True,

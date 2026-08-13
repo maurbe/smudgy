@@ -1160,184 +1160,406 @@ def create_spherical_kernel(name: str) -> SphericalKernelSpec:
 # dispatch on which kernel this is.
 
 
+# --------------------------------------------------------------------------
+# Sizing helpers -- purely functions of eta_crit (and nyquist_factor). eta is
+# a DIAMETER ratio (eta = 2 * support * h / cell_size); nyquist_factor=2.0 is
+# the theoretical Nyquist minimum for the point spacing (in cell-size units)
+# needed to avoid aliasing when depositing the resulting samples onto a grid.
+# --------------------------------------------------------------------------
+
+
+def _compute_n_q(eta_crit: float, nyquist_factor: float = 2.0) -> int:
+    """Number of positive-radial shells.
+
+    eta_crit is a diameter ratio; Nyquist spacing applies to the radius, so
+    the effective radial eta_crit is eta_crit / 2.
+    """
+    eta_crit_radius = eta_crit / 2.0
+    return max(1, int(np.ceil(nyquist_factor * eta_crit_radius)))
+
+
+def _n_points_circle_shell(
+    u_outer: float, eta_crit_radius: float, nyquist_factor: float
+) -> int:
+    """2D: number of uniformly-spaced angular samples needed on a shell of
+    (normalized) outer radius u_outer, to keep point spacing <= s/nyquist_factor
+    in the worst case (eta -> eta_crit).
+    """
+    delta = 1.0 / nyquist_factor
+    circumference = 2.0 * pi * eta_crit_radius * u_outer
+    return max(1, int(np.ceil(circumference / delta)))
+
+
+def _n_points_sphere_shell(
+    u_outer: float, eta_crit_radius: float, nyquist_factor: float
+) -> int:
+    """3D: number of quasi-uniformly-spaced directional samples needed on a
+    shell of (normalized) outer radius u_outer.
+    """
+    delta = 1.0 / nyquist_factor
+    r = eta_crit_radius * u_outer
+    area = 4.0 * pi * r * r
+    return max(1, int(np.ceil(area / (delta * delta))))
+
+
+def _fibonacci_sphere_points(n: int) -> np.ndarray:
+    """N quasi-uniformly distributed unit vectors on the sphere (Fibonacci
+    spiral point set). No pole clustering, deterministic, O(n).
+    """
+    i = np.arange(n, dtype=np.float64)
+    golden_angle = pi * (3.0 - np.sqrt(5.0))
+    z = 1.0 - (2.0 * i + 1.0) / n  # uniform in z, range (-1, 1)
+    r_xy = np.sqrt(np.maximum(0.0, 1.0 - z * z))
+    phi = golden_angle * i
+    x = r_xy * np.cos(phi)
+    y = r_xy * np.sin(phi)
+    return np.stack([x, y, z], axis=1).astype(np.float32)  # (n, 3)
+
+
+# --------------------------------------------------------------------------
+# Host-side (numpy) ragged shell-layout builders. These only produce bin
+# boundaries / directions -- no kernel evaluation happens here, so they
+# don't need Taichi scope.
+# --------------------------------------------------------------------------
+
+
+def _build_shell_layout_1d(
+    support: float, eta_crit: float, nyquist_factor: float = 2.0
+):
+    """1D: each radial shell contributes exactly two points, at +q and -q."""
+    n_q = _compute_n_q(eta_crit, nyquist_factor)
+    dq = support / n_q
+    shell_q0 = (np.arange(n_q, dtype=np.float32)) * dq
+    shell_q1 = shell_q0 + dq
+
+    shell_id = np.repeat(np.arange(n_q, dtype=np.int32), 2)
+    sign = np.tile(np.array([1.0, -1.0], dtype=np.float32), n_q)
+    n_points_per_shell = np.full(n_q, 2, dtype=np.int32)
+
+    return n_q, shell_q0, shell_q1, shell_id, sign, n_points_per_shell
+
+
+def _build_shell_layout_2d(
+    support: float, eta_crit: float, nyquist_factor: float = 2.0
+):
+    """2D: uniform angular samples per shell (no pole-clustering issue in
+    2D -- a circle has no poles -- so uniform angle spacing is already
+    spherically-uniform).
+    """
+    n_q = _compute_n_q(eta_crit, nyquist_factor)
+    eta_crit_radius = eta_crit / 2.0
+    dq = support / n_q
+    shell_q0 = np.arange(n_q, dtype=np.float32) * dq
+    shell_q1 = shell_q0 + dq
+
+    shell_id_chunks, theta_chunks, n_points_per_shell = [], [], []
+    for iq in range(n_q):
+        u_outer = (iq + 1) / n_q
+        n_pts = _n_points_circle_shell(u_outer, eta_crit_radius, nyquist_factor)
+        dtheta = 2.0 * pi / n_pts
+        theta = (np.arange(n_pts, dtype=np.float32) + 0.5) * dtheta  # bin midpoints
+
+        shell_id_chunks.append(np.full(n_pts, iq, dtype=np.int32))
+        theta_chunks.append(theta)
+        n_points_per_shell.append(n_pts)
+
+    shell_id = np.concatenate(shell_id_chunks)
+    theta = np.concatenate(theta_chunks)
+    n_points_per_shell = np.array(n_points_per_shell, dtype=np.int32)
+
+    return n_q, shell_q0, shell_q1, shell_id, theta, n_points_per_shell
+
+
+def _build_shell_layout_3d(
+    support: float, eta_crit: float, nyquist_factor: float = 2.0
+):
+    """3D: Fibonacci-sphere directional samples per shell -- quasi-uniform
+    coverage of the sphere, no pole clustering.
+    """
+    n_q = _compute_n_q(eta_crit, nyquist_factor)
+    eta_crit_radius = eta_crit / 2.0
+    dq = support / n_q
+    shell_q0 = np.arange(n_q, dtype=np.float32) * dq
+    shell_q1 = shell_q0 + dq
+
+    shell_id_chunks, dirs_chunks, n_points_per_shell = [], [], []
+    for iq in range(n_q):
+        u_outer = (iq + 1) / n_q
+        n_pts = _n_points_sphere_shell(u_outer, eta_crit_radius, nyquist_factor)
+        dirs = _fibonacci_sphere_points(n_pts)
+
+        shell_id_chunks.append(np.full(n_pts, iq, dtype=np.int32))
+        dirs_chunks.append(dirs)
+        n_points_per_shell.append(n_pts)
+
+    shell_id = np.concatenate(shell_id_chunks)
+    dirs = np.concatenate(dirs_chunks, axis=0)  # (total, 3) unit vectors
+    n_points_per_shell = np.array(n_points_per_shell, dtype=np.int32)
+
+    return n_q, shell_q0, shell_q1, shell_id, dirs, n_points_per_shell
+
+
+# --------------------------------------------------------------------------
+# Taichi kernel: radial integral, computed ONCE per shell (n_q evaluations
+# total, shared across every direction/angle sampled within that shell).
+# --------------------------------------------------------------------------
+
+
+@ti.kernel
+def _compute_radial_integrals(
+    evaluate_integral_fn: ti.template(),
+    dim: ti.template(),
+    n_q: ti.i32,
+    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    radial_integral_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+):
+    for iq in range(n_q):
+        radial_integral_out[iq] = evaluate_integral_fn(shell_q0[iq], shell_q1[iq], dim)
+
+
+# --------------------------------------------------------------------------
+# Taichi kernels: populate coords / q / integrals from the precomputed shell
+# layout + radial integrals. No calls to evaluate_integral_fn here.
+# --------------------------------------------------------------------------
+
+
 @ti.kernel
 def _build_kernel_sample_grid_1d(
-    evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
-    support: ti.f32,
-    dim: ti.template(),  # <-- new: passed in, not assigned inside
-    n_q: ti.i32,
-    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q, 1)
-    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (n_q,)
-    integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (n_q,)
+    dim: ti.template(),
+    n_pts: ti.i32,
+    shell_id_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
+    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    radial_integral_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    n_points_per_shell_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
+    sign_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 1)
+    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
 ):
-    dq = support / n_q
     sig = sigma_fn(dim)
-    for iq in range(n_q):
-        q0 = iq * dq
-        q = q0 + 0.5 * dq
-        q1 = q0 + dq
-        integral = sig * 2.0 * evaluate_integral_fn(q0, q1, dim)
-        coords_out[iq, 0] = q
-        q_out[iq] = q
-        integrals_out[iq] = integral
+    for i in range(n_pts):
+        iq = shell_id_in[i]
+        q0, q1 = shell_q0[iq], shell_q1[iq]
+        q = 0.5 * (q0 + q1)
+
+        coords_out[i, 0] = sign_in[i] * q
+        q_out[i] = q
+        # evaluate_integral_fn is a pure radial integral; the angular
+        # measure for a 1D "shell" (two points, +/-q) is 2. sigma * (2 *
+        # radial_integral) is the shell's total mass, split evenly across
+        # this shell's points (spherically symmetric -> every point in a
+        # shell carries an equal fraction of that shell's mass).
+        integrals_out[i] = (
+            sig * 2.0 * radial_integral_in[iq] / ti.f32(n_points_per_shell_in[iq])
+        )
 
 
 @ti.kernel
 def _build_kernel_sample_grid_2d(
-    evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
-    support: ti.f32,
-    dim: ti.template(),  # <-- new: passed in, not assigned inside
-    n_q: ti.i32,
-    n_phi: ti.i32,
-    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q*n_phi, 2)
+    dim: ti.template(),
+    n_pts: ti.i32,
+    shell_id_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
+    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    radial_integral_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    n_points_per_shell_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
+    theta_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 2)
     q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
     integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
 ):
-    dq = support / n_q
-    dphi = 2.0 * pi / n_phi
     sig = sigma_fn(dim)
+    for i in range(n_pts):
+        iq = shell_id_in[i]
+        q0, q1 = shell_q0[iq], shell_q1[iq]
+        q = 0.5 * (q0 + q1)
+        theta = theta_in[i]
 
-    for iq, it in ti.ndrange(n_q, n_phi):
-        q0 = iq * dq
-        q = q0 + dq * 0.5
-        q1 = q0 + dq
-
-        phiC = (it + 0.5) * dphi
-        x = q * ti.cos(phiC)
-        y = q * ti.sin(phiC)
-
-        integral = sig * dphi * evaluate_integral_fn(q0, q1, dim)
-
-        idx = iq * n_phi + it
-        coords_out[idx, 0] = x
-        coords_out[idx, 1] = y
-        q_out[idx] = q
-        integrals_out[idx] = integral
+        coords_out[i, 0] = q * ti.cos(theta)
+        coords_out[i, 1] = q * ti.sin(theta)
+        q_out[i] = q
+        # evaluate_integral_fn is a pure radial integral; the angular
+        # measure for a full 2D shell (circle) is 2*pi.
+        integrals_out[i] = (
+            sig
+            * (2.0 * pi)
+            * radial_integral_in[iq]
+            / ti.f32(n_points_per_shell_in[iq])
+        )
 
 
 @ti.kernel
 def _build_kernel_sample_grid_3d(
-    evaluate_integral_fn: ti.template(),
     sigma_fn: ti.template(),
-    support: ti.f32,
-    dim: ti.template(),  # <-- new: passed in, not assigned inside
-    n_q: ti.i32,
-    n_theta: ti.i32,
-    n_phi: ti.i32,
-    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_q*n_theta*n_phi, 3)
+    dim: ti.template(),
+    n_pts: ti.i32,
+    shell_id_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
+    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    radial_integral_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    n_points_per_shell_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
+    dirs_in: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 3) unit vectors
+    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 3)
     q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
     integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
 ):
-    dq = support / n_q
-    dtheta = pi / n_theta
-    dphi = 2.0 * pi / n_phi
     sig = sigma_fn(dim)
+    for i in range(n_pts):
+        iq = shell_id_in[i]
+        q0, q1 = shell_q0[iq], shell_q1[iq]
+        q = 0.5 * (q0 + q1)
 
-    for iq, it, ip in ti.ndrange(n_q, n_theta, n_phi):
-        q0 = iq * dq
-        q = q0 + 0.5 * dq
-        q1 = q0 + dq
-
-        theta0 = it * dtheta
-        thetaC = (it + 0.5) * dtheta
-        theta1 = theta0 + dtheta
-
-        phi0 = ip * dphi
-        phiC = phi0 + 0.5 * dphi
-
-        sin_thetaC = ti.sin(thetaC)
-        x = q * sin_thetaC * ti.cos(phiC)
-        y = q * sin_thetaC * ti.sin(phiC)
-        z = q * ti.cos(thetaC)
-
-        integral = (
+        coords_out[i, 0] = q * dirs_in[i, 0]
+        coords_out[i, 1] = q * dirs_in[i, 1]
+        coords_out[i, 2] = q * dirs_in[i, 2]
+        q_out[i] = q
+        # evaluate_integral_fn is a pure radial integral; the angular
+        # measure for a full 3D shell (sphere) is 4*pi.
+        integrals_out[i] = (
             sig
-            * dphi
-            * (-ti.cos(theta1) + ti.cos(theta0))
-            * evaluate_integral_fn(q0, q1, dim)
+            * (4.0 * pi)
+            * radial_integral_in[iq]
+            / ti.f32(n_points_per_shell_in[iq])
         )
 
-        idx = (iq * n_theta + it) * n_phi + ip
-        coords_out[idx, 0] = x
-        coords_out[idx, 1] = y
-        coords_out[idx, 2] = z
-        q_out[idx] = q
-        integrals_out[idx] = integral
+
+# --------------------------------------------------------------------------
+# Public orchestrator
+# --------------------------------------------------------------------------
 
 
 def build_kernel_sample_grid(
-    kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
+    kernel_name: str,
+    dim: int,
+    eta_crit: float,
+    nyquist_factor: float = 2.0,
 ):
-    """Python-level equivalent of build_kernel_sample_grid(kernel, n).
+    """Build a Nyquist-safe, spherically-uniform kernel sample table.
+
+    The table geometry (n_q, per-shell point counts, directions) is sized
+    purely from `eta_crit` -- independent of any specific particle's h, the
+    grid's cell size, or the kernel's own support multiple -- so the
+    returned table is safe (by construction) for every particle whose
+    actual eta < eta_crit.
 
     Parameters
     ----------
     kernel_name : str
-        Name of the kernel to sample.
+        Name of the kernel to sample (looked up via create_spherical_kernel).
     dim : int
         Dimension of the kernel (1, 2, or 3).
-    num_kernel_evaluations_per_axis : int
-        Number of kernel evaluations per axis for the numerical integration.
+    eta_crit : float
+        Critical eta (diameter convention: eta = 2 * support * h / cell_size)
+        at which the deposition loop switches from tabulated samples to
+        numerical quadrature.
+    nyquist_factor : float
+        Samples-per-cell-width safety margin. 2.0 is the Nyquist minimum;
+        values > 2.0 add extra safety margin at the cost of more points.
 
     Returns
     -------
     dict
-        Dictionary containing the following keys:
-        - "dim": int, the dimension of the kernel.
-        - "count": int, the total number of samples.
-        - "coords": np.ndarray of shape (count, dim), the coordinates of the samples.
-        - "q": np.ndarray of shape (count,), the radial distances of the samples.
-        - "integrals": np.ndarray of shape (count,), the integrals of the kernel
-          over the corresponding spherical shells.
+        - "dim": int
+        - "count": int, total number of samples
+        - "n_q": int, number of positive-radial shells (diagnostic)
+        - "coords": np.ndarray (count, dim), sample coordinates in units of
+          q = r/h (i.e. NOT yet scaled by any particle's physical h)
+        - "q": np.ndarray (count,), radial distance in units of q = r/h
+        - "integrals": np.ndarray (count,), normalized kernel mass
+          contribution of each sample (sums to ~1.0 over the full table)
 
     """
-    if num_kernel_evaluations_per_axis <= 0:
-        raise ValueError("num_kernel_evaluations_per_axis must be > 0")
+    if eta_crit < 0:
+        raise ValueError("eta_crit must be >= 0")
     if dim not in (1, 2, 3):
-        raise ValueError("SphericalKernelSampleGrid supports only dim = 1, 2 or 3")
+        raise ValueError("build_kernel_sample_grid supports only dim = 1, 2 or 3")
 
     kspec = create_spherical_kernel(kernel_name)
-    n = num_kernel_evaluations_per_axis
-    count = n**dim
-
-    coords = np.zeros((count, dim), dtype=np.float32)
-    q = np.zeros(count, dtype=np.float32)
-    integrals = np.zeros(count, dtype=np.float32)
+    support = kspec.support  # kernel's own cutoff in q = r/h units
 
     if dim == 1:
+        n_q, shell_q0, shell_q1, shell_id, sign, n_points_per_shell = (
+            _build_shell_layout_1d(support, eta_crit, nyquist_factor)
+        )
+        count = shell_id.shape[0]
+        radial_integral = np.zeros(n_q, dtype=np.float32)
+        _compute_radial_integrals(
+            kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
+        )
+
+        coords = np.zeros((count, 1), dtype=np.float32)
+        q = np.zeros(count, dtype=np.float32)
+        integrals = np.zeros(count, dtype=np.float32)
         _build_kernel_sample_grid_1d(
-            kspec.evaluate_integral,
             kspec.sigma,
-            kspec.support,
             dim,
-            n,
+            count,
+            shell_id,
+            shell_q0,
+            shell_q1,
+            radial_integral,
+            n_points_per_shell,
+            sign,
             coords,
             q,
             integrals,
         )
+
     elif dim == 2:
+        n_q, shell_q0, shell_q1, shell_id, theta, n_points_per_shell = (
+            _build_shell_layout_2d(support, eta_crit, nyquist_factor)
+        )
+        count = shell_id.shape[0]
+        radial_integral = np.zeros(n_q, dtype=np.float32)
+        _compute_radial_integrals(
+            kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
+        )
+
+        coords = np.zeros((count, 2), dtype=np.float32)
+        q = np.zeros(count, dtype=np.float32)
+        integrals = np.zeros(count, dtype=np.float32)
         _build_kernel_sample_grid_2d(
-            kspec.evaluate_integral,
             kspec.sigma,
-            kspec.support,
             dim,
-            n,
-            n,
+            count,
+            shell_id,
+            shell_q0,
+            shell_q1,
+            radial_integral,
+            n_points_per_shell,
+            theta,
             coords,
             q,
             integrals,
         )
+
     else:  # dim == 3
+        n_q, shell_q0, shell_q1, shell_id, dirs, n_points_per_shell = (
+            _build_shell_layout_3d(support, eta_crit, nyquist_factor)
+        )
+        count = shell_id.shape[0]
+        radial_integral = np.zeros(n_q, dtype=np.float32)
+        _compute_radial_integrals(
+            kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
+        )
+
+        coords = np.zeros((count, 3), dtype=np.float32)
+        q = np.zeros(count, dtype=np.float32)
+        integrals = np.zeros(count, dtype=np.float32)
         _build_kernel_sample_grid_3d(
-            kspec.evaluate_integral,
             kspec.sigma,
-            kspec.support,
             dim,
-            n,
-            n,
-            n,
+            count,
+            shell_id,
+            shell_q0,
+            shell_q1,
+            radial_integral,
+            n_points_per_shell,
+            dirs,
             coords,
             q,
             integrals,
@@ -1346,6 +1568,7 @@ def build_kernel_sample_grid(
     return {
         "dim": dim,
         "count": count,
+        "n_q": n_q,
         "coords": coords,
         "q": q,
         "integrals": integrals,
@@ -1391,7 +1614,7 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
 
 
 def compute_total_integral_spherical(
-    kernel_name: str, dim: int, num_kernel_evaluations_per_axis: int
+    kernel_name: str, dim: int, eta_crit: float
 ) -> float:
     """Sigma * evaluate_integral(bounds) over the box [-support, support]^dim.
 
@@ -1401,8 +1624,9 @@ def compute_total_integral_spherical(
         Name of the kernel to integrate.
     dim : int
         Dimension of the kernel (1, 2, or 3).
-    num_kernel_evaluations_per_axis : int
-        Number of kernel evaluations per axis for the numerical integration.
+    eta_crit : float
+        Critical eta (diameter convention) used to size the sample grid --
+        see `build_kernel_sample_grid`.
 
     Returns
     -------
@@ -1411,7 +1635,7 @@ def compute_total_integral_spherical(
 
     """
     ti.init(arch=ti.cpu)
-    grid = build_kernel_sample_grid(kernel_name, dim, num_kernel_evaluations_per_axis)
+    grid = build_kernel_sample_grid(kernel_name, dim, eta_crit)
     return float(np.sum(grid["integrals"]))
 
 

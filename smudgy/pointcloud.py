@@ -1,6 +1,5 @@
 """Core PointCloud class for particle-based computations."""
 
-import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -966,8 +965,7 @@ class PointCloud:
         structure: Structure | None = None,
         plane_projection: list[int] | None = None,
         integration_method: str = "midpoint",
-        num_kernel_evaluations_per_axis: int = 4,
-        eta_crit: float = 10.0,
+        eta_crit: float = 4.0,
         return_weights: bool = False,
     ) -> (
         npt.NDArray[np.floating]
@@ -999,20 +997,15 @@ class PointCloud:
             Indices of the axes to project onto for 3D to 2D deposition.
         integration_method : str, default 'midpoint'
             Kernel integration method.
-        num_kernel_evaluations_per_axis : int, default 4
-            Resolution for kernel integration.
-        eta_crit : float, default 10.0
-            Anti-aliasing threshold, in units of smoothing length / cell
+        eta_crit : float, default 4.0
+            Anti-aliasing threshold, in units of kernel diameter / cell
             size, to switch a particle from the sampled kernel deposition to
-            the per-cell numerical quadrature deposition. The quadrature
-            branch uses a small, fixed number of quadrature points per grid
-            cell and cannot reliably resolve kernels whose smoothing length
-            is comparable to or smaller than several grid cells; below
-            eta_crit ~ 10 it can silently under-sample the kernel and fail
-            to conserve mass, in the worst case dropping a particle's
-            contribution entirely. Do not lower this below 10 unless you
-            have verified mass conservation for your specific grid
-            resolution and kernel choice.
+            the per-cell numerical quadrature deposition. The sample-based
+            deposition's resolution is derived automatically from eta_crit
+            (Nyquist-safe by construction for any value), so this parameter
+            only controls the tradeoff between how much of the particle
+            population uses the (cheaper) sampled path versus the
+            (exact-per-cell) quadrature path.
         return_weights : bool, default False
             If True, returns the weights (density) grid as well.
         backend : {"numpy", "taichi"}, optional
@@ -1028,13 +1021,6 @@ class PointCloud:
             Deposited field grid, and optionally the weights grid.
 
         """
-        if adaptive and eta_crit < 10.0:
-            warnings.warn(
-                f"eta_crit={eta_crit} < 10: narrow kernels will be under-sampled by "
-                "quadrature deposition and mass conservation is not guaranteed.",
-                stacklevel=2,
-            )
-
         kernel_name_temp, structure_temp = self._resolve_deposition_options(
             adaptive, kernel_name, structure
         )
@@ -1116,7 +1102,6 @@ class PointCloud:
             "periodic": periodic,
             "kernel_name": kernel_name_temp,
             "integration_method": integration_method,
-            "num_kernel_evaluations_per_axis": num_kernel_evaluations_per_axis,
             "eta_crit": eta_crit,
         }
 

@@ -1,6 +1,5 @@
 """Utilities for tensor operations in Taichi backend."""
 
-
 import numpy as np
 import taichi as ti
 
