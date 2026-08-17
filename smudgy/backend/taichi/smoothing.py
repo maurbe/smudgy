@@ -79,11 +79,18 @@ def _compute_hmat_kernel(
         Sigma /= wsum
         Sigma += eps * Sigma.trace() * ti.Matrix.identity(ti.f32, dim)
 
-        eigvals, eigvecs = ti.sym_eig(Sigma, ti.f32)
+        # ti.sym_eig is numerically unreliable (non-orthonormal eigenvectors,
+        # wrong eigenvalues) when the matrix entries are small in absolute
+        # magnitude, which is exactly the regime Sigma lives in for typical
+        # unit-scale point clouds. Rescale to a safe magnitude band before
+        # eigendecomposition, then undo the scale on the eigenvalues.
+        alpha = 10.0 / Sigma.trace()
+        eigvals, eigvecs = ti.sym_eig(alpha * Sigma, ti.f32)
+        eigvals = eigvals / alpha
 
         # ==========================================================================================
         # Fix for annyoing taichi bug in 2D:
-        # eigvals/vecs are returned in descending order, 3D is fine and follows numpy backend
+        # eigvals/vecs are returned in descending order
         if ti.static(dim == 2):
             if eigvals[0] > eigvals[1]:
                 eigvals[0], eigvals[1] = eigvals[1], eigvals[0]
