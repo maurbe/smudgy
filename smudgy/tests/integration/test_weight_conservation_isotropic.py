@@ -66,7 +66,7 @@ def test_weight_conservation(
         kernel_name=kernel_name,
         structure=structure,
         integration_method=integral_method,
-        eta_crit=10,  # for anti-aliasing tophat kernel
+        #eta_crit=10,  # for anti-aliasing tophat kernel
         return_weights=True,
     )
 

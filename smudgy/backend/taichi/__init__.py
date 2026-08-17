@@ -12,14 +12,26 @@ _ARCH_MAP = {
 }
 
 
-def init(arch="gpu", force=False, **kwargs):
+def init(arch=None, force=False, **kwargs):
     """Safe to call repeatedly: no-op if already initialized, unless
     force=True, which tears down and reconfigures the runtime -- e.g.
     to compare backends interactively in a notebook.
+
+    arch=None means "no preference": reuse whatever is already active if
+    the runtime has been initialized before, or fall back to "gpu" on the
+    very first call in the process. This matters because switching a live
+    Taichi runtime's arch mid-process (e.g. gpu -> cpu -> gpu) has been
+    observed to destabilize previously-compiled @ti.kernel functions --
+    callers that don't care about arch should never force that switch just
+    by omitting the argument.
     """
     global _initialized, _current_config
 
-    arch = "gpu" if arch is None else arch
+    if arch is None:
+        if _initialized and not force:
+            return
+        arch = "gpu"
+
     if arch not in _ARCH_MAP:
         raise ValueError(
             f"Unknown Taichi arch: {arch!r}. Expected one of {sorted(_ARCH_MAP)}"

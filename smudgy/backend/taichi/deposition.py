@@ -2210,9 +2210,17 @@ def _covariant_2d(
 
         eta = 2.0 * ti.min(support_x_cell, support_y_cell)  # diameter convention
 
+        # A degenerate ellipsoid (any eigenvalue exactly 0 -- possible with
+        # few neighbors, e.g. near-coplanar configurations) makes
+        # detH = eval0*eval1 = 0 in the quadrature branch below, which would
+        # divide by zero. eta itself doesn't reliably flag this (it's driven
+        # by the largest eigenvalue per axis, not the product), so check
+        # explicitly and force the (division-free) sample branch instead.
+        degenerate = eval0 <= 0.0 or eval1 <= 0.0
+
         wj = particle_weights[n]
 
-        if eta < eta_crit:
+        if eta < eta_crit or degenerate:
 
             for s in range(num_samples):
 
@@ -2415,9 +2423,17 @@ def _covariant_3d(
         eta = 2.0 * ti.min(
             support_x_cell, ti.min(support_y_cell, support_z_cell)
         )  # diameter convention
+
+        # A degenerate ellipsoid (any eigenvalue exactly 0 -- possible with
+        # few neighbors, e.g. near-coplanar configurations) makes
+        # detH = eval0*eval1*eval2 = 0 in the quadrature branch below, which
+        # would divide by zero. eta itself doesn't reliably flag this (it's
+        # driven by the largest eigenvalue per axis, not the product), so
+        # check explicitly and force the (division-free) sample branch.
+        degenerate = eval0 <= 0.0 or eval1 <= 0.0 or eval2 <= 0.0
         wj = particle_weights[n]
 
-        if eta < eta_crit:
+        if eta < eta_crit or degenerate:
             # --- anti-aliasing branch: deposit via precomputed kernel samples ---
             for s in range(num_samples):
                 cx = sample_coords[s, 0]

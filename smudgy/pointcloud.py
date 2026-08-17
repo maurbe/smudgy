@@ -1115,10 +1115,8 @@ class PointCloud:
         # Verbose output / computation
         # ----------------------------
         if self.verbose:
-            print(
-                f"[smudgy] Depositing using "
-                f"{structure_temp if structure_temp else ''} '{kernel_name_temp}' kernel"
-            )
+            structure_prefix = f"{structure_temp} " if structure_temp else ""
+            print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
         fields_grid, weights_grid = execution._dispatch(
             "deposit",
