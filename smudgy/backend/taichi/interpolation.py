@@ -358,7 +358,7 @@ def _curl_covariant(
 
     for n in range(N):
         for f in ti.static(range(F)):
-            for a in ti.static(range(dim)):
+            for a in ti.static(range(C)):
                 out[n, f, a] = 0.0
         for k in range(K):
             r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
