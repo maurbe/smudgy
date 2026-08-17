@@ -8,6 +8,7 @@ from .backend.taichi.kernels import (
     get_separable_kernel_values_1D,
     get_spherical_kernel_values_1D,
 )
+from .backend.numpy.kernels import get_kernel
 from .pointcloud import PointCloud
 
 
@@ -24,4 +25,5 @@ __all__ = [
     "compute_total_integral_separable",
     "compute_total_integral_spherical",
     "get_kernel_shapes_1D",
+    "get_kernel"
 ]
