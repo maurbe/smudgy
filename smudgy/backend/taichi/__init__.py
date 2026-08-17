@@ -24,6 +24,15 @@ def init(arch=None, force=False, **kwargs):
     observed to destabilize previously-compiled @ti.kernel functions --
     callers that don't care about arch should never force that switch just
     by omitting the argument.
+
+    Defaults offline_cache=False (overridable via kwargs): Taichi's
+    on-disk kernel cache serializes compiled kernels' LLVM IR at process
+    exit, and for our more complex (Matrix-heavy, ti.template()-generic)
+    kernels this has been observed to crash -- an LLVM assertion in
+    AsmWriter.cpp (printLLVMNameWithoutPrefix: "Cannot get empty name!")
+    while printing a value with no name, only reachable via that dump
+    path. Disabling the cache avoids it entirely; it costs a bit of
+    recompilation time across process restarts, nothing else.
     """
     global _initialized, _current_config
 
@@ -36,6 +45,8 @@ def init(arch=None, force=False, **kwargs):
         raise ValueError(
             f"Unknown Taichi arch: {arch!r}. Expected one of {sorted(_ARCH_MAP)}"
         )
+
+    kwargs.setdefault("offline_cache", False)
 
     config = {"arch": arch, **kwargs}
     if _initialized and not force and _current_config == config:

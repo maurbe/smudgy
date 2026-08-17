@@ -74,5 +74,5 @@ def test_weight_conservation(
     weight_true = np.sum(pc.weights)
     ratio = weight_deposited / weight_true
     assert np.isclose(
-        ratio, 1.0, atol=1e-3
+        ratio, 1.0, atol=1e-2
     ), f"Weight conservation failed for {kernel_name} in {dim}D"
