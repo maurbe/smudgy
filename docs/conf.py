@@ -33,7 +33,14 @@ napoleon_numpy_docstring = True
 
 autodoc_member_order = "bysource"
 autodoc_mock_imports = [
-    "smudgy.core._cpp_functions_ext", # needed otherwise API docs fail to build
+    "smudgy.core._cpp_functions_ext",  # needed otherwise API docs fail to build
+    # mpi4py and taichi are heavy/native dependencies that are prone to
+    # failing to import (missing system MPI runtime, no GPU/display, etc.)
+    # in RTD's minimal build container. Mocking them means autodoc never
+    # needs a real, working import of them just to read docstrings/signatures.
+    "mpi4py",
+    "mpi4py.MPI",
+    "taichi",
 ]
 
 nb_execution_mode = "off"
