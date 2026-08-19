@@ -49,6 +49,8 @@ def _scatter(func, kwargs, rank, size):
 
     local_kwargs = dict(kwargs)
     for key in chunk_keys:
+        if key not in kwargs:
+            continue
         local_kwargs[key] = kwargs[key][start:stop]
     return local_kwargs
 
