@@ -70,6 +70,16 @@ def _reduce_sum(comm, local_result):
     return comm.allreduce(local_result, op=MPI.SUM)
 
 
+def _bcast(comm, obj, root=0):
+    """Broadcast a (possibly None-on-non-root) Python object/array from root.
+
+    Pickle-based, matching the allgather/allreduce style already used in
+    this module. A buffer-based Bcast would avoid re-pickling large
+    positions/weights arrays on every call; left as a later optimization.
+    """
+    return comm.bcast(obj, root=root)
+
+
 def _dispatch(func: str, *, backend: str, **kwargs):
     comm = MPI.COMM_WORLD
     size = comm.Get_size()

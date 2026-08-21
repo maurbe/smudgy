@@ -53,52 +53,75 @@ class PointCloud:
             Additional keyword arguments for backend initialization.
 
         """
-        # Initialize backend
+        # Initialize MPI environment
         self.verbose = verbose
+        self.comm = MPI.COMM_WORLD
+        self.rank = self.comm.Get_rank()
+        self.size = self.comm.Get_size()
+        if verbose and self.rank == 0:
+            print(f'[smudgy] Using {self.size} MPI rank{"s" if self.size > 1 else ""}')
+
+        # Initialize backend (every rank needs its own device/runtime context)
         self.set_backend(backend, **kwargs)
 
-        # Initialize MPI environment
-        comm = MPI.COMM_WORLD
-        size = comm.Get_size()
-        if verbose:
-            print(f'[smudgy] Using {size} MPI rank{"s" if size > 1 else ""}')
+        # Initialize point cloud (rank 0 only; other ranks receive a broadcast copy below)
+        if self.rank == 0:
+            dim = positions.shape[-1]
+            assert dim in (
+                1,
+                2,
+                3,
+            ), f"Particle positions must be of shape (N, 1), (N, 2) or (N, 3) but found {positions.shape}"
+            positions_resolved = positions.astype(np.float32)
 
-        # Initialize point cloud
-        self.dim = positions.shape[-1]
-        assert self.dim in (
-            1,
-            2,
-            3,
-        ), f"Particle positions must be of shape (N, 1), (N, 2) or (N, 3) but found {positions.shape}"
-        self.positions = positions.astype(np.float32)
+            weights_resolved = (
+                np.ones(positions_resolved.shape[0], dtype=np.float32)
+                if weights is None
+                else weights.astype(np.float32)
+            )
+            assert (
+                weights_resolved.shape[0] == positions_resolved.shape[0]
+            ), f"Shape mismatch: length of weights and positions must be the same but found: {weights_resolved.shape} and {positions_resolved.shape}"
 
-        self.weights = (
-            np.ones(self.positions.shape[0], dtype=np.float32)
-            if weights is None
-            else weights.astype(np.float32)
-        )
-        assert (
-            self.weights.shape[0] == self.positions.shape[0]
-        ), f"Shape mismatch: length of weights and positions must be the same but found: {self.weights.shape} and {self.positions.shape}"
-
-        if boxsize is None:
-            self.periodic = False
-            self.boxsize = None
-        else:
-            self.periodic = True
-            boxsize_arr = np.asarray(boxsize)
-            if boxsize_arr.ndim == 0:
-                self.boxsize = np.repeat(boxsize_arr, self.dim)
+            if boxsize is None:
+                periodic_resolved = False
+                boxsize_resolved = None
             else:
-                assert boxsize_arr.shape == (
-                    self.dim,
-                ), f"'boxsize' must be a scalar or have shape ({self.dim},), got {boxsize_arr.shape}"
-                self.boxsize = boxsize_arr
+                periodic_resolved = True
+                boxsize_arr = np.asarray(boxsize)
+                if boxsize_arr.ndim == 0:
+                    boxsize_resolved = np.repeat(boxsize_arr, dim)
+                else:
+                    assert boxsize_arr.shape == (
+                        dim,
+                    ), f"'boxsize' must be a scalar or have shape ({dim},), got {boxsize_arr.shape}"
+                    boxsize_resolved = boxsize_arr
+        else:
+            dim = positions_resolved = weights_resolved = None
+            periodic_resolved = boxsize_resolved = None
+
+        if self.size > 1:
+            dim, positions_resolved, weights_resolved, periodic_resolved, boxsize_resolved = execution._bcast(
+                self.comm,
+                (
+                    dim,
+                    positions_resolved,
+                    weights_resolved,
+                    periodic_resolved,
+                    boxsize_resolved,
+                ),
+            )
+
+        self.dim = dim
+        self.positions = positions_resolved
+        self.weights = weights_resolved
+        self.periodic = periodic_resolved
+        self.boxsize = boxsize_resolved
 
         self.smoothing = SmoothingInfo()
 
         # Verbose output after completed initialization
-        if self.verbose:
+        if self.verbose and self.rank == 0:
             periodic_str = (
                 f"in periodic box of size={self.boxsize}"
                 if self.periodic
@@ -123,7 +146,7 @@ class PointCloud:
         self.backend = backend
         if backend == "taichi":
             taichi_init(**kwargs)
-        if self.verbose:
+        if self.verbose and getattr(self, "rank", 0) == 0:
             print(f"[smudgy] Set {backend} backend")
 
     def _set_property(self, name: str, value: Any) -> None:
@@ -398,8 +421,13 @@ class PointCloud:
     # Tree utilities
     # =============================================================================
     def _check_tree(self) -> Any:
-        """Ensure a kd-tree exists for neighbor searches."""
-        if self.smoothing.tree is None:
+        """Ensure a kd-tree exists for neighbor searches.
+
+        Only built on rank 0 (parallel/distributed kd-tree construction is
+        deferred); returns ``None`` on non-root ranks. Callers must only
+        dereference the returned tree inside an ``if self.rank == 0`` block.
+        """
+        if self.smoothing.tree is None and self.rank == 0:
             if self.verbose:
                 print("[smudgy] Building kd-tree from positions")
             tree = build_kdtree(self.positions, boxsize=self.boxsize)
@@ -483,16 +511,34 @@ class PointCloud:
         """
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
         structure_temp = self._resolve_structure(structure)
-        tree = self._check_tree()
 
-        qpos = (
-            tree.data
-            if query_positions is None
-            else np.asarray(query_positions, dtype=np.float32)
-        )
-        nn_dists, nn_inds = query_kdtree(tree, qpos, k=num_neighbors_temp)
+        # caller-supplied query positions are only authoritative on rank 0
+        if query_positions is not None and self.size > 1:
+            query_positions = execution._bcast(
+                self.comm,
+                np.asarray(query_positions, dtype=np.float32)
+                if self.rank == 0
+                else None,
+            )
 
-        if self.verbose:
+        # kd-tree build + neighbor search: rank 0 only (deferred: parallel kd-tree)
+        if self.rank == 0:
+            tree = self._check_tree()
+            qpos = (
+                self.positions
+                if query_positions is None
+                else np.asarray(query_positions, dtype=np.float32)
+            )
+            nn_dists, nn_inds = query_kdtree(tree, qpos, k=num_neighbors_temp)
+        else:
+            qpos = nn_dists = nn_inds = None
+
+        if self.size > 1:
+            qpos, nn_dists, nn_inds = execution._bcast(
+                self.comm, (qpos, nn_dists, nn_inds)
+            )
+
+        if self.verbose and self.rank == 0:
             info_str = "tensors" if structure_temp == "covariant" else "lengths"
             print(
                 f"[smudgy] Computing smoothing {info_str} from {num_neighbors_temp} neighbors"
@@ -514,7 +560,7 @@ class PointCloud:
                 "compute_hmat",
                 backend=self.backend,
                 query_positions=qpos,
-                neighbor_positions=tree.data[nn_inds],
+                neighbor_positions=self.positions[nn_inds],
                 neighbor_weights=self.weights[nn_inds],
                 boxsize=self.boxsize,
             )
@@ -550,7 +596,7 @@ class PointCloud:
         kn = self._resolve_kernel(kernel_name)
         self._check_smoothing_computed(st)
 
-        if self.verbose:
+        if self.verbose and self.rank == 0:
             print(f"[smudgy] Computing density using " f"{st} '{kn}' kernel")
 
         density = execution._dispatch(
@@ -609,9 +655,14 @@ class PointCloud:
 
         # --- Case 2: single field ---
         name = names
-        values_arr = np.asarray(values, dtype=np.float32)
+        # caller-supplied field values are only authoritative on rank 0
+        values_arr = (
+            np.asarray(values, dtype=np.float32) if self.rank == 0 else None
+        )
+        if self.size > 1:
+            values_arr = execution._bcast(self.comm, values_arr)
 
-        if hasattr(self, name):
+        if self.rank == 0 and hasattr(self, name):
             print(f"Overwriting existing attribute '{name}' on PointCloud instance.")
 
         self._check_shape(values_arr, name)
@@ -889,13 +940,26 @@ class PointCloud:
             query_positions = self.positions
             nn_inds = self.smoothing.nn_inds
         else:
+            # caller-supplied query positions are only authoritative on rank 0
+            query_positions = np.asarray(query_positions, dtype=np.float32)
+            if self.size > 1:
+                query_positions = execution._bcast(
+                    self.comm, query_positions if self.rank == 0 else None
+                )
+
             # for new query positions, need to perform a new neighbor search
-            tree = self._check_tree()
-            _, nn_inds = query_kdtree(
-                tree,
-                query_positions,
-                k=self.num_neighbors,
-            )
+            # (rank 0 only; deferred: parallel kd-tree / neighbor search)
+            if self.rank == 0:
+                tree = self._check_tree()
+                _, nn_inds = query_kdtree(
+                    tree,
+                    query_positions,
+                    k=self.num_neighbors,
+                )
+            else:
+                nn_inds = None
+            if self.size > 1:
+                nn_inds = execution._bcast(self.comm, nn_inds)
 
         # ----------------------------
         # Input preparation
@@ -929,7 +993,7 @@ class PointCloud:
         # ----------------------------
         # Verbose output / computation
         # ----------------------------
-        if self.verbose:
+        if self.verbose and self.rank == 0:
             mode_str = {
                 "field": "fields",
                 "gradient": "gradients of fields",
@@ -1105,16 +1169,17 @@ class PointCloud:
             "eta_crit": eta_crit,
         }
 
-        if structure_temp in ("separable", "isotropic"):
-            deposit_kwargs["particle_hsml"] = h
-        else:
-            deposit_kwargs["particle_hmat_eigvecs"] = h_vecs
-            deposit_kwargs["particle_hmat_eigvals"] = h_vals
+        if adaptive:
+            if structure_temp in ("separable", "isotropic"):
+                deposit_kwargs["particle_hsml"] = h
+            else:
+                deposit_kwargs["particle_hmat_eigvecs"] = h_vecs
+                deposit_kwargs["particle_hmat_eigvals"] = h_vals
 
         # ----------------------------
         # Verbose output / computation
         # ----------------------------
-        if self.verbose:
+        if self.verbose and self.rank == 0:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
