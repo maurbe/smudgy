@@ -101,16 +101,11 @@ class PointCloud:
             periodic_resolved = boxsize_resolved = None
 
         if self.size > 1:
-            dim, positions_resolved, weights_resolved, periodic_resolved, boxsize_resolved = execution._bcast(
-                self.comm,
-                (
-                    dim,
-                    positions_resolved,
-                    weights_resolved,
-                    periodic_resolved,
-                    boxsize_resolved,
-                ),
+            dim, periodic_resolved, boxsize_resolved = execution._bcast(
+                self.comm, (dim, periodic_resolved, boxsize_resolved)
             )
+            positions_resolved = execution._bcast_array(self.comm, positions_resolved)
+            weights_resolved = execution._bcast_array(self.comm, weights_resolved)
 
         self.dim = dim
         self.positions = positions_resolved
@@ -512,14 +507,8 @@ class PointCloud:
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
         structure_temp = self._resolve_structure(structure)
 
-        # caller-supplied query positions are only authoritative on rank 0
-        if query_positions is not None and self.size > 1:
-            query_positions = execution._bcast(
-                self.comm,
-                np.asarray(query_positions, dtype=np.float32)
-                if self.rank == 0
-                else None,
-            )
+        # query_positions is only ever read by rank 0 below (to compute qpos,
+        # which then gets broadcast) -- no need to broadcast the raw input.
 
         # kd-tree build + neighbor search: rank 0 only (deferred: parallel kd-tree)
         if self.rank == 0:
@@ -534,9 +523,9 @@ class PointCloud:
             qpos = nn_dists = nn_inds = None
 
         if self.size > 1:
-            qpos, nn_dists, nn_inds = execution._bcast(
-                self.comm, (qpos, nn_dists, nn_inds)
-            )
+            qpos = execution._bcast_array(self.comm, qpos)
+            nn_dists = execution._bcast_array(self.comm, nn_dists)
+            nn_inds = execution._bcast_array(self.comm, nn_inds)
 
         if self.verbose and self.rank == 0:
             info_str = "tensors" if structure_temp == "covariant" else "lengths"
@@ -660,7 +649,7 @@ class PointCloud:
             np.asarray(values, dtype=np.float32) if self.rank == 0 else None
         )
         if self.size > 1:
-            values_arr = execution._bcast(self.comm, values_arr)
+            values_arr = execution._bcast_array(self.comm, values_arr)
 
         if self.rank == 0 and hasattr(self, name):
             print(f"Overwriting existing attribute '{name}' on PointCloud instance.")
@@ -935,17 +924,29 @@ class PointCloud:
         fields, fields_sizes = self._resolve_fields(fields)
         self._check_field_dimensionality(mode, fields_sizes)
 
+        # whether query_positions was supplied is decided by rank 0 alone
+        # (other ranks may pass anything, e.g. None) -- otherwise ranks
+        # could take different branches below and hang/diverge in the
+        # collective execution._dispatch call at the end of this method.
+        has_query_positions = query_positions is not None
+        if self.size > 1:
+            has_query_positions = execution._bcast(
+                self.comm, has_query_positions if self.rank == 0 else None
+            )
+
         # if query_positions is None, use particle positions
-        if query_positions is None:
+        if not has_query_positions:
             query_positions = self.positions
             nn_inds = self.smoothing.nn_inds
         else:
             # caller-supplied query positions are only authoritative on rank 0
-            query_positions = np.asarray(query_positions, dtype=np.float32)
+            query_positions = (
+                np.asarray(query_positions, dtype=np.float32)
+                if self.rank == 0
+                else None
+            )
             if self.size > 1:
-                query_positions = execution._bcast(
-                    self.comm, query_positions if self.rank == 0 else None
-                )
+                query_positions = execution._bcast_array(self.comm, query_positions)
 
             # for new query positions, need to perform a new neighbor search
             # (rank 0 only; deferred: parallel kd-tree / neighbor search)
@@ -959,7 +960,7 @@ class PointCloud:
             else:
                 nn_inds = None
             if self.size > 1:
-                nn_inds = execution._bcast(self.comm, nn_inds)
+                nn_inds = execution._bcast_array(self.comm, nn_inds)
 
         # ----------------------------
         # Input preparation

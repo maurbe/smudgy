@@ -71,13 +71,36 @@ def _reduce_sum(comm, local_result):
 
 
 def _bcast(comm, obj, root=0):
-    """Broadcast a (possibly None-on-non-root) Python object/array from root.
+    """Broadcast a (possibly None-on-non-root) Python object from root.
 
     Pickle-based, matching the allgather/allreduce style already used in
-    this module. A buffer-based Bcast would avoid re-pickling large
-    positions/weights arrays on every call; left as a later optimization.
+    this module. Only safe for small objects (scalars, tiny arrays): the
+    pickled payload's byte count is passed to the underlying MPI_Bcast as
+    a 32-bit int, so this silently breaks (MPI_ERR_ARG) for payloads
+    anywhere near 2GB. Use `_bcast_array` for large per-particle arrays.
     """
     return comm.bcast(obj, root=root)
+
+
+def _bcast_array(comm, arr, root=0):
+    """Broadcast a numpy array via a raw buffer Bcast, not pickle.
+
+    Avoids mpi4py's ~2GB pickle-payload ceiling (MPI_Bcast's count param
+    is a 32-bit int; pickle-bcast counts raw bytes, buffer-bcast counts
+    elements in the array's own dtype) -- large per-particle arrays
+    (positions, nn_dists, nn_inds, ...) can exceed 2GB well before hitting
+    any realistic element-count limit. `arr` must be non-None on `root`;
+    shape/dtype are sent via a small preliminary pickle bcast so non-root
+    ranks can allocate a matching receive buffer.
+    """
+    rank = comm.Get_rank()
+    shape, dtype = comm.bcast(
+        (arr.shape, arr.dtype) if rank == root else None, root=root
+    )
+    if rank != root:
+        arr = np.empty(shape, dtype=dtype)
+    comm.Bcast(arr, root=root)
+    return arr
 
 
 def _dispatch(func: str, *, backend: str, **kwargs):
