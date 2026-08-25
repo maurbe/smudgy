@@ -533,11 +533,17 @@ class PointCloud:
                 f"[smudgy] Computing smoothing {info_str} from {num_neighbors_temp} neighbors"
             )
 
+        # Slice to this rank's local rows *before* gathering neighbor data,
+        # so the expensive fancy-indexing below is O(n/size), not O(n), per
+        # rank (see execution._local_slice docstring).
+        start, stop = execution._local_slice(qpos.shape[0], self.rank, self.size)
+        nn_inds_local = nn_inds[start:stop]
+
         if structure_temp in ("separable", "isotropic"):
             self.smoothing.smoothing_lengths = execution._dispatch(
                 "compute_hsml",
                 backend=self.backend,
-                nn_dists=nn_dists,
+                nn_dists=nn_dists[start:stop],
             )
         else:
             (
@@ -548,9 +554,9 @@ class PointCloud:
             ) = execution._dispatch(
                 "compute_hmat",
                 backend=self.backend,
-                query_positions=qpos,
-                neighbor_positions=self.positions[nn_inds],
-                neighbor_weights=self.weights[nn_inds],
+                query_positions=qpos[start:stop],
+                neighbor_positions=self.positions[nn_inds_local],
+                neighbor_weights=self.weights[nn_inds_local],
                 boxsize=self.boxsize,
             )
             self.smoothing.smoothing_tensors = smoothing_tensors
@@ -588,19 +594,27 @@ class PointCloud:
         if self.verbose and self.rank == 0:
             print(f"[smudgy] Computing density using " f"{st} '{kn}' kernel")
 
+        # Slice to this rank's local particles *before* gathering neighbor
+        # data, so the expensive fancy-indexing below is O(n/size), not
+        # O(n), per rank (see execution._local_slice docstring).
+        start, stop = execution._local_slice(
+            self.smoothing.nn_inds.shape[0], self.rank, self.size
+        )
+        nn_inds_local = self.smoothing.nn_inds[start:stop]
+
         density = execution._dispatch(
             "compute_density",
             backend=self.backend,
             kernel_name=kn,
             dim=self.dim,
-            neighbor_weights=self.weights[self.smoothing.nn_inds],
+            neighbor_weights=self.weights[nn_inds_local],
             r_ij=self._get_rel_coords(
-                self.positions, self.positions[self.smoothing.nn_inds]
+                self.positions[start:stop], self.positions[nn_inds_local]
             ),
             h=(
-                self.smoothing.smoothing_tensors
+                self.smoothing.smoothing_tensors[start:stop]
                 if st == "covariant"
-                else self.smoothing.smoothing_lengths
+                else self.smoothing.smoothing_lengths[start:stop]
             ),
             structure=st,
         )
@@ -774,7 +788,7 @@ class PointCloud:
     def _prepare_deposition_smoothing(
         self,
         structure: Structure,
-        mask: npt.NDArray[np.bool_],
+        idx: npt.NDArray[np.integer],
         dim: int,
         plane_projection: list[int] | None = None,
     ) -> tuple[
@@ -782,29 +796,38 @@ class PointCloud:
         npt.NDArray[np.float32] | None,
         npt.NDArray[np.float32] | None,
     ]:
-        """Prepare smoothing data (h, h_vals, h_vecs) for an adaptive deposition call."""
+        """Prepare smoothing data (h, h_vals, h_vecs) for an adaptive deposition call.
+
+        `idx` is this rank's already-local set of particle indices (see
+        `deposit`), not a full-size boolean mask -- keeps this gather at
+        O(n/size) instead of O(n) per rank.
+        """
         self._check_smoothing_computed(
             "isotropic" if structure == "separable" else structure
         )
 
         if structure == "separable":
-            hsml = self.smoothing.smoothing_lengths[mask]
+            hsml = self.smoothing.smoothing_lengths[idx]
             return np.repeat(hsml[:, np.newaxis], dim, axis=1), None, None
 
         if structure == "isotropic":
-            return self.smoothing.smoothing_lengths[mask], None, None
+            return self.smoothing.smoothing_lengths[idx], None, None
 
         if structure == "covariant":
             if plane_projection is not None:
+                # reduce=False: this result is immediately consumed locally
+                # by `deposit`'s own dispatch call below, not surfaced to
+                # the caller, so there's nothing to gather here.
                 _, vals, vecs = execution._dispatch(
                     "project_2d",
                     backend=self.backend,
-                    h_tensor=self.smoothing.smoothing_tensors[mask],
+                    reduce=False,
+                    h_tensor=self.smoothing.smoothing_tensors[idx],
                     plane=plane_projection,
                 )
             else:
-                vals = self.smoothing.smoothing_tensors_eigvals[mask]
-                vecs = self.smoothing.smoothing_tensors_eigvecs[mask]
+                vals = self.smoothing.smoothing_tensors_eigvals[idx]
+                vecs = self.smoothing.smoothing_tensors_eigvecs[idx]
             return None, vals, vecs
 
         raise ValueError(f"Unsupported deposition structure '{structure}'")
@@ -962,14 +985,25 @@ class PointCloud:
             if self.size > 1:
                 nn_inds = execution._bcast_array(self.comm, nn_inds)
 
+        # Slice to this rank's local query positions *before* gathering
+        # neighbor data below, so the expensive fancy-indexing is O(m/size),
+        # not O(m), per rank (see execution._local_slice docstring).
+        start, stop = execution._local_slice(
+            query_positions.shape[0], self.rank, self.size
+        )
+        query_positions_local = query_positions[start:stop]
+        nn_inds_local = nn_inds[start:stop]
+
         # ----------------------------
         # Input preparation
         # ----------------------------
         # compute relative coordinates
-        r_ij = self._get_rel_coords(query_positions, self.positions[nn_inds])
+        r_ij = self._get_rel_coords(
+            query_positions_local, self.positions[nn_inds_local]
+        )
 
         # prepare interpolation weights and fields
-        fields_temp = fields[nn_inds]  # Shape: (M, K, num_fields)
+        fields_temp = fields[nn_inds_local]  # Shape: (M_local, K, num_fields)
 
         # For divergence and curl, reshape fields to (M, K, num_fields, D)
         # This enables clean einsum patterns since all fields are validated to have self.dim components
@@ -980,15 +1014,15 @@ class PointCloud:
             )
 
         density_temp = (
-            self.smoothing.density_covariant[nn_inds]
+            self.smoothing.density_covariant[nn_inds_local]
             if structure_temp == "covariant"
-            else self.smoothing.density_isotropic[nn_inds]
+            else self.smoothing.density_isotropic[nn_inds_local]
         )
-        weights_temp = self.weights[nn_inds] / (density_temp + 1e-8)
+        weights_temp = self.weights[nn_inds_local] / (density_temp + 1e-8)
         h_temp = (
-            self.smoothing.smoothing_tensors[nn_inds]
+            self.smoothing.smoothing_tensors[nn_inds_local]
             if structure_temp == "covariant"
-            else self.smoothing.smoothing_lengths[nn_inds]
+            else self.smoothing.smoothing_lengths[nn_inds_local]
         )
 
         # ----------------------------
@@ -1114,9 +1148,16 @@ class PointCloud:
             (self.positions >= domain_min) & (self.positions <= domain_max),
             axis=1,
         )
-        pos_temp = self.positions[mask] - domain_min
-        weights_temp = self.weights[mask]
-        fields_temp = fields[mask]
+        # Slice to this rank's local particles *before* gathering per-particle
+        # data below, so that gather is O(n/size), not O(n), per rank (see
+        # execution._local_slice docstring).
+        idx = np.flatnonzero(mask)
+        start, stop = execution._local_slice(idx.shape[0], self.rank, self.size)
+        idx_local = idx[start:stop]
+
+        pos_temp = self.positions[idx_local] - domain_min
+        weights_temp = self.weights[idx_local]
+        fields_temp = fields[idx_local]
 
         # if plane_projection is set, collect relevant axes
         if plane_projection:
@@ -1151,7 +1192,7 @@ class PointCloud:
         if adaptive:
             h, h_vals, h_vecs = self._prepare_deposition_smoothing(
                 structure_temp,
-                mask,
+                idx_local,
                 dep_dim,
                 plane_projection,
             )
