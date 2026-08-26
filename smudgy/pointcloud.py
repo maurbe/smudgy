@@ -14,6 +14,7 @@ from .backend.neighbors import (
     query_kdtree,
 )
 from .backend.taichi import init as taichi_init
+from .decomposition import DecompositionInfo, hilbert_partition_and_scatter
 from .smooth import SmoothingInfo
 
 STRUCTURES = ("separable", "isotropic", "covariant")
@@ -114,6 +115,7 @@ class PointCloud:
         self.boxsize = boxsize_resolved
 
         self.smoothing = SmoothingInfo()
+        self.decomposition = DecompositionInfo()
 
         # Verbose output after completed initialization
         if self.verbose and self.rank == 0:
@@ -143,6 +145,65 @@ class PointCloud:
             taichi_init(**kwargs)
         if self.verbose and getattr(self, "rank", 0) == 0:
             print(f"[smudgy] Set {backend} backend")
+
+    def decompose(self) -> "PointCloud":
+        """Compute a Hilbert-curve, particle-count-balanced spatial decomposition.
+
+        Opt-in: does NOT change `self.positions`/`self.weights` or any
+        existing method's behavior. Stores the result in `self.decomposition`
+        (see `decomposition.DecompositionInfo`) as a side artifact for future
+        use (ghost exchange, local-only compute, gather-to-root) once later
+        steps in the domain-decomposition roadmap land. Custom fields added
+        via `add_fields` are NOT decomposed by this method.
+
+        Returns
+        -------
+        PointCloud
+            self, for chaining (mirrors `global_setup`).
+
+        """
+        domain_min, domain_max = self._resolve_decomposition_domain()
+        self.decomposition = hilbert_partition_and_scatter(
+            self.comm,
+            self.positions if self.rank == 0 else None,
+            self.weights if self.rank == 0 else None,
+            domain_min=domain_min,
+            domain_max=domain_max,
+            periodic=self.periodic,
+        )
+        if self.verbose and self.rank == 0:
+            print(
+                f"[smudgy] Decomposed {self.positions.shape[0]} particles across "
+                f"{self.size} rank{'s' if self.size > 1 else ''} (Hilbert order, "
+                "count-balanced)"
+            )
+        return self
+
+    def _resolve_decomposition_domain(
+        self,
+    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+        """Resolve the (domain_min, domain_max) extent for Hilbert quantization.
+
+        Periodic: [0, boxsize] per axis -- `self.boxsize` is already
+        identical on every rank (broadcast in `__init__`), so no new
+        communication is needed. Non-periodic: the data's own bounding box,
+        computed on rank 0 (the only rank required to have authoritative
+        data, per `hilbert_partition_and_scatter`'s calling convention) and
+        broadcast (a tiny payload: 2*dim floats).
+        """
+        if self.periodic:
+            return np.zeros(self.dim, dtype=np.float32), np.asarray(
+                self.boxsize, dtype=np.float32
+            )
+
+        domain = (
+            (self.positions.min(axis=0), self.positions.max(axis=0))
+            if self.rank == 0
+            else None
+        )
+        if self.size > 1:
+            domain = execution._bcast(self.comm, domain)
+        return domain
 
     def _set_property(self, name: str, value: Any) -> None:
         """Set a global property with centralized validation."""

@@ -15,6 +15,20 @@ REDUCTION = {
 }
 
 
+def _balanced_counts(n, size):
+    """Per-rank item counts for a contiguous, balanced split of n items.
+
+    Every rank's count differs by at most 1 (the first `n % size` ranks get
+    one extra item). Shared by `_local_slice` (index-range chunking of
+    already-replicated data) and `decomposition.hilbert_partition_and_scatter`
+    (chunking a Hilbert-sorted particle array before `_scatterv_rows`), so
+    both use exactly one definition of "balanced".
+    """
+    counts = np.full(size, n // size, dtype=np.int64)
+    counts[: n % size] += 1
+    return counts
+
+
 def _local_slice(n, rank, size):
     """Contiguous, balanced [start, stop) range for this rank.
 
@@ -24,8 +38,7 @@ def _local_slice(n, rank, size):
     and chunking it afterward -- the latter makes that gather cost O(N) per
     rank instead of O(N/size), which dominates wall time at high rank counts.
     """
-    counts = np.full(size, n // size, dtype=int)
-    counts[: n % size] += 1
+    counts = _balanced_counts(n, size)
     starts = np.concatenate(([0], np.cumsum(counts)))[:-1]
     return int(starts[rank]), int(starts[rank] + counts[rank])
 
@@ -76,6 +89,41 @@ def _bcast_array(comm, arr, root=0):
         arr = np.empty(shape, dtype=dtype)
     comm.Bcast(arr, root=root)
     return arr
+
+
+def _scatterv_rows(comm, arr, counts, root=0):
+    """Scatter the leading-axis rows of an array to each rank via a raw-buffer Scatterv.
+
+    Counterpart to `_bcast_array` for row-*unequal* distribution -- needed
+    because a Hilbert-sorted, count-balanced chunk (see
+    `decomposition.hilbert_partition_and_scatter`) isn't equal-sized across
+    ranks when N isn't divisible by `size`. `arr` must be non-None, full
+    leading-axis length, and C-contiguous on `root`, with rows already
+    ordered so rows [0, counts[0]) go to rank 0, [counts[0], counts[0]+counts[1])
+    to rank 1, etc.; ignored (may be None) elsewhere. `counts` (shape
+    (size,)) must already be identical on every rank (e.g. via a preceding
+    small `comm.bcast`, as `hilbert_partition_and_scatter` does). Avoids
+    mpi4py's pickle ceiling the same way `_bcast_array` does.
+
+    Returns
+    -------
+    np.ndarray, shape (counts[rank], *arr.shape[1:])
+    """
+    rank = comm.Get_rank()
+    row_shape, dtype = comm.bcast(
+        (arr.shape[1:], arr.dtype) if rank == root else None, root=root
+    )
+    counts = np.asarray(counts, dtype=np.int64)
+    local_arr = np.empty((int(counts[rank]), *row_shape), dtype=dtype)
+
+    row_size = int(np.prod(row_shape, dtype=np.int64)) if row_shape else 1
+    send = None
+    if rank == root:
+        sendcounts = counts * row_size
+        displs = np.concatenate(([0], np.cumsum(sendcounts)[:-1]))
+        send = [np.ascontiguousarray(arr), (sendcounts, displs)]
+    comm.Scatterv(send, local_arr, root=root)
+    return local_arr
 
 
 def _dispatch(func: str, *, backend: str, reduce: bool = True, **kwargs):
