@@ -7,8 +7,11 @@ Hilbert-curve code), then redistributes positions/weights via
 (local chunk + provenance) for later steps (ghost exchange, local-only
 compute, gather-to-root) to build on.
 
-This module is currently opt-in and self-contained: nothing else in the
-package reads `DecompositionInfo` yet (see `PointCloud.decompose`).
+Also home to `route_query_positions` (Step 4b): routes an arbitrary
+(non-particle) query-position array to ranks using the *same* Hilbert-code
+partition, via `DecompositionInfo.boundary_codes` -- reusing the partition
+`decompose()` already computed rather than deriving a new one for query
+points.
 """
 
 from __future__ import annotations
@@ -48,6 +51,18 @@ class DecompositionInfo:
         Lower extent, shape (D,), used for Hilbert quantization.
     domain_max : np.ndarray
         Upper extent, shape (D,), used for Hilbert quantization.
+    boundary_codes : np.ndarray
+        Shape (size+1,) uint64, identical on every rank. The actual
+        count-based partition cut points used above: rank `i` owns Hilbert
+        codes in `[boundary_codes[i], boundary_codes[i+1])`. `boundary_codes[0]`
+        is always 0 and `boundary_codes[size]` is always the maximum uint64
+        value, so together the intervals cover the entire code space (not
+        just where particles happen to be) -- needed so an arbitrary query
+        position (not a particle) can still be routed to exactly one rank,
+        consistently with the partition actually used above. A rank with 0
+        local particles gets a zero-width interval (its own boundary equals
+        the next non-empty rank's), so it is correctly never routed anything.
+        See `route_query_positions`.
 
     """
 
@@ -57,6 +72,38 @@ class DecompositionInfo:
     counts: np.ndarray = None
     domain_min: np.ndarray = None
     domain_max: np.ndarray = None
+    boundary_codes: np.ndarray = None
+
+
+@dataclass
+class QueryRouting:
+    """Result of `route_query_positions`.
+
+    Routes an arbitrary (M, D) query-position array to ranks using the exact
+    same Hilbert-code partition `hilbert_partition_and_scatter` already
+    computed for particles (`DecompositionInfo.boundary_codes`) -- so a query
+    point lands on whichever rank's spatial region, as defined by that
+    partition, contains it. Unrelated to and independent from any earlier
+    `route_query_positions` call: there is no persistent "query decomposition"
+    the way there is for particles, this is recomputed fresh per call.
+
+    Parameters
+    ----------
+    local_positions : np.ndarray
+        This rank's chunk of query positions, shape (n_local_queries, D).
+    local_global_indices : np.ndarray
+        Original row index (into the caller's (M, D) query array) of each
+        local query point, shape (n_local_queries,) -- mirrors
+        `DecompositionInfo.local_global_indices`'s role, needed to reassemble
+        a per-rank result back into the caller's original order.
+    counts : np.ndarray
+        Per-rank query-point counts, shape (size,), identical on every rank.
+
+    """
+
+    local_positions: np.ndarray = None
+    local_global_indices: np.ndarray = None
+    counts: np.ndarray = None
 
 
 def _quantize(
@@ -242,10 +289,14 @@ def hilbert_partition_and_scatter(
         positions_sorted = np.ascontiguousarray(positions[order])
         weights_sorted = np.ascontiguousarray(weights[order])
         global_indices_sorted = np.ascontiguousarray(order.astype(np.int64))
+        boundary_codes = _partition_boundary_codes(codes[order], counts)
     else:
         counts = positions_sorted = weights_sorted = global_indices_sorted = None
+        boundary_codes = None
 
-    counts = comm.bcast(counts if rank == root else None, root=root)
+    counts, boundary_codes = comm.bcast(
+        (counts, boundary_codes) if rank == root else None, root=root
+    )
 
     local_positions = execution._scatterv_rows(comm, positions_sorted, counts, root=root)
     local_weights = execution._scatterv_rows(comm, weights_sorted, counts, root=root)
@@ -260,4 +311,99 @@ def hilbert_partition_and_scatter(
         counts=counts,
         domain_min=np.asarray(domain_min),
         domain_max=np.asarray(domain_max),
+        boundary_codes=boundary_codes,
+    )
+
+
+def _partition_boundary_codes(
+    codes_sorted: npt.NDArray[np.uint64], counts: npt.NDArray[np.int64]
+) -> npt.NDArray[np.uint64]:
+    """Derive the (size+1,) Hilbert-code cut points actually used by a
+    count-based partition of `codes_sorted` (already sorted ascending) into
+    per-rank chunks of size `counts`.
+
+    `boundary_codes[i]` is the code of the first element of rank `i`'s chunk;
+    `boundary_codes[0]` is always 0 and `boundary_codes[size]` is always the
+    maximum uint64 value, so consecutive pairs
+    `[boundary_codes[i], boundary_codes[i+1])` partition the *entire* code
+    space (not just codes that actually occur), including empty (zero-width)
+    intervals for any rank with 0 particles. See `DecompositionInfo`.
+    """
+    size = counts.shape[0]
+    n = codes_sorted.shape[0]
+    max_code = np.iinfo(np.uint64).max
+    boundary_codes = np.full(size + 1, max_code, dtype=np.uint64)
+    boundary_codes[0] = 0
+    if n > 0:
+        starts = np.cumsum(counts)[:-1]  # rank i's chunk starts at starts[i-1], i=1..size-1
+        valid = starts < n
+        clipped_starts = np.clip(starts, 0, n - 1)
+        boundary_codes[1:size] = np.where(valid, codes_sorted[clipped_starts], max_code)
+    return boundary_codes
+
+
+def route_query_positions(
+    comm: MPI.Comm,
+    decomposition: DecompositionInfo,
+    query_positions: FloatArray | None,
+    periodic: bool = False,
+    root: int = 0,
+) -> QueryRouting:
+    """Route an arbitrary (M, D) query-position array to ranks by the same
+    Hilbert-code partition already used for particles, then Scatterv.
+
+    `query_positions` must be the full, global (M, D) array on `root`;
+    ignored (may be `None`) on every other rank -- same calling convention as
+    `hilbert_partition_and_scatter`. `decomposition` must already have
+    `boundary_codes` set (i.e. come from `hilbert_partition_and_scatter`).
+    Uses `decomposition.domain_min`/`domain_max` (the *same* domain particles
+    were quantized against) so a query point's code is computed on the
+    identical curve, making "which rank owns this code" well-defined
+    everywhere in the domain, not just where particles happen to be. An
+    out-of-domain, non-periodic query position is handled by
+    `hilbert_encode`'s existing defensive clipping (see `_quantize`) -- it
+    routes to whichever rank owns the nearest boundary region, which affects
+    only which rank does the work, never the correctness of the final K-NN
+    answer found later by `ghosts.exchange_ghosts`.
+
+    Returns
+    -------
+    QueryRouting
+        `local_positions` (this rank's routed chunk), `local_global_indices`
+        (original row index of each local query point, into the caller's
+        (M, D) array), `counts` (per-rank counts, identical on every rank).
+    """
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    if rank == root:
+        codes = hilbert_encode(
+            query_positions,
+            decomposition.domain_min,
+            decomposition.domain_max,
+            periodic=periodic,
+        )
+        owning_rank = np.clip(
+            np.searchsorted(decomposition.boundary_codes, codes, side="right") - 1,
+            0,
+            size - 1,
+        )
+        order = np.argsort(owning_rank, kind="stable")
+        counts = np.bincount(owning_rank, minlength=size).astype(np.int64)
+        positions_sorted = np.ascontiguousarray(query_positions[order])
+        global_indices_sorted = np.ascontiguousarray(order.astype(np.int64))
+    else:
+        counts = positions_sorted = global_indices_sorted = None
+
+    counts = comm.bcast(counts if rank == root else None, root=root)
+
+    local_positions = execution._scatterv_rows(comm, positions_sorted, counts, root=root)
+    local_global_indices = execution._scatterv_rows(
+        comm, global_indices_sorted, counts, root=root
+    )
+
+    return QueryRouting(
+        local_positions=local_positions,
+        local_global_indices=local_global_indices,
+        counts=counts,
     )

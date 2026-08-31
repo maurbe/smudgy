@@ -156,6 +156,90 @@ def _run_pipeline_regression_under_mpi(out_path):
     print(f"RANK {rank} DONE")
 
 
+def _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodic):
+    """Route an arbitrary (M, D) query array via `route_query_positions` and
+    check the properties that make it a valid partition: bijection (every
+    query point routed to exactly one rank, none dropped/duplicated),
+    reconstruction via `local_global_indices` is exact, and -- the actual
+    routing correctness property -- each routed point's own Hilbert code
+    truly falls inside the *owning* rank's `[boundary_codes[r],
+    boundary_codes[r+1])` interval (not just "some rank claimed it")."""
+    from mpi4py import MPI
+
+    from smudgy import PointCloud
+    from smudgy.decomposition import hilbert_encode, route_query_positions
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    rng = np.random.default_rng(4)
+    dim = 3
+    positions = rng.uniform(0.0, 1.0, size=(n_particles, dim)).astype(np.float32)
+    weights = np.ones(n_particles, dtype=np.float32)
+    boxsize = 1.0 if periodic else None
+
+    pc = PointCloud(
+        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        backend="numpy",
+    )
+    pc.decompose()
+
+    qrng = np.random.default_rng(5)
+    # deliberately includes some out-of-[0,1] points to exercise the
+    # non-periodic clip-routing edge case too
+    lo, hi = (0.0, 1.0) if periodic else (-0.05, 1.05)
+    query = qrng.uniform(lo, hi, size=(n_query, dim)).astype(np.float32)
+
+    routing = route_query_positions(
+        comm, pc.decomposition, query if rank == 0 else None, periodic
+    )
+
+    local_shape_ok = (
+        routing.local_positions.shape[0] == routing.counts[rank]
+        and routing.local_global_indices.shape[0] == routing.counts[rank]
+    )
+
+    # routing correctness: this rank's own routed points' Hilbert codes must
+    # fall inside ITS OWN boundary_codes interval.
+    routing_correct = True
+    if routing.local_positions.shape[0] > 0:
+        codes = hilbert_encode(
+            routing.local_positions,
+            pc.decomposition.domain_min,
+            pc.decomposition.domain_max,
+            periodic=periodic,
+        )
+        lo_code = pc.decomposition.boundary_codes[rank]
+        hi_code = pc.decomposition.boundary_codes[rank + 1]
+        routing_correct = bool(np.all((codes >= lo_code) & (codes < hi_code)))
+
+    all_global = comm.gather(routing.local_global_indices, root=0)
+    all_local = comm.gather(routing.local_positions, root=0)
+    all_shape_ok = comm.gather(local_shape_ok, root=0)
+    all_routing_correct = comm.gather(routing_correct, root=0)
+
+    if rank == 0:
+        concatenated = np.concatenate(all_global)
+        bijection_ok = np.array_equal(np.sort(concatenated), np.arange(n_query))
+
+        reconstructed = np.empty_like(query)
+        for g, p in zip(all_global, all_local):
+            if g.shape[0] == 0:
+                continue
+            reconstructed[g] = p
+        reconstruct_exact = np.array_equal(reconstructed, query)
+
+        result = {
+            "bijection_ok": bijection_ok,
+            "reconstruct_exact": reconstruct_exact,
+            "local_shapes_ok": all(all_shape_ok),
+            "routing_correct": all(all_routing_correct),
+            "counts_sum_ok": routing.counts.sum() == n_query,
+        }
+        np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
+    print(f"RANK {rank} DONE")
+
+
 def _run_under_mpi():
     mode = sys.argv[1]
     if mode == "props":
@@ -163,6 +247,11 @@ def _run_under_mpi():
         _run_props_under_mpi(out_path, n, dist_mode, periodic)
     elif mode == "pipeline":
         _run_pipeline_regression_under_mpi(sys.argv[2])
+    elif mode == "route_query":
+        out_path, n_particles, n_query, periodic = (
+            sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5] == "1"
+        )
+        _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodic)
     else:
         raise ValueError(f"unknown mode {mode!r}")
 
@@ -219,6 +308,31 @@ def test_decompose_does_not_change_pipeline_results(tmp_path):
     assert int(result["interp_matches"]) == 1
     assert int(result["fgrid_matches"]) == 1
     assert int(result["wgrid_matches"]) == 1
+
+
+@pytest.mark.parametrize(
+    "n_particles,n_query,n_ranks,periodic",
+    [
+        (300, 200, 3, False),  # includes deliberate out-of-domain (clip-routed) points
+        (300, 200, 3, True),
+        (100, 1, 1, False),  # trivial single-rank path
+        (2000, 500, 4, False),
+        (5, 3, 5, False),  # N < P AND M < P: some ranks get zero of both
+    ],
+)
+def test_route_query_positions_properties(tmp_path, n_particles, n_query, n_ranks, periodic):
+    out_path = tmp_path / "result.npz"
+    _mpiexec(
+        n_ranks,
+        ["route_query", str(out_path), str(n_particles), str(n_query), "1" if periodic else "0"],
+    )
+    result = np.load(out_path)
+
+    assert int(result["bijection_ok"]) == 1
+    assert int(result["reconstruct_exact"]) == 1
+    assert int(result["local_shapes_ok"]) == 1
+    assert int(result["routing_correct"]) == 1
+    assert int(result["counts_sum_ok"]) == 1
 
 
 if __name__ == "__main__":

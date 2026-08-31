@@ -14,7 +14,12 @@ from .backend.neighbors import (
     query_kdtree,
 )
 from .backend.taichi import init as taichi_init
-from .decomposition import DecompositionInfo, hilbert_partition_and_scatter
+from .decomposition import (
+    DecompositionInfo,
+    QueryRouting,
+    hilbert_partition_and_scatter,
+    route_query_positions,
+)
 from .ghosts import GhostInfo, exchange_ghosts, push_to_ghosts
 from .smooth import SmoothingInfo
 
@@ -141,6 +146,7 @@ class PointCloud:
         self.smoothing = SmoothingInfo()
         self.decomposition = DecompositionInfo()
         self.ghosts = GhostInfo()
+        self.query_routing = QueryRouting()
 
         # Verbose output after completed initialization
         if self.verbose and self.rank == 0:
@@ -1093,6 +1099,87 @@ class PointCloud:
 
         raise ValueError(f"Unsupported deposition structure '{structure}'")
 
+    def _interpolate_local(
+        self,
+        query_positions_local: npt.NDArray[np.floating],
+        ghost_info: GhostInfo,
+        fields: npt.NDArray[np.floating],
+        fields_sizes: list[int],
+        mode: InterpolationMode,
+        structure_temp: Structure,
+    ) -> npt.NDArray[np.floating]:
+        """Shared body of `interpolate()`'s two local+ghost branches.
+
+        SPH-interpolates `fields` at `query_positions_local` using
+        `ghost_info.nn_inds`/`nn_dists` (already solved -- either by
+        `find_neighbors()` for the particle-position case, or by a fresh
+        `ghosts.exchange_ghosts(..., target_positions=...)` call for the
+        arbitrary-query-position case, Step 4b) against this rank's own
+        local particles plus `ghost_info`'s imported ghosts.
+        `ghost_info.export_local_index`/`export_counts` must correspond to
+        the exact same exchange that produced `nn_inds` -- used here via
+        `push_to_ghosts` to fetch each neighbor's already-computed
+        density/smoothing data from whichever rank actually computed it.
+        Returns a local-sized (not full-N/M, not gathered) array; the caller
+        is responsible for knowing how to reassemble it (see `interpolate`).
+        """
+        nn_inds_local = ghost_info.nn_inds
+        combined_positions = self._combined_local_and_ghost(
+            self.decomposition.local_positions, ghost_info.ghost_positions
+        )
+        combined_weights = self._combined_local_and_ghost(
+            self.decomposition.local_weights, ghost_info.ghost_weights
+        )
+
+        r_ij = self._get_rel_coords(
+            query_positions_local, combined_positions[nn_inds_local]
+        )
+
+        fields_local = fields[self.decomposition.local_global_indices]
+        ghost_fields = push_to_ghosts(self.comm, ghost_info, fields_local)
+        combined_fields = self._combined_local_and_ghost(fields_local, ghost_fields)
+        fields_temp = combined_fields[nn_inds_local]
+
+        if mode in ("divergence", "curl"):
+            num_fields = len(fields_sizes)
+            fields_temp = fields_temp.reshape(
+                fields_temp.shape[0], fields_temp.shape[1], num_fields, self.dim
+            )
+
+        density_local = (
+            self.smoothing.density_covariant
+            if structure_temp == "covariant"
+            else self.smoothing.density_isotropic
+        )
+        ghost_density = push_to_ghosts(self.comm, ghost_info, density_local)
+        combined_density = self._combined_local_and_ghost(density_local, ghost_density)
+        density_temp = combined_density[nn_inds_local]
+
+        weights_temp = combined_weights[nn_inds_local] / (density_temp + 1e-8)
+
+        h_local = (
+            self.smoothing.smoothing_tensors
+            if structure_temp == "covariant"
+            else self.smoothing.smoothing_lengths
+        )
+        ghost_h = push_to_ghosts(self.comm, ghost_info, h_local)
+        combined_h = self._combined_local_and_ghost(h_local, ghost_h)
+        h_temp = combined_h[nn_inds_local]
+
+        return execution._dispatch(
+            "interpolate",
+            backend=self.backend,
+            kernel_name=self.smoothing.kernel_name,
+            dim=self.dim,
+            fields=fields_temp,
+            weights=weights_temp,
+            r_ij=r_ij,
+            h=h_temp,
+            mode=mode,
+            structure=structure_temp,
+            reduce=False,
+        )
+
     # =============================================================================
     # Core methods
     # =============================================================================
@@ -1218,56 +1305,16 @@ class PointCloud:
                 self.comm, has_query_positions if self.rank == 0 else None
             )
 
-        # Local+ghost path: only when compute_smoothing() actually used it
+        # Local+ghost paths: only when compute_smoothing() actually used it
         # (self.smoothing.used_ghosts -- not just "is a decomposition
         # available", since that alone doesn't say which path produced the
-        # smoothing/density data currently stored) and no custom query
-        # positions were given (those aren't decomposed yet -- deferred).
+        # smoothing/density data currently stored). Two sub-cases, both
+        # sharing `_interpolate_local`'s body: evaluate at the particles
+        # themselves (nn_inds already solved by find_neighbors(), via
+        # self.ghosts), or at arbitrary caller-supplied query positions
+        # (Step 4b: route them by the same Hilbert partition, then solve
+        # their K-NN with a generalized ghost exchange).
         if self.smoothing.used_ghosts and not has_query_positions:
-            query_positions_local = self.decomposition.local_positions
-            nn_inds_local = self.smoothing.nn_inds  # already local-sized
-            combined_positions = self._combined_local_and_ghost(
-                self.decomposition.local_positions, self.ghosts.ghost_positions
-            )
-            combined_weights = self._combined_local_and_ghost(
-                self.decomposition.local_weights, self.ghosts.ghost_weights
-            )
-
-            r_ij = self._get_rel_coords(
-                query_positions_local, combined_positions[nn_inds_local]
-            )
-
-            fields_local = fields[self.decomposition.local_global_indices]
-            ghost_fields = push_to_ghosts(self.comm, self.ghosts, fields_local)
-            combined_fields = self._combined_local_and_ghost(fields_local, ghost_fields)
-            fields_temp = combined_fields[nn_inds_local]
-
-            if mode in ("divergence", "curl"):
-                num_fields = len(fields_sizes)
-                fields_temp = fields_temp.reshape(
-                    fields_temp.shape[0], fields_temp.shape[1], num_fields, self.dim
-                )
-
-            density_local = (
-                self.smoothing.density_covariant
-                if structure_temp == "covariant"
-                else self.smoothing.density_isotropic
-            )
-            ghost_density = push_to_ghosts(self.comm, self.ghosts, density_local)
-            combined_density = self._combined_local_and_ghost(density_local, ghost_density)
-            density_temp = combined_density[nn_inds_local]
-
-            weights_temp = combined_weights[nn_inds_local] / (density_temp + 1e-8)
-
-            h_local = (
-                self.smoothing.smoothing_tensors
-                if structure_temp == "covariant"
-                else self.smoothing.smoothing_lengths
-            )
-            ghost_h = push_to_ghosts(self.comm, self.ghosts, h_local)
-            combined_h = self._combined_local_and_ghost(h_local, ghost_h)
-            h_temp = combined_h[nn_inds_local]
-
             if self.verbose and self.rank == 0:
                 mode_str = {
                     "field": "fields",
@@ -1279,19 +1326,57 @@ class PointCloud:
                     f"[smudgy] Interpolating {mode_str} at query positions using "
                     f"{structure_temp} '{self.smoothing.kernel_name}' kernel (local+ghost)"
                 )
+            return self._interpolate_local(
+                self.decomposition.local_positions,
+                self.ghosts,
+                fields,
+                fields_sizes,
+                mode,
+                structure_temp,
+            )
 
-            return execution._dispatch(
-                "interpolate",
-                backend=self.backend,
-                kernel_name=self.smoothing.kernel_name,
-                dim=self.dim,
-                fields=fields_temp,
-                weights=weights_temp,
-                r_ij=r_ij,
-                h=h_temp,
-                mode=mode,
-                structure=structure_temp,
-                reduce=False,
+        if self.smoothing.used_ghosts and has_query_positions:
+            # Root-authoritative, like hilbert_partition_and_scatter --
+            # route_query_positions Scatterv's the routed chunks itself, so
+            # (unlike the old path below) the full (M, D) array is never
+            # broadcast to every rank.
+            query_positions_root = (
+                np.asarray(query_positions, dtype=np.float32)
+                if self.rank == 0
+                else None
+            )
+            self.query_routing = route_query_positions(
+                self.comm, self.decomposition, query_positions_root, self.periodic
+            )
+            query_ghosts = exchange_ghosts(
+                self.comm,
+                self.decomposition,
+                self.smoothing.num_neighbors,
+                self.dim,
+                self.periodic,
+                self.boxsize,
+                target_positions=self.query_routing.local_positions,
+            )
+
+            if self.verbose and self.rank == 0:
+                mode_str = {
+                    "field": "fields",
+                    "gradient": "gradients of fields",
+                    "divergence": "divergence of fields",
+                    "curl": "curl of fields",
+                }[mode]
+                print(
+                    f"[smudgy] Interpolating {mode_str} at routed query positions "
+                    f"using {structure_temp} '{self.smoothing.kernel_name}' kernel "
+                    "(local+ghost)"
+                )
+            return self._interpolate_local(
+                self.query_routing.local_positions,
+                query_ghosts,
+                fields,
+                fields_sizes,
+                mode,
+                structure_temp,
             )
 
         # if query_positions is None, use particle positions

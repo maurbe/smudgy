@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from smudgy.decomposition import hilbert_encode
+from smudgy.decomposition import _partition_boundary_codes, hilbert_encode
 
 
 def _xy2d_reference(n: int, x: int, y: int) -> int:
@@ -138,3 +138,62 @@ class TestHilbertEncodePeriodicity:
         # non-periodic (clipped): -0.001 is pinned to the domain_min edge,
         # far from 0.999 -- codes must differ
         assert clipped_codes[0] != clipped_codes[1]
+
+
+class TestPartitionBoundaryCodes:
+    """Unit tests for `_partition_boundary_codes` (Step 4b): the (size+1,)
+    cut-point array `route_query_positions` uses to route arbitrary query
+    positions consistently with the *actual* particle partition, without
+    needing MPI (a pure function of already-sorted codes + counts)."""
+
+    def test_matches_actual_partition_cut_points(self):
+        codes_sorted = np.array([0, 5, 5, 9, 20, 21, 40, 41, 41, 99], dtype=np.uint64)
+        counts = np.array([3, 3, 4], dtype=np.int64)  # ranks own [0:3), [3:6), [6:10)
+        boundaries = _partition_boundary_codes(codes_sorted, counts)
+
+        assert boundaries.dtype == np.uint64
+        assert boundaries.shape == (4,)
+        assert boundaries[0] == 0
+        assert boundaries[1] == codes_sorted[3]  # first code of rank 1's chunk
+        assert boundaries[2] == codes_sorted[6]  # first code of rank 2's chunk
+        assert boundaries[3] == np.iinfo(np.uint64).max
+
+    def test_monotonically_non_decreasing(self):
+        rng = np.random.default_rng(0)
+        codes_sorted = np.sort(rng.integers(0, 10_000, size=200).astype(np.uint64))
+        counts = np.array([40, 60, 100], dtype=np.int64)
+        boundaries = _partition_boundary_codes(codes_sorted, counts)
+        assert np.all(np.diff(boundaries.astype(np.float64)) >= 0)
+
+    def test_empty_rank_gets_zero_width_interval(self):
+        """N < P: a rank with 0 particles must not silently claim any code
+        range -- its interval collapses to width 0 (shared boundary with the
+        next non-empty rank), so a query point can never route there."""
+        codes_sorted = np.array([1, 2], dtype=np.uint64)
+        counts = np.array([1, 0, 1], dtype=np.int64)  # rank 1 is empty
+        boundaries = _partition_boundary_codes(codes_sorted, counts)
+
+        assert boundaries[1] == boundaries[2]  # rank 1's interval is empty
+
+    def test_trailing_empty_ranks_all_collapse_to_max(self):
+        codes_sorted = np.array([1, 2, 3], dtype=np.uint64)
+        counts = np.array([3, 0, 0], dtype=np.int64)
+        boundaries = _partition_boundary_codes(codes_sorted, counts)
+
+        max_code = np.iinfo(np.uint64).max
+        assert boundaries[1] == max_code
+        assert boundaries[2] == max_code
+        assert boundaries[3] == max_code
+
+    def test_zero_particles_total(self):
+        """N == 0 (degenerate, but must not crash): every rank's interval is
+        empty, and the array is still well-formed."""
+        codes_sorted = np.array([], dtype=np.uint64)
+        counts = np.array([0, 0], dtype=np.int64)
+        boundaries = _partition_boundary_codes(codes_sorted, counts)
+
+        assert boundaries.shape == (3,)
+        assert boundaries[0] == 0
+        max_code = np.iinfo(np.uint64).max
+        assert boundaries[1] == max_code
+        assert boundaries[2] == max_code

@@ -339,9 +339,116 @@ def _run_push_to_ghosts_under_mpi(out_path):
     print(f"RANK {rank} DONE")
 
 
+def _run_target_positions_under_mpi(out_path, mode):
+    """Step 4b: `exchange_ghosts(..., target_positions=...)` generalization.
+
+    Two checks in one run: (1) `target_positions=decomposition.local_positions`
+    reproduces `target_positions=None` exactly -- the generalization is
+    behavior-preserving in the default-equivalent case, not just "close
+    enough". (2) `target_positions=<a separate synthetic point set>` (a
+    random grid, unrelated to any particle) converges to the TRUE global K-NN
+    at those points, checked against a brute-force single-tree reference --
+    proving the radius-growth/ghost-fetch machinery works correctly when the
+    thing needing answers isn't this rank's own particles."""
+    from mpi4py import MPI
+    from scipy.spatial import cKDTree
+
+    from smudgy import PointCloud
+    from smudgy.ghosts import exchange_ghosts
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    rng = np.random.default_rng(31)
+    n, dim, k = 400, 3, 8
+    positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
+    weights = rng.uniform(0.5, 1.5, size=n).astype(np.float32)
+    boxsize = 1.0 if mode == "periodic" else None
+    periodic = mode == "periodic"
+
+    pc = PointCloud(
+        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        backend="numpy",
+    )
+    pc.decompose()
+
+    default_ghosts = exchange_ghosts(
+        comm, pc.decomposition, k, dim, periodic, boxsize,
+    )
+    explicit_self_ghosts = exchange_ghosts(
+        comm, pc.decomposition, k, dim, periodic, boxsize,
+        target_positions=pc.decomposition.local_positions,
+    )
+    equivalence_ok = (
+        np.array_equal(default_ghosts.nn_inds, explicit_self_ghosts.nn_inds)
+        and np.array_equal(default_ghosts.nn_dists, explicit_self_ghosts.nn_dists)
+    )
+
+    # a separate, unrelated query-point set (not particles at all) -- a
+    # different draw per rank (via the rank-offset seed), all still owned/
+    # searched locally -- this test isn't exercising cross-rank query
+    # routing (that's Step 4b's PointCloud-level test), just
+    # exchange_ghosts's target_positions mechanics in isolation. Deliberately
+    # confined to a small sub-cube (not a full-domain-spanning sample): a
+    # spatially compact query batch is what real Hilbert-routed query points
+    # actually look like (the whole reason 4b routes by Hilbert code rather
+    # than arbitrarily); a batch scattered across the whole periodic domain
+    # would legitimately need a huge padding radius and isn't representative.
+    qrng = np.random.default_rng(32 + rank)
+    n_query_local = 15
+    query = qrng.uniform(0.3, 0.4, size=(n_query_local, dim)).astype(np.float32)
+
+    query_ghosts = exchange_ghosts(
+        comm, pc.decomposition, k, dim, periodic, boxsize, target_positions=query,
+    )
+    shape_ok = query_ghosts.nn_inds.shape == (n_query_local, k)
+
+    n_local = query_ghosts.n_local
+    local_global = pc.decomposition.local_global_indices
+    ghost_global = query_ghosts.ghost_global_index
+
+    ref_tree = cKDTree(positions, boxsize=boxsize)
+    ref_dists, ref_inds = ref_tree.query(query, k=k)
+
+    all_match = True
+    max_dist_err = 0.0
+    for i in range(n_query_local):
+        mine = set()
+        for idx in query_ghosts.nn_inds[i]:
+            mine.add(
+                int(local_global[idx]) if idx < n_local else int(ghost_global[idx - n_local])
+            )
+        ref = set(int(x) for x in ref_inds[i])
+        if mine != ref:
+            all_match = False
+        max_dist_err = max(
+            max_dist_err,
+            float(np.max(np.abs(np.sort(query_ghosts.nn_dists[i]) - np.sort(ref_dists[i])))),
+        )
+
+    result = {
+        "equivalence_ok": equivalence_ok,
+        "shape_ok": shape_ok,
+        "all_match": all_match,
+        "max_dist_err": max_dist_err,
+    }
+    all_results = comm.gather(result, root=0)
+    if rank == 0:
+        agg = {
+            "equivalence_ok": all(r["equivalence_ok"] for r in all_results),
+            "shape_ok": all(r["shape_ok"] for r in all_results),
+            "all_match": all(r["all_match"] for r in all_results),
+            "max_dist_err": max(r["max_dist_err"] for r in all_results),
+        }
+        np.savez(out_path, **{k: np.asarray(v) for k, v in agg.items()})
+    print(f"RANK {rank} DONE")
+
+
 def _run_under_mpi():
     mode = sys.argv[1]
-    if mode == "knn":
+    if mode == "target_positions":
+        _run_target_positions_under_mpi(sys.argv[2], sys.argv[3])
+    elif mode == "knn":
         _run_knn_under_mpi(sys.argv[2], sys.argv[3], int(sys.argv[4]))
     elif mode == "pipeline":
         _run_pipeline_regression_under_mpi(sys.argv[2])
@@ -451,6 +558,18 @@ def test_push_to_ghosts_routes_values_correctly(tmp_path):
     _mpiexec(4, ["push_to_ghosts", str(out_path)])
     result = np.load(out_path)
     assert int(result["all_ok"]) == 1
+
+
+@pytest.mark.parametrize("mode", ["nonperiodic", "periodic"])
+def test_exchange_ghosts_target_positions_generalization(tmp_path, mode):
+    out_path = tmp_path / "result.npz"
+    _mpiexec(3, ["target_positions", str(out_path), mode])
+    result = np.load(out_path)
+
+    assert int(result["equivalence_ok"]) == 1
+    assert int(result["shape_ok"]) == 1
+    assert int(result["all_match"]) == 1
+    assert float(result["max_dist_err"]) < 1e-4
 
 
 if __name__ == "__main__":

@@ -69,13 +69,19 @@ class GhostInfo:
         Original pre-decomposition row index of each ghost, shape (n_ghost,)
         int64 (== source rank's `local_global_indices[ghost_source_local_index]`).
     nn_inds : np.ndarray
-        Shape (n_local, k) int64. Indices into the CONCEPTUAL combined array
-        [this rank's own local particles, rows 0..n_local) followed by
-        [ghost particles, rows n_local..n_local+n_ghost). A value < n_local
-        indexes this rank's own `decomposition.local_*` arrays directly; a
-        value >= n_local indexes `ghost_*` at row (value - n_local).
+        Shape (n_target, k) int64, where n_target is n_local unless
+        `exchange_ghosts` was called with an explicit `target_positions`
+        (Step 4b: solving K-NN for an arbitrary point set, e.g. routed
+        interpolation query positions, instead of this rank's own particles),
+        in which case n_target = target_positions.shape[0]. Indices are
+        always into the CONCEPTUAL combined array of this rank's own
+        particles -- [rows 0..n_local) -- followed by ghost particles --
+        [rows n_local..n_local+n_ghost) -- regardless of what was queried: a
+        value < n_local indexes this rank's own `decomposition.local_*`
+        arrays directly; a value >= n_local indexes `ghost_*` at row
+        (value - n_local).
     nn_dists : np.ndarray
-        Shape (n_local, k) float.
+        Shape (n_target, k) float (see `nn_inds`).
     radius : float
         This rank's final converged padding radius.
     n_local : int
@@ -254,16 +260,35 @@ def exchange_ghosts(
     dim: int,
     periodic: bool,
     boxsize: FloatArray | None,
+    target_positions: FloatArray | None = None,
     max_iterations: int = 20,
     on_max_iterations: str = "raise",
 ) -> GhostInfo:
-    """Iteratively fetch ghosts and solve for each local particle's true K-NN.
+    """Iteratively fetch ghosts and solve true K-NN for `target_positions`.
 
     See module docstring for the periodic-boundary design. Every rank must
     call this collectively (it runs the same sequence of MPI collectives on
     every rank every iteration, including ranks with zero local particles --
     see `DecompositionInfo`'s `N < P` case -- so that no rank ever waits on
     a peer that has stopped participating).
+
+    `target_positions`, default `None`, is the (possibly per-rank-varying
+    size) set of points to solve K-NN for -- defaults to this rank's own
+    `decomposition.local_positions` (Step 2's original use: find each local
+    particle's true neighbors). Passing a different array (Step 4b: e.g.
+    routed interpolation query positions) solves K-NN for those points
+    instead, using the exact same mechanism: only the *radius estimate,
+    requested-region bounding box, and convergence check* are based on
+    `target_positions` instead of the local particles; ghosts are still
+    always drawn from other ranks' own particle data regardless (the sender
+    side, `_select_ghosts_to_send`, only ever looks at *its own* particles
+    against the *destination's* requested box -- it does not care what that
+    box represents). The provably-sufficient radius-growth argument (see
+    below) depends only on what a given radius makes available to fetch, via
+    that same sender-side overlap test -- never on whether the requesting
+    box came from the requester's own particles -- so it carries over
+    unchanged. `target_positions` need not have associated weights (it is
+    never sent to any rank as a ghost, only queried against).
     """
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -287,14 +312,25 @@ def exchange_ghosts(
     local_global_indices = decomposition.local_global_indices
     boxsize_arr = np.asarray(boxsize) if periodic else None
 
-    has_particles = n_local > 0
-    if has_particles:
-        local_min, local_max = wrapped_local.min(axis=0), wrapped_local.max(axis=0)
+    # Unlike wrapped_local above, this is NOT usually a no-op when
+    # target_positions is explicitly given: an arbitrary caller-supplied
+    # point set (e.g. interpolation query positions) has no guarantee of
+    # already lying in [0, boxsize) the way self.positions does.
+    wrapped_target = (
+        wrapped_local
+        if target_positions is None
+        else wrap_periodic(target_positions, boxsize if periodic else None)
+    )
+    n_target = wrapped_target.shape[0]
+
+    has_targets = n_target > 0
+    if has_targets:
+        target_min, target_max = wrapped_target.min(axis=0), wrapped_target.max(axis=0)
     else:
-        local_min = local_max = np.zeros(dim, dtype=np.float64)
+        target_min = target_max = np.zeros(dim, dtype=np.float64)
 
     radius = _initial_radius(
-        n_local, local_min, local_max, num_neighbors, dim,
+        n_target, target_min, target_max, num_neighbors, dim,
         decomposition.domain_min, decomposition.domain_max, boxsize, periodic,
     )
 
@@ -326,7 +362,7 @@ def exchange_ghosts(
                 "size."
             )
 
-        all_boxes = comm.allgather((local_min, local_max, radius, has_particles))
+        all_boxes = comm.allgather((target_min, target_max, radius, has_targets))
 
         send_counts, send_pos, send_w, send_lidx, send_gidx = _select_ghosts_to_send(
             rank, size, wrapped_local, local_weights, local_global_indices,
@@ -339,10 +375,14 @@ def exchange_ghosts(
         recv_global_idx = execution._alltoallv_rows(comm, send_gidx, send_counts, recv_counts)
         recv_source_rank = np.repeat(np.arange(size, dtype=np.int64), recv_counts)
 
-        if has_particles:
+        if has_targets:
+            # combined_positions is always this rank's own particles + fetched
+            # ghost particles (never target_positions itself -- a target point
+            # is only ever queried against, not concatenated in as something
+            # that could be returned as someone's neighbor).
             combined_positions = np.concatenate([wrapped_local, recv_positions], axis=0)
             tree = build_kdtree(combined_positions, boxsize=boxsize_arr if periodic else None)
-            nn_dists, nn_inds = query_kdtree(tree, wrapped_local, k=num_neighbors)
+            nn_dists, nn_inds = query_kdtree(tree, wrapped_target, k=num_neighbors)
             if num_neighbors == 1:
                 nn_dists = nn_dists.reshape(-1, 1)
                 nn_inds = nn_inds.reshape(-1, 1)
@@ -360,7 +400,7 @@ def exchange_ghosts(
         if global_converged:
             break
 
-        if has_particles and not local_converged:
+        if has_targets and not local_converged:
             unconverged = ~converged_mask
             grow_finite = finite & unconverged
             grow_deficit = (~finite) & unconverged
@@ -375,7 +415,7 @@ def exchange_ghosts(
         total_unconverged = comm.allreduce(n_unconverged, op=MPI.SUM)
         message = (
             f"Ghost exchange did not converge after {max_iterations} iterations "
-            f"({total_unconverged} particles globally still unconverged; "
+            f"({total_unconverged} points globally still unconverged; "
             f"rank {rank} radius={radius})."
         )
         if on_max_iterations == "raise":
