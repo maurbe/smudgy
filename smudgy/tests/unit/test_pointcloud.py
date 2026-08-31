@@ -184,6 +184,34 @@ class TestInit:
         with pytest.raises(AssertionError):
             PointCloud(pos, boxsize=[1.0, 2.0], verbose=False)
 
+    def test_periodic_positions_wrapped_into_box(self, rng):
+        pos = make_positions(rng, n=10, dim=3)
+        pos[0] = [-0.1, 1.3, 0.5]
+        pc = PointCloud(pos, boxsize=1.0, verbose=False)
+        np.testing.assert_allclose(pc.positions[0], [0.9, 0.3, 0.5], atol=1e-6)
+
+    def test_periodic_wrap_survives_float32_boundary_rounding(self, rng):
+        """Regression test: a float64 position just below boxsize can round
+        UP to exactly (or past) boxsize once PointCloud casts to float32,
+        which scipy's periodic cKDTree used to reject outright ("some data
+        is outside of the periodic domain")."""
+        pos = make_positions(rng, n=10, dim=3).astype(np.float64)
+        pos[0] = [1.0 - 1e-8, 1.0 - 1e-9, 0.9999999]
+        pc = PointCloud(pos, boxsize=1.0, verbose=False)
+        assert pc.positions.dtype == np.float32
+        assert np.all(pc.positions >= 0)
+        assert np.all(pc.positions < pc.boxsize)
+        # scipy's own periodic cKDTree construction must not raise
+        from scipy.spatial import cKDTree
+
+        cKDTree(pc.positions, boxsize=pc.boxsize)
+
+    def test_non_periodic_positions_not_wrapped(self, rng):
+        pos = make_positions(rng, n=10, dim=3)
+        pos[0] = [-0.1, 1.3, 0.5]
+        pc = PointCloud(pos, boxsize=None, verbose=False)
+        np.testing.assert_allclose(pc.positions[0], [-0.1, 1.3, 0.5], atol=1e-6)
+
     def test_backend_default_is_taichi(self, rng):
         pos = make_positions(rng, n=10)
         pc = PointCloud(pos, verbose=False)

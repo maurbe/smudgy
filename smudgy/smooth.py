@@ -35,6 +35,17 @@ class SmoothingInfo:
         Isotropic density estimates for each particle.
     density_covariant : np.ndarray
         Anisotropic density estimates for each particle.
+    used_ghosts : bool
+        Whether the most recent `compute_smoothing()` call used the
+        local+ghost path (see `PointCloud._using_decomposition`) rather than
+        the full-replication path. `compute_density`/`interpolate`/`deposit`
+        key off this (not off `_using_decomposition()` independently) so
+        every stage's path decision is provably consistent with what
+        `compute_smoothing()` actually produced -- e.g. `nn_inds` and
+        `smoothing_lengths`/`smoothing_tensors` are local-sized when this is
+        True, full-N-sized when False, and indexing one with the wrong
+        convention would silently read the wrong particle's data rather than
+        raise.
 
     """
 
@@ -52,3 +63,4 @@ class SmoothingInfo:
     kernel_name: str = None
     density_isotropic: np.ndarray = None
     density_covariant: np.ndarray = None
+    used_ghosts: bool = False

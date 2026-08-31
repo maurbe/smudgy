@@ -126,6 +126,75 @@ def _scatterv_rows(comm, arr, counts, root=0):
     return local_arr
 
 
+def _alltoall_counts(comm, send_counts):
+    """Alltoall exchange of per-destination row counts.
+
+    Split out from `_alltoallv_rows` so multiple row arrays that share one
+    send/recv pattern (e.g. ghost positions + weights + indices, all keyed
+    by the same per-particle destination selection) only pay for one small
+    Alltoall of counts, not one per array.
+
+    send_counts : np.ndarray[int64], shape (size,)
+        This rank's row count destined for each other rank (send_counts[r]
+        is how many rows this rank is sending to rank r).
+
+    Returns
+    -------
+    np.ndarray[int64], shape (size,)
+        recv_counts[r] is how many rows this rank will receive from rank r.
+    """
+    send_counts = np.ascontiguousarray(np.asarray(send_counts, dtype=np.int64))
+    recv_counts = np.empty_like(send_counts)
+    comm.Alltoall(send_counts, recv_counts)
+    return recv_counts
+
+
+def _alltoallv_rows(comm, send_rows, send_counts, recv_counts):
+    """Exchange variable-length row blocks between every pair of ranks via a raw-buffer Alltoallv.
+
+    The genuinely all-to-all counterpart to `_scatterv_rows` (root -> all)
+    and `_bcast_array` (root -> all): every rank simultaneously sends a
+    (possibly different) row count to every other rank and receives a
+    (possibly different) row count from every other rank -- there is no
+    root here, so (unlike those two) shape/dtype can't be learned from a
+    single authoritative sender. Each rank's own `send_rows` already
+    carries its correct row shape/dtype even when it has zero rows to send
+    to anyone (e.g. `np.empty((0, dim), dtype=np.float32)`), and that is
+    used directly to size this rank's receive buffer -- callers are
+    responsible for every rank agreeing on row shape/dtype for a given
+    exchange (true by construction when exchanging one conceptual field,
+    e.g. "positions", across ranks).
+
+    send_rows : np.ndarray, shape (sum(send_counts), *row_shape)
+        This rank's own rows, grouped by destination rank in rank order
+        (rows [0, send_counts[0]) go to rank 0, etc.).
+    send_counts, recv_counts : np.ndarray[int64], shape (size,)
+        `recv_counts` must already be known (via `_alltoall_counts`).
+
+    Returns
+    -------
+    np.ndarray, shape (sum(recv_counts), *row_shape), grouped by SOURCE
+    rank in rank order.
+    """
+    send_counts = np.asarray(send_counts, dtype=np.int64)
+    recv_counts = np.asarray(recv_counts, dtype=np.int64)
+    row_shape = send_rows.shape[1:]
+    dtype = send_rows.dtype
+
+    row_size = int(np.prod(row_shape, dtype=np.int64)) if row_shape else 1
+    sendcounts = send_counts * row_size
+    senddispls = np.concatenate(([0], np.cumsum(sendcounts)[:-1]))
+    recvcounts = recv_counts * row_size
+    recvdispls = np.concatenate(([0], np.cumsum(recvcounts)[:-1]))
+
+    recv_rows = np.empty((int(recv_counts.sum()), *row_shape), dtype=dtype)
+    comm.Alltoallv(
+        [np.ascontiguousarray(send_rows), (sendcounts, senddispls)],
+        [recv_rows, (recvcounts, recvdispls)],
+    )
+    return recv_rows
+
+
 def _dispatch(func: str, *, backend: str, reduce: bool = True, **kwargs):
     """Run `func` on this rank's (already-local) kwargs, then recombine.
 

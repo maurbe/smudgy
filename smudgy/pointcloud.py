@@ -15,6 +15,7 @@ from .backend.neighbors import (
 )
 from .backend.taichi import init as taichi_init
 from .decomposition import DecompositionInfo, hilbert_partition_and_scatter
+from .ghosts import GhostInfo, exchange_ghosts, push_to_ghosts
 from .smooth import SmoothingInfo
 
 STRUCTURES = ("separable", "isotropic", "covariant")
@@ -97,6 +98,29 @@ class PointCloud:
                         dim,
                     ), f"'boxsize' must be a scalar or have shape ({dim},), got {boxsize_arr.shape}"
                     boxsize_resolved = boxsize_arr
+
+                # Wrap into [0, boxsize) canonically, in float32 (the dtype
+                # `self.positions` is stored in): raw input isn't guaranteed
+                # pre-wrapped, and even input that IS within [0, boxsize) in
+                # float64 can round up to exactly (or past) boxsize once cast
+                # to float32 above -- which scipy's periodic cKDTree (used
+                # for the smoothing-length neighbor search, see
+                # `_check_tree`) rejects outright ("some data is outside of
+                # the periodic domain"). `boxsize_resolved` isn't itself
+                # guaranteed float32 (e.g. a plain Python float given as
+                # `boxsize` stays float64 through `np.asarray`), so it's
+                # cast explicitly first -- np.mod would otherwise silently
+                # upcast `positions_resolved` to float64. The `np.minimum`
+                # step closes one more edge case np.mod alone doesn't fully
+                # rule out: for a value extremely close to a multiple of
+                # boxsize, the internal subtraction can itself round back up
+                # to exactly boxsize, so this clips to the largest float32
+                # strictly below it.
+                boxsize_f32 = boxsize_resolved.astype(np.float32)
+                positions_resolved = np.mod(positions_resolved, boxsize_f32)
+                positions_resolved = np.minimum(
+                    positions_resolved, np.nextafter(boxsize_f32, np.float32(0))
+                ).astype(np.float32)
         else:
             dim = positions_resolved = weights_resolved = None
             periodic_resolved = boxsize_resolved = None
@@ -116,6 +140,7 @@ class PointCloud:
 
         self.smoothing = SmoothingInfo()
         self.decomposition = DecompositionInfo()
+        self.ghosts = GhostInfo()
 
         # Verbose output after completed initialization
         if self.verbose and self.rank == 0:
@@ -205,6 +230,47 @@ class PointCloud:
             domain = execution._bcast(self.comm, domain)
         return domain
 
+    def find_neighbors(
+        self,
+        num_neighbors: int | None = None,
+        max_iterations: int = 20,
+        on_max_iterations: str = "raise",
+    ) -> "PointCloud":
+        """Ghost-particle exchange + iterative true-KNN solve.
+
+        Opt-in: stores the result in `self.ghosts` (see `ghosts.GhostInfo`)
+        without touching `self.positions`/`self.weights`/`self.smoothing` or
+        any existing method's behavior -- mirrors `decompose()`'s contract
+        exactly. `compute_smoothing` is NOT rewired to use this (a later
+        domain-decomposition-roadmap step's job).
+
+        Requires `.decompose()` to have already been called.
+
+        Returns
+        -------
+        PointCloud
+            self, for chaining (mirrors `global_setup`/`decompose`).
+
+        """
+        self._check_decomposed()
+        num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
+        self.ghosts = exchange_ghosts(
+            self.comm,
+            self.decomposition,
+            num_neighbors_temp,
+            self.dim,
+            self.periodic,
+            self.boxsize,
+            max_iterations=max_iterations,
+            on_max_iterations=on_max_iterations,
+        )
+        if self.verbose and self.rank == 0:
+            print(
+                f"[smudgy] Found neighbors via ghost exchange "
+                f"({num_neighbors_temp} neighbors per particle)"
+            )
+        return self
+
     def _set_property(self, name: str, value: Any) -> None:
         """Set a global property with centralized validation."""
         if name == "structure":
@@ -253,13 +319,50 @@ class PointCloud:
                 f"'{property}' has not been set: either set it via the 'global_setup' method or provide it as a function argument"
             )
 
-    def _check_neighbors(self, nn_inds: npt.NDArray[np.integer]) -> None:
-        """Verify that neighbor indices are within valid bounds."""
+    def _check_neighbors(
+        self, nn_inds: npt.NDArray[np.integer], n_valid: int | None = None
+    ) -> None:
+        """Verify that neighbor indices are within valid bounds.
+
+        `n_valid` defaults to `self.positions.shape[0]` (the full-replication
+        path's convention); the local+ghost path passes the local+ghost
+        combined count instead, since its `nn_inds` values are indices into
+        that smaller combined array, not into `self.positions`.
+        """
+        if n_valid is None:
+            n_valid = self.positions.shape[0]
         max_idx = np.max(nn_inds)
-        if max_idx >= self.positions.shape[0]:
+        if max_idx >= n_valid:
             raise IndexError(
-                f"Neighbor index {max_idx} is out of bounds for {self.positions.shape[0]} particles. This indicates a bug in the neighbor search or input setup."
+                f"Neighbor index {max_idx} is out of bounds for {n_valid} particles. This indicates a bug in the neighbor search or input setup."
             )
+
+    def _check_decomposed(self) -> None:
+        """Verify that a spatial decomposition has been computed."""
+        if self.decomposition.local_positions is None:
+            raise AttributeError(
+                "No spatial decomposition has been computed yet; call 'decompose' first."
+            )
+
+    def _using_decomposition(self) -> bool:
+        """Whether `.decompose()` and `.find_neighbors()` have both been
+        called, so the local+ghost data path can be used instead of the
+        full-replication path."""
+        return (
+            self.decomposition.local_positions is not None
+            and self.ghosts.nn_inds is not None
+        )
+
+    def _combined_local_and_ghost(
+        self, local_arr: npt.NDArray[Any], ghost_arr: npt.NDArray[Any]
+    ) -> npt.NDArray[Any]:
+        """Concatenate a rank's local array with its imported ghosts',
+        local rows first -- the ordering `GhostInfo.nn_inds` assumes (a
+        value < n_local indexes `local_arr`, >= n_local indexes `ghost_arr`
+        at `value - n_local`). Named so this invariant lives in one place
+        instead of being repeated by hand at every call site.
+        """
+        return np.concatenate([local_arr, ghost_arr], axis=0)
 
     def _check_density_computed(self, structure: Structure) -> None:
         """Verify that density has been computed for the requested structure."""
@@ -568,6 +671,72 @@ class PointCloud:
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
         structure_temp = self._resolve_structure(structure)
 
+        # Local+ghost path: only when a decomposition AND ghost exchange are
+        # available, no custom query_positions were given (arbitrary query
+        # positions aren't decomposed yet -- deferred), and the requested
+        # num_neighbors matches what find_neighbors() actually solved for
+        # (self.ghosts.nn_inds has that k baked in; a mismatch can't be
+        # silently reused, so falls back to the full path below instead).
+        use_ghosts = (
+            self._using_decomposition()
+            and query_positions is None
+            and self.ghosts.nn_inds.shape[1] == num_neighbors_temp
+        )
+        if use_ghosts:
+            if self.verbose and self.rank == 0:
+                info_str = "tensors" if structure_temp == "covariant" else "lengths"
+                print(
+                    f"[smudgy] Computing smoothing {info_str} from "
+                    f"{num_neighbors_temp} neighbors (local+ghost)"
+                )
+
+            nn_inds_local = self.ghosts.nn_inds
+            nn_dists_local = self.ghosts.nn_dists
+            combined_positions = self._combined_local_and_ghost(
+                self.decomposition.local_positions, self.ghosts.ghost_positions
+            )
+            combined_weights = self._combined_local_and_ghost(
+                self.decomposition.local_weights, self.ghosts.ghost_weights
+            )
+
+            if structure_temp in ("separable", "isotropic"):
+                self.smoothing.smoothing_lengths = execution._dispatch(
+                    "compute_hsml",
+                    backend=self.backend,
+                    nn_dists=nn_dists_local,
+                    reduce=False,
+                )
+            else:
+                (
+                    smoothing_tensors,
+                    smoothing_tensors_eigvals,
+                    smoothing_tensors_eigvecs,
+                    nn_dists_vec,
+                ) = execution._dispatch(
+                    "compute_hmat",
+                    backend=self.backend,
+                    query_positions=self.decomposition.local_positions,
+                    neighbor_positions=combined_positions[nn_inds_local],
+                    neighbor_weights=combined_weights[nn_inds_local],
+                    boxsize=self.boxsize,
+                    reduce=False,
+                )
+                self.smoothing.smoothing_tensors = smoothing_tensors
+                self.smoothing.smoothing_tensors_eigvals = smoothing_tensors_eigvals
+                self.smoothing.smoothing_tensors_eigvecs = smoothing_tensors_eigvecs
+                self.smoothing.nn_dists_vec = nn_dists_vec
+
+            self.smoothing.nn_inds, self.smoothing.nn_dists = (
+                nn_inds_local,
+                nn_dists_local,
+            )
+            self.smoothing.num_neighbors = num_neighbors_temp
+            self.smoothing.used_ghosts = True
+            self._check_neighbors(nn_inds_local, n_valid=combined_positions.shape[0])
+            return
+
+        self.smoothing.used_ghosts = False
+
         # query_positions is only ever read by rank 0 below (to compute qpos,
         # which then gets broadcast) -- no need to broadcast the raw input.
 
@@ -655,30 +824,61 @@ class PointCloud:
         if self.verbose and self.rank == 0:
             print(f"[smudgy] Computing density using " f"{st} '{kn}' kernel")
 
-        # Slice to this rank's local particles *before* gathering neighbor
-        # data, so the expensive fancy-indexing below is O(n/size), not
-        # O(n), per rank (see execution._local_slice docstring).
-        start, stop = execution._local_slice(
-            self.smoothing.nn_inds.shape[0], self.rank, self.size
-        )
-        nn_inds_local = self.smoothing.nn_inds[start:stop]
+        if self.smoothing.used_ghosts:
+            # self.smoothing.nn_inds/smoothing_lengths/smoothing_tensors are
+            # already local-sized here (compute_smoothing's local+ghost
+            # path), so no _local_slice chunking is needed at all -- an
+            # already-local array doesn't need re-chunking.
+            nn_inds_local = self.smoothing.nn_inds
+            combined_positions = self._combined_local_and_ghost(
+                self.decomposition.local_positions, self.ghosts.ghost_positions
+            )
+            combined_weights = self._combined_local_and_ghost(
+                self.decomposition.local_weights, self.ghosts.ghost_weights
+            )
+            density = execution._dispatch(
+                "compute_density",
+                backend=self.backend,
+                kernel_name=kn,
+                dim=self.dim,
+                neighbor_weights=combined_weights[nn_inds_local],
+                r_ij=self._get_rel_coords(
+                    self.decomposition.local_positions,
+                    combined_positions[nn_inds_local],
+                ),
+                h=(
+                    self.smoothing.smoothing_tensors
+                    if st == "covariant"
+                    else self.smoothing.smoothing_lengths
+                ),
+                structure=st,
+                reduce=False,
+            )
+        else:
+            # Slice to this rank's local particles *before* gathering neighbor
+            # data, so the expensive fancy-indexing below is O(n/size), not
+            # O(n), per rank (see execution._local_slice docstring).
+            start, stop = execution._local_slice(
+                self.smoothing.nn_inds.shape[0], self.rank, self.size
+            )
+            nn_inds_local = self.smoothing.nn_inds[start:stop]
 
-        density = execution._dispatch(
-            "compute_density",
-            backend=self.backend,
-            kernel_name=kn,
-            dim=self.dim,
-            neighbor_weights=self.weights[nn_inds_local],
-            r_ij=self._get_rel_coords(
-                self.positions[start:stop], self.positions[nn_inds_local]
-            ),
-            h=(
-                self.smoothing.smoothing_tensors[start:stop]
-                if st == "covariant"
-                else self.smoothing.smoothing_lengths[start:stop]
-            ),
-            structure=st,
-        )
+            density = execution._dispatch(
+                "compute_density",
+                backend=self.backend,
+                kernel_name=kn,
+                dim=self.dim,
+                neighbor_weights=self.weights[nn_inds_local],
+                r_ij=self._get_rel_coords(
+                    self.positions[start:stop], self.positions[nn_inds_local]
+                ),
+                h=(
+                    self.smoothing.smoothing_tensors[start:stop]
+                    if st == "covariant"
+                    else self.smoothing.smoothing_lengths[start:stop]
+                ),
+                structure=st,
+            )
 
         self.smoothing.kernel_name = kn
 
@@ -1018,6 +1218,82 @@ class PointCloud:
                 self.comm, has_query_positions if self.rank == 0 else None
             )
 
+        # Local+ghost path: only when compute_smoothing() actually used it
+        # (self.smoothing.used_ghosts -- not just "is a decomposition
+        # available", since that alone doesn't say which path produced the
+        # smoothing/density data currently stored) and no custom query
+        # positions were given (those aren't decomposed yet -- deferred).
+        if self.smoothing.used_ghosts and not has_query_positions:
+            query_positions_local = self.decomposition.local_positions
+            nn_inds_local = self.smoothing.nn_inds  # already local-sized
+            combined_positions = self._combined_local_and_ghost(
+                self.decomposition.local_positions, self.ghosts.ghost_positions
+            )
+            combined_weights = self._combined_local_and_ghost(
+                self.decomposition.local_weights, self.ghosts.ghost_weights
+            )
+
+            r_ij = self._get_rel_coords(
+                query_positions_local, combined_positions[nn_inds_local]
+            )
+
+            fields_local = fields[self.decomposition.local_global_indices]
+            ghost_fields = push_to_ghosts(self.comm, self.ghosts, fields_local)
+            combined_fields = self._combined_local_and_ghost(fields_local, ghost_fields)
+            fields_temp = combined_fields[nn_inds_local]
+
+            if mode in ("divergence", "curl"):
+                num_fields = len(fields_sizes)
+                fields_temp = fields_temp.reshape(
+                    fields_temp.shape[0], fields_temp.shape[1], num_fields, self.dim
+                )
+
+            density_local = (
+                self.smoothing.density_covariant
+                if structure_temp == "covariant"
+                else self.smoothing.density_isotropic
+            )
+            ghost_density = push_to_ghosts(self.comm, self.ghosts, density_local)
+            combined_density = self._combined_local_and_ghost(density_local, ghost_density)
+            density_temp = combined_density[nn_inds_local]
+
+            weights_temp = combined_weights[nn_inds_local] / (density_temp + 1e-8)
+
+            h_local = (
+                self.smoothing.smoothing_tensors
+                if structure_temp == "covariant"
+                else self.smoothing.smoothing_lengths
+            )
+            ghost_h = push_to_ghosts(self.comm, self.ghosts, h_local)
+            combined_h = self._combined_local_and_ghost(h_local, ghost_h)
+            h_temp = combined_h[nn_inds_local]
+
+            if self.verbose and self.rank == 0:
+                mode_str = {
+                    "field": "fields",
+                    "gradient": "gradients of fields",
+                    "divergence": "divergence of fields",
+                    "curl": "curl of fields",
+                }[mode]
+                print(
+                    f"[smudgy] Interpolating {mode_str} at query positions using "
+                    f"{structure_temp} '{self.smoothing.kernel_name}' kernel (local+ghost)"
+                )
+
+            return execution._dispatch(
+                "interpolate",
+                backend=self.backend,
+                kernel_name=self.smoothing.kernel_name,
+                dim=self.dim,
+                fields=fields_temp,
+                weights=weights_temp,
+                r_ij=r_ij,
+                h=h_temp,
+                mode=mode,
+                structure=structure_temp,
+                reduce=False,
+            )
+
         # if query_positions is None, use particle positions
         if not has_query_positions:
             query_positions = self.positions
@@ -1205,20 +1481,46 @@ class PointCloud:
             domain_min, domain_max, periodic = ext[:, 0], ext[:, 1], False
 
         d_lens = domain_max - domain_min
-        mask = np.all(
-            (self.positions >= domain_min) & (self.positions <= domain_max),
-            axis=1,
-        )
-        # Slice to this rank's local particles *before* gathering per-particle
-        # data below, so that gather is O(n/size), not O(n), per rank (see
-        # execution._local_slice docstring).
-        idx = np.flatnonzero(mask)
-        start, stop = execution._local_slice(idx.shape[0], self.rank, self.size)
-        idx_local = idx[start:stop]
 
-        pos_temp = self.positions[idx_local] - domain_min
-        weights_temp = self.weights[idx_local]
-        fields_temp = fields[idx_local]
+        # Local path: only when a decomposition is available AND (either
+        # this is a non-adaptive deposit, which never touches smoothing data
+        # at all, or compute_smoothing() actually produced local-sized
+        # smoothing data -- self.smoothing.used_ghosts). Guarding on
+        # used_ghosts (not just "is a decomposition available") matters
+        # because _prepare_deposition_smoothing below indexes
+        # self.smoothing.smoothing_lengths/tensors with a LOCAL idx; if that
+        # array were actually full-N (used_ghosts False), the same idx
+        # values would silently select the wrong particles' data rather than
+        # raise.
+        use_local = self._using_decomposition() and (
+            not adaptive or self.smoothing.used_ghosts
+        )
+
+        if use_local:
+            local_positions = self.decomposition.local_positions
+            mask = np.all(
+                (local_positions >= domain_min) & (local_positions <= domain_max),
+                axis=1,
+            )
+            idx_local = np.flatnonzero(mask)  # already this rank's own share
+            pos_temp = local_positions[idx_local] - domain_min
+            weights_temp = self.decomposition.local_weights[idx_local]
+            fields_temp = fields[self.decomposition.local_global_indices][idx_local]
+        else:
+            mask = np.all(
+                (self.positions >= domain_min) & (self.positions <= domain_max),
+                axis=1,
+            )
+            # Slice to this rank's local particles *before* gathering per-particle
+            # data below, so that gather is O(n/size), not O(n), per rank (see
+            # execution._local_slice docstring).
+            idx = np.flatnonzero(mask)
+            start, stop = execution._local_slice(idx.shape[0], self.rank, self.size)
+            idx_local = idx[start:stop]
+
+            pos_temp = self.positions[idx_local] - domain_min
+            weights_temp = self.weights[idx_local]
+            fields_temp = fields[idx_local]
 
         # if plane_projection is set, collect relevant axes
         if plane_projection:
