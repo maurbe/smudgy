@@ -58,6 +58,19 @@ def _reduce_sum(comm, local_result):
     return comm.allreduce(local_result, op=MPI.SUM)
 
 
+def _reduce_sum_to_root(comm, local_result, root=0):
+    """Elementwise-sum each rank's full-size output onto `root` only.
+
+    The root-only counterpart to `_reduce_sum` (`comm.reduce` instead of
+    `comm.allreduce`) -- cheaper when only `root` needs the combined result
+    (e.g. `PointCloud.deposit(..., gather_to_root=True)`). Returns `None` on
+    every rank other than `root` (mpi4py's own `Comm.reduce` convention).
+    """
+    if isinstance(local_result, tuple):
+        return tuple(comm.reduce(part, op=MPI.SUM, root=root) for part in local_result)
+    return comm.reduce(local_result, op=MPI.SUM, root=root)
+
+
 def _bcast(comm, obj, root=0):
     """Broadcast a (possibly None-on-non-root) Python object from root.
 
@@ -193,6 +206,81 @@ def _alltoallv_rows(comm, send_rows, send_counts, recv_counts):
         [recv_rows, (recvcounts, recvdispls)],
     )
     return recv_rows
+
+
+def _gatherv_rows(comm, local_rows, root=0):
+    """Gather the leading-axis rows of an array from every rank onto `root`
+    only, via a raw-buffer Gatherv.
+
+    The many-to-one counterpart to `_scatterv_rows` (root -> all) and
+    `_alltoallv_rows` (all -> all) -- avoids mpi4py's ~2GB pickle-payload
+    ceiling the same way those do, which matters here since this is meant to
+    be the *efficient* alternative to `_gather`'s `allgather` for exactly the
+    class of data that ceiling affects (large per-particle arrays). Every
+    rank's own `local_rows` must share the same row shape/dtype (true by
+    construction when gathering one conceptual array, e.g. a just-computed
+    density). Row counts (one int per rank) are exchanged via a separate,
+    tiny pickle-based `comm.gather` first -- consistent with how
+    `hilbert_partition_and_scatter`/`route_query_positions` already size
+    their own Scatterv the same way.
+
+    Returns
+    -------
+    np.ndarray, shape (sum of every rank's row count, *row_shape), rows
+    grouped by source rank in rank order, on `root`; `None` elsewhere.
+    """
+    rank = comm.Get_rank()
+    local_rows = np.ascontiguousarray(local_rows)
+    row_shape, dtype = local_rows.shape[1:], local_rows.dtype
+    row_size = int(np.prod(row_shape, dtype=np.int64)) if row_shape else 1
+
+    counts = comm.gather(local_rows.shape[0], root=root)
+
+    recv_spec = None
+    recv_buf = None
+    if rank == root:
+        counts = np.asarray(counts, dtype=np.int64)
+        recvcounts = counts * row_size
+        displs = np.concatenate(([0], np.cumsum(recvcounts)[:-1]))
+        recv_buf = np.empty((int(counts.sum()), *row_shape), dtype=dtype)
+        recv_spec = [recv_buf, (recvcounts, displs)]
+
+    comm.Gatherv(local_rows, recv_spec, root=root)
+    return recv_buf if rank == root else None
+
+
+def _gather_to_root(comm, global_index, local_array, n_total, root=0):
+    """Gather a local, `global_index`-ordered array back onto `root` only,
+    reassembled into original order.
+
+    The root-only counterpart to `_gather` (which ships the full result to
+    *every* rank via `allgather` instead): what a caller using the
+    local+ghost paths (`PointCloud.decompose`/`find_neighbors`, or
+    `interpolate(query_positions=...)`) should use to turn a local-sized
+    result (ordered by `decomposition.local_global_indices` or
+    `query_routing.local_global_indices`) into a normal, original-order
+    array without paying to replicate it onto every rank.
+
+    `global_index` and `local_array` must share the same leading-axis length
+    (this rank's own local row count). `n_total` -- already known
+    identically on every rank at every real call site
+    (`decomposition.counts.sum()`/`positions.shape[0]` for particles,
+    `query_routing.counts.sum()` for query positions) -- sizes root's
+    reassembled output; not re-derived here.
+
+    Returns
+    -------
+    np.ndarray, shape (n_total, *local_array.shape[1:]), on `root`; `None`
+    on every other rank.
+    """
+    rank = comm.Get_rank()
+    recv_global = _gatherv_rows(comm, np.asarray(global_index, dtype=np.int64), root=root)
+    recv_array = _gatherv_rows(comm, local_array, root=root)
+    if rank != root:
+        return None
+    full = np.empty((n_total, *local_array.shape[1:]), dtype=local_array.dtype)
+    full[recv_global] = recv_array
+    return full
 
 
 def _dispatch(func: str, *, backend: str, reduce: bool = True, **kwargs):

@@ -444,10 +444,94 @@ def _run_target_positions_under_mpi(out_path, mode):
     print(f"RANK {rank} DONE")
 
 
+def _run_sparse_target_density_under_mpi(out_path):
+    """Regression test for a real bug found while building Step 4b/5: an
+    earlier version of `exchange_ghosts`'s `target_positions` generalization
+    estimated the INITIAL radius from `target_positions`'s own density (its
+    count over its own bounding box) rather than the local particles' -- for
+    a `target_positions` batch spread over roughly the same region as the
+    local particles but with far fewer points (exactly what routed
+    interpolation query positions look like relative to particles: e.g. 200
+    query points vs 900 particles), that formula's initial guess came out
+    ~2x too large, occasionally exceeding the periodic half-box guard on the
+    very first iteration -- before any real ghost-fetching had happened at
+    all. Fixed by estimating the initial radius from the local PARTICLE
+    density unconditionally (the radius needed to reach `num_neighbors`
+    particles depends on how densely packed particles are, not on how many
+    target points happen to be nearby). This test reproduces that exact
+    shape (many particles, few target points, similar bounding box,
+    periodic) and confirms it converges without raising."""
+    from mpi4py import MPI
+    from scipy.spatial import cKDTree
+
+    from smudgy import PointCloud
+    from smudgy.ghosts import exchange_ghosts
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    rng = np.random.default_rng(41)
+    n, dim, k = 700, 3, 10
+    positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
+    weights = rng.uniform(0.5, 1.5, size=n).astype(np.float32)
+    boxsize = 1.0
+
+    pc = PointCloud(
+        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        backend="numpy",
+    )
+    pc.decompose()
+
+    # ~10x fewer target points than particles, spread over the SAME
+    # near-full-domain extent as the particles (not confined to a small
+    # sub-cube) -- the specific shape that tripped the bug.
+    qrng = np.random.default_rng(42 + rank)
+    n_query_local = max(1, pc.decomposition.local_positions.shape[0] // 10)
+    query = qrng.uniform(0.0, 1.0, size=(n_query_local, dim)).astype(np.float32)
+
+    raised = False
+    query_ghosts = None
+    try:
+        query_ghosts = exchange_ghosts(
+            comm, pc.decomposition, k, dim, True, boxsize, target_positions=query,
+        )
+    except ValueError:
+        raised = True
+    no_raise_ok = comm.allreduce(not raised, op=MPI.LAND)
+
+    all_match = True
+    if not raised:
+        n_local = query_ghosts.n_local
+        local_global = pc.decomposition.local_global_indices
+        ghost_global = query_ghosts.ghost_global_index
+        ref_tree = cKDTree(positions, boxsize=boxsize)
+        ref_dists, ref_inds = ref_tree.query(query, k=k)
+        for i in range(n_query_local):
+            mine = set()
+            for idx in query_ghosts.nn_inds[i]:
+                mine.add(
+                    int(local_global[idx]) if idx < n_local else int(ghost_global[idx - n_local])
+                )
+            ref = set(int(x) for x in ref_inds[i])
+            if mine != ref:
+                all_match = False
+    all_match_ok = comm.allreduce(all_match, op=MPI.LAND)
+
+    if rank == 0:
+        np.savez(
+            out_path,
+            no_raise_ok=np.asarray(no_raise_ok),
+            all_match_ok=np.asarray(all_match_ok),
+        )
+    print(f"RANK {rank} DONE")
+
+
 def _run_under_mpi():
     mode = sys.argv[1]
     if mode == "target_positions":
         _run_target_positions_under_mpi(sys.argv[2], sys.argv[3])
+    elif mode == "sparse_target_density":
+        _run_sparse_target_density_under_mpi(sys.argv[2])
     elif mode == "knn":
         _run_knn_under_mpi(sys.argv[2], sys.argv[3], int(sys.argv[4]))
     elif mode == "pipeline":
@@ -570,6 +654,15 @@ def test_exchange_ghosts_target_positions_generalization(tmp_path, mode):
     assert int(result["shape_ok"]) == 1
     assert int(result["all_match"]) == 1
     assert float(result["max_dist_err"]) < 1e-4
+
+
+def test_sparse_target_density_does_not_inflate_initial_radius(tmp_path):
+    out_path = tmp_path / "result.npz"
+    _mpiexec(3, ["sparse_target_density", str(out_path)])
+    result = np.load(out_path)
+
+    assert int(result["no_raise_ok"]) == 1
+    assert int(result["all_match_ok"]) == 1
 
 
 if __name__ == "__main__":

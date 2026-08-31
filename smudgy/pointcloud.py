@@ -277,6 +277,80 @@ class PointCloud:
             )
         return self
 
+    def gather_particles(
+        self, local_array: npt.NDArray[Any], root: int = 0
+    ) -> npt.NDArray[Any] | None:
+        """Gather a particle-indexed local array back onto `root` only, in
+        original particle order (Step 5 of the domain-decomposition roadmap).
+
+        `local_array` must be indexed the way `decomposition.local_*` is
+        (row i = this rank's i-th local particle) -- e.g. `smoothing.
+        smoothing_lengths`/`smoothing_tensors`, `smoothing.density_isotropic`/
+        `density_covariant`, or an `interpolate()` (no `query_positions`)
+        result, all produced via the local+ghost path Step 4a wired up.
+        Requires `.decompose()` to have already been called. Cheaper than
+        gathering the equivalent old-path result: this ships the reassembled
+        array to `root` only, not to every rank (see `execution._gather_to_root`).
+
+        Returns
+        -------
+        np.ndarray, shape (n_particles, *local_array.shape[1:]), on `root`;
+        `None` on every other rank.
+        """
+        self._check_decomposed()
+        local_global_indices = self.decomposition.local_global_indices
+        if local_array.shape[0] != local_global_indices.shape[0]:
+            raise ValueError(
+                f"'local_array' has {local_array.shape[0]} rows but this rank "
+                f"has {local_global_indices.shape[0]} local particles; "
+                "'local_array' must be a local+ghost-path result (indexed the "
+                "same way as decomposition.local_positions), not a full-N "
+                "array from the old (full-replication) path."
+            )
+        return execution._gather_to_root(
+            self.comm, local_global_indices, local_array,
+            self.positions.shape[0], root=root,
+        )
+
+    def gather_queries(
+        self, local_array: npt.NDArray[Any], root: int = 0
+    ) -> npt.NDArray[Any] | None:
+        """Gather a query-position-indexed local array back onto `root` only,
+        in the original query-array order (Step 5 of the domain-decomposition
+        roadmap).
+
+        `local_array` must be an `interpolate(query_positions=...)` result
+        produced via Step 4b's local+ghost path -- indexed the way
+        `query_routing.local_positions` is (row i = this rank's i-th routed
+        query position). Requires that call to have populated
+        `self.query_routing` (i.e. `used_ghosts` was True and query
+        positions were given).
+
+        Returns
+        -------
+        np.ndarray, shape (n_query_positions, *local_array.shape[1:]), on
+        `root`; `None` on every other rank.
+        """
+        local_global_indices = self.query_routing.local_global_indices
+        if local_global_indices is None:
+            raise AttributeError(
+                "No query-position routing available yet; call 'interpolate' "
+                "with 'query_positions' set (with the local+ghost path active, "
+                "i.e. after 'decompose'/'find_neighbors'/'compute_smoothing') "
+                "first."
+            )
+        if local_array.shape[0] != local_global_indices.shape[0]:
+            raise ValueError(
+                f"'local_array' has {local_array.shape[0]} rows but this rank "
+                f"has {local_global_indices.shape[0]} local query positions; "
+                "'local_array' must be the result of the most recent "
+                "'interpolate(query_positions=...)' call."
+            )
+        n_total = int(self.query_routing.counts.sum())
+        return execution._gather_to_root(
+            self.comm, local_global_indices, local_array, n_total, root=root,
+        )
+
     def _set_property(self, name: str, value: Any) -> None:
         """Set a global property with centralized validation."""
         if name == "structure":
@@ -1488,6 +1562,8 @@ class PointCloud:
         integration_method: str = "midpoint",
         eta_crit: float = 4.0,
         return_weights: bool = False,
+        gather_to_root: bool = False,
+        root: int = 0,
     ) -> (
         npt.NDArray[np.floating]
         | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
@@ -1529,6 +1605,14 @@ class PointCloud:
             (exact-per-cell) quadrature path.
         return_weights : bool, default False
             If True, returns the weights (density) grid as well.
+        gather_to_root : bool, default False
+            If True, the summed grid is delivered to `root` only (via
+            `comm.reduce`) instead of every rank (via `comm.allreduce`,
+            today's default) -- cheaper when only `root` needs the result.
+            Non-`root` ranks then return `None` (or `(None, None)` if
+            `return_weights=True`).
+        root : int, default 0
+            Destination rank when `gather_to_root=True`; unused otherwise.
         backend : {"numpy", "taichi"}, optional
             Backend used for this deposition. Defaults to the PointCloud backend.
         accelerator : str, optional
@@ -1673,14 +1757,31 @@ class PointCloud:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
-        fields_grid, weights_grid = execution._dispatch(
-            "deposit",
-            backend=self.backend,
-            **deposit_kwargs,
-        )
+        if gather_to_root:
+            # Skip _dispatch's built-in allreduce-to-everyone reduction and
+            # do the equivalent sum ourselves, delivered to `root` only (Step
+            # 5 of the domain-decomposition roadmap) -- cheaper than
+            # replicating the full grid onto every rank when only `root`
+            # needs it.
+            fields_grid, weights_grid = execution._dispatch(
+                "deposit",
+                backend=self.backend,
+                reduce=False,
+                **deposit_kwargs,
+            )
+            fields_grid, weights_grid = execution._reduce_sum_to_root(
+                self.comm, (fields_grid, weights_grid), root=root
+            )
+        else:
+            fields_grid, weights_grid = execution._dispatch(
+                "deposit",
+                backend=self.backend,
+                **deposit_kwargs,
+            )
 
-        for i, avg in enumerate(averaged):
-            if avg:
-                fields_grid[i] /= weights_grid + 1e-10
+        if fields_grid is not None:
+            for i, avg in enumerate(averaged):
+                if avg:
+                    fields_grid[i] /= weights_grid + 1e-10
 
         return (fields_grid, weights_grid) if return_weights else fields_grid

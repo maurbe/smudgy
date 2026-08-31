@@ -277,16 +277,23 @@ def exchange_ghosts(
     `decomposition.local_positions` (Step 2's original use: find each local
     particle's true neighbors). Passing a different array (Step 4b: e.g.
     routed interpolation query positions) solves K-NN for those points
-    instead, using the exact same mechanism: only the *radius estimate,
-    requested-region bounding box, and convergence check* are based on
-    `target_positions` instead of the local particles; ghosts are still
-    always drawn from other ranks' own particle data regardless (the sender
-    side, `_select_ghosts_to_send`, only ever looks at *its own* particles
-    against the *destination's* requested box -- it does not care what that
-    box represents). The provably-sufficient radius-growth argument (see
-    below) depends only on what a given radius makes available to fetch, via
-    that same sender-side overlap test -- never on whether the requesting
-    box came from the requester's own particles -- so it carries over
+    instead, using the exact same mechanism: the *requested-region bounding
+    box and convergence check* are based on `target_positions`, while the
+    *initial radius estimate* is deliberately still based on this rank's own
+    PARTICLE density (`n_local`/local bbox), never on `target_positions`'s
+    own count/bbox -- the radius needed to reach `num_neighbors` particles is
+    governed by how densely packed particles are nearby, which has nothing
+    to do with how many target points happen to be nearby (a target batch
+    far sparser than the local particles over a similar region would
+    otherwise produce a wildly inflated first guess; see `_initial_radius`'s
+    call site). Ghosts are still always drawn from other ranks' own particle
+    data regardless (the sender side, `_select_ghosts_to_send`, only ever
+    looks at *its own* particles against the *destination's* requested box --
+    it does not care what that box represents). The provably-sufficient
+    radius-growth argument (see below) depends only on what a given radius
+    makes available to fetch, via that same sender-side overlap test --
+    never on whether the requesting box came from the requester's own
+    particles -- so it carries over
     unchanged. `target_positions` need not have associated weights (it is
     never sent to any rank as a ghost, only queried against).
     """
@@ -329,8 +336,29 @@ def exchange_ghosts(
     else:
         target_min = target_max = np.zeros(dim, dtype=np.float64)
 
+    has_particles = n_local > 0
+    if has_particles:
+        local_min, local_max = wrapped_local.min(axis=0), wrapped_local.max(axis=0)
+    else:
+        local_min = local_max = np.zeros(dim, dtype=np.float64)
+
+    # Deliberately estimated from THIS RANK'S OWN PARTICLE density
+    # (n_local/local_min/local_max), never from n_target/target_min/
+    # target_max: the radius needed to reach num_neighbors *particles* is
+    # governed by how densely packed particles are nearby, which has nothing
+    # to do with how many target points happen to be nearby. Conflating the
+    # two (an earlier version of this code did, using n_target's own count)
+    # systematically mis-estimates the initial guess whenever target_positions
+    # has a different density than the local particles -- e.g. far fewer
+    # query points than particles covering a similar region produces a wildly
+    # inflated first guess (found empirically: tripped the periodic half-box
+    # guard on the very first iteration, before any real ghost-fetching had
+    # even happened, for a query batch ~10x sparser than the local particles
+    # over a similar bounding box). Using particle density instead matches
+    # what `target_positions=None` (particles-as-their-own-target) already
+    # does exactly, since n_target == n_local there.
     radius = _initial_radius(
-        n_target, target_min, target_max, num_neighbors, dim,
+        n_local, local_min, local_max, num_neighbors, dim,
         decomposition.domain_min, decomposition.domain_max, boxsize, periodic,
     )
 
