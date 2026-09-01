@@ -10,7 +10,7 @@ from smudgy.backend.taichi.tensor_utils import project_2d as project_2d_taichi
 def _generate_dataset(dim: int):
     """Generate a random dataset for testing."""
     np.random.seed(42)
-    N = 100
+    N = 300
     positions = np.random.uniform(0, 1, size=(N, dim))
     weights = np.ones(N, dtype=np.float32)
     boxsize = np.ones(dim, dtype=np.float32)
@@ -28,6 +28,7 @@ def test_backend_consistency():
         verbose=False,
         arch="cpu",
     ).global_setup(num_neighbors=8, structure="covariant", kernel_name="lucy")
+    pc.find_neighbors()
     pc.compute_smoothing()
 
     H_tensor = pc.smoothing.smoothing_tensors

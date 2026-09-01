@@ -31,29 +31,17 @@ from smudgy.pointcloud import INTERPOLATION_MODES, STRUCTURES, PointCloud
 # =============================================================================
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch):
-    """Stub out execution._dispatch, taichi init, and kd-tree calls.
+    """Stub out execution._dispatch and taichi init.
 
     Returns shapes consistent with what real backends would produce, so the
-    PointCloud-level shape/type contracts can be tested in isolation.
+    PointCloud-level shape/type contracts can be tested in isolation. The
+    KD-tree work itself (decompose-at-construction's Hilbert sort, and
+    find_neighbors()'s ghost-exchange KD-tree queries) is genuinely run --
+    it's now unconditional (no more optional old full-replication path to
+    bypass it with), and is cheap/fast at these tests' small particle counts
+    even without faking it, using the real scipy cKDTree under the hood.
     """
     monkeypatch.setattr("smudgy.pointcloud.taichi_init", lambda **kwargs: None)
-
-    class _FakeTree:
-        def __init__(self, data):
-            self.data = data
-
-    def fake_build_kdtree(positions, boxsize=None):
-        return _FakeTree(positions)
-
-    def fake_query_kdtree(tree, qpos, k):
-        n = qpos.shape[0]
-        # fake distances/indices with the right shape; indices valid & in-bounds
-        nn_dists = np.ones((n, k), dtype=np.float32)
-        nn_inds = np.zeros((n, k), dtype=np.int64)
-        return nn_dists, nn_inds
-
-    monkeypatch.setattr("smudgy.pointcloud.build_kdtree", fake_build_kdtree)
-    monkeypatch.setattr("smudgy.pointcloud.query_kdtree", fake_query_kdtree)
 
     def fake_dispatch(name, **kwargs):
         dim = kwargs.get("dim", 3)
@@ -116,6 +104,13 @@ def rng():
 
 def make_positions(rng, n=50, dim=3):
     return rng.uniform(0, 1, size=(n, dim)).astype(np.float32)
+
+
+def find_local_row(pc, original_row):
+    """`pc.positions` is Hilbert-sorted (decomposition always happens at
+    construction now), so row i no longer corresponds to input row i --
+    look up where a given original row ended up via local_global_indices."""
+    return np.flatnonzero(pc.decomposition.local_global_indices == original_row)[0]
 
 
 # =============================================================================
@@ -188,7 +183,8 @@ class TestInit:
         pos = make_positions(rng, n=10, dim=3)
         pos[0] = [-0.1, 1.3, 0.5]
         pc = PointCloud(pos, boxsize=1.0, verbose=False)
-        np.testing.assert_allclose(pc.positions[0], [0.9, 0.3, 0.5], atol=1e-6)
+        row = find_local_row(pc, 0)
+        np.testing.assert_allclose(pc.positions[row], [0.9, 0.3, 0.5], atol=1e-6)
 
     def test_periodic_wrap_survives_float32_boundary_rounding(self, rng):
         """Regression test: a float64 position just below boxsize can round
@@ -210,7 +206,8 @@ class TestInit:
         pos = make_positions(rng, n=10, dim=3)
         pos[0] = [-0.1, 1.3, 0.5]
         pc = PointCloud(pos, boxsize=None, verbose=False)
-        np.testing.assert_allclose(pc.positions[0], [-0.1, 1.3, 0.5], atol=1e-6)
+        row = find_local_row(pc, 0)
+        np.testing.assert_allclose(pc.positions[row], [-0.1, 1.3, 0.5], atol=1e-6)
 
     def test_backend_default_is_taichi(self, rng):
         pos = make_positions(rng, n=10)
@@ -298,6 +295,7 @@ class TestComputeSmoothing:
         n = 40
         pc = PointCloud(make_positions(rng, n=n), verbose=False)
         pc.global_setup(structure=structure, num_neighbors=8)
+        pc.find_neighbors()
         pc.compute_smoothing()
         assert pc.smoothing.smoothing_lengths.shape == (n,)
         assert pc.smoothing.smoothing_lengths.dtype == np.float32
@@ -306,6 +304,7 @@ class TestComputeSmoothing:
         n, dim = 40, 3
         pc = PointCloud(make_positions(rng, n=n, dim=dim), verbose=False)
         pc.global_setup(structure="covariant", num_neighbors=8)
+        pc.find_neighbors()
         pc.compute_smoothing()
         assert pc.smoothing.smoothing_tensors.shape == (n, dim, dim)
         assert pc.smoothing.smoothing_tensors_eigvals.shape == (n, dim)
@@ -313,21 +312,20 @@ class TestComputeSmoothing:
 
     def test_num_neighbors_out_of_range_raises(self, rng):
         pc = PointCloud(make_positions(rng), verbose=False)
-        pc.global_setup(structure="isotropic")
+        pc.global_setup(structure="isotropic", num_neighbors=8)
+        pc.find_neighbors()
         with pytest.raises(AssertionError):
             pc.compute_smoothing(num_neighbors=-3)
 
-    def test_neighbors_out_of_bounds_raises_index_error(self, rng, monkeypatch):
+    def test_neighbors_out_of_bounds_raises_index_error(self, rng):
         n = 10
         pc = PointCloud(make_positions(rng, n=n), verbose=False)
         pc.global_setup(structure="isotropic", num_neighbors=4)
-
-        def bad_query_kdtree(tree, qpos, k):
-            nn_dists = np.ones((qpos.shape[0], k), dtype=np.float32)
-            nn_inds = np.full((qpos.shape[0], k), n, dtype=np.int64)  # out of bounds
-            return nn_dists, nn_inds
-
-        monkeypatch.setattr("smudgy.pointcloud.query_kdtree", bad_query_kdtree)
+        pc.find_neighbors()
+        # directly corrupt nn_inds (rather than mocking the KD-tree query
+        # that produced it) to simulate a neighbor-search bug and confirm
+        # the bounds check catches it.
+        pc.ghosts.nn_inds = np.full_like(pc.ghosts.nn_inds, n * 10)
         with pytest.raises(IndexError):
             pc.compute_smoothing()
 
@@ -342,6 +340,7 @@ class TestComputeDensity:
         pc.global_setup(
             structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
         )
+        pc.find_neighbors()
         pc.compute_smoothing()
         pc.compute_density()
         assert pc.smoothing.density_isotropic.shape == (n,)
@@ -414,6 +413,7 @@ class TestInterpolate:
         pc.global_setup(
             structure=structure, kernel_name="cubic_spline", num_neighbors=8
         )
+        pc.find_neighbors()
         pc.compute_smoothing()
         pc.compute_density()
         return pc
@@ -472,6 +472,7 @@ class TestInterpolate:
         pc.global_setup(
             structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
         )
+        pc.find_neighbors()
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(AttributeError):
             pc.interpolate("scalar_field")
@@ -499,18 +500,19 @@ class TestInterpolate:
 # deposit
 # =============================================================================
 class TestDeposit:
-    def _setup_ready_pc(self, rng, n=40, dim=3, structure="isotropic", boxsize=1.0):
+    def _setup_ready_pc(self, rng, n=200, dim=3, structure="isotropic", boxsize=1.0):
         pc = PointCloud(
             make_positions(rng, n=n, dim=dim), boxsize=boxsize, verbose=False
         )
         pc.global_setup(
             structure=structure, kernel_name="cubic_spline", num_neighbors=8
         )
+        pc.find_neighbors()
         pc.compute_smoothing()
         return pc
 
     def test_deposit_output_shape_matches_gridnums(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         grid = pc.deposit("scalar_field", averaged=False, gridnums=16, adaptive=True)
@@ -518,7 +520,7 @@ class TestDeposit:
         assert grid.dtype == np.float32
 
     def test_deposit_return_weights_true_returns_tuple(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         result = pc.deposit(
@@ -534,7 +536,7 @@ class TestDeposit:
         assert weights_grid.shape == (8, 8, 8)
 
     def test_deposit_return_weights_false_returns_array_only(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         result = pc.deposit(
@@ -547,18 +549,19 @@ class TestDeposit:
         assert isinstance(result, np.ndarray)
 
     def test_deposit_no_boxsize_no_extent_raises_value_error(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = PointCloud(make_positions(rng, n=n, dim=dim), boxsize=None, verbose=False)
         pc.global_setup(
             structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
         )
+        pc.find_neighbors()
         pc.compute_smoothing()
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(ValueError):
             pc.deposit("scalar_field", averaged=False, gridnums=8, adaptive=True)
 
     def test_deposit_structure_with_non_adaptive_raises_value_error(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(ValueError):
@@ -572,7 +575,7 @@ class TestDeposit:
             )
 
     def test_deposit_plane_projection_output_shape_2d(self, rng):
-        n = 40
+        n = 200
         pc = self._setup_ready_pc(rng, n=n, dim=3, structure="covariant")
         pc.add_fields("scalar_field", rng.uniform(size=n))
         grid = pc.deposit(
@@ -585,7 +588,7 @@ class TestDeposit:
         assert grid.shape == (1, 10, 10)
 
     def test_deposit_plane_projection_requires_3d(self, rng):
-        n = 40
+        n = 200
         pc = self._setup_ready_pc(rng, n=n, dim=2)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(ValueError):
@@ -611,7 +614,7 @@ class TestDeposit:
     #        )
 
     def test_deposit_averaged_length_mismatch_raises(self, rng):
-        n = 40
+        n = 200
         pc = self._setup_ready_pc(rng, n=n, dim=3)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         with pytest.raises(ValueError):
@@ -620,14 +623,14 @@ class TestDeposit:
             )
 
     def test_deposit_gridnums_scalar_broadcast(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         grid = pc.deposit("scalar_field", averaged=False, gridnums=6, adaptive=True)
         assert grid.shape[1:] == (6, 6, 6)
 
     def test_deposit_gridnums_per_axis(self, rng):
-        n, dim = 40, 3
+        n, dim = 200, 3
         pc = self._setup_ready_pc(rng, n=n, dim=dim)
         pc.add_fields("scalar_field", rng.uniform(size=n))
         grid = pc.deposit(

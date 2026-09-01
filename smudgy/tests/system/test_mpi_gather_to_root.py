@@ -1,19 +1,15 @@
-"""Multi-rank correctness tests for Step 5 of the domain-decomposition
-roadmap: `PointCloud.gather_particles`/`gather_queries` and
-`deposit(gather_to_root=True)` -- collecting a local-sized 4a/4b result (or
-deposit's grid) back onto rank 0 only, in original order, instead of paying
-to replicate it onto every rank.
+"""Multi-rank correctness tests for `PointCloud.gather_particles`/
+`gather_queries` and `deposit(gather_to_root=True)` -- collecting a
+local-sized pipeline result (or deposit's grid) back onto rank 0 only, in
+original order, instead of paying to replicate it onto every rank.
 
-The strongest check: run the full pipeline (decompose -> find_neighbors ->
-compute_smoothing -> compute_density -> add_fields -> interpolate ->
-deposit) via the local+ghost path, gather every result via the new Step 5
-utilities, and compare against a reference `PointCloud` that never calls
-`decompose()`/`find_neighbors()` at all (the old, full-replication path) --
-mirroring `test_mpi_local_pipeline.py`/`test_mpi_interpolate_query_positions.py`'s
-own old-vs-new comparison pattern, just using the new utilities to do the
-reassembly instead of a hand-rolled `comm.gather` + loop. Also covers: `None`
-on non-root ranks, negative/guard-rail tests, and the deadlock-safety edge
-case (some ranks with zero local rows).
+The strongest check, mirroring `test_mpi_local_pipeline.py`'s own pattern:
+run the full pipeline (find_neighbors -> compute_smoothing ->
+compute_density -> add_fields -> interpolate -> deposit) at a single rank
+(reference) and again at several rank counts on identical input, gather
+every result via the Step 5 utilities, and compare. Also covers: `None` on
+non-root ranks, negative/guard-rail tests, and the deadlock-safety edge case
+(some ranks with zero local rows).
 
 Run directly under MPI:
     mpiexec -n 3 python test_mpi_gather_to_root.py pipeline <out.npz> 1
@@ -52,29 +48,10 @@ def _run_pipeline_under_mpi(out_path, periodic):
     n_query = 200
     query = qrng.uniform(0.0, 1.0, size=(n_query, dim)).astype(np.float32)
 
-    # reference: old (non-decomposed) full-replication path
-    pc_ref = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
-        verbose=False, backend="taichi", arch="cpu",
-    ).global_setup(kernel_name="cubic_spline", num_neighbors=10, structure="isotropic")
-    pc_ref.compute_smoothing()
-    pc_ref.compute_density()
-    pc_ref.add_fields("sf", scalar_field)
-    density_ref = pc_ref.smoothing.density_isotropic.copy()
-    interp_particles_ref = pc_ref.interpolate("sf", structure="isotropic").copy()
-    interp_query_ref = pc_ref.interpolate(
-        "sf", query_positions=query.copy(), structure="isotropic"
-    ).copy()
-    fgrid_ref, wgrid_ref = pc_ref.deposit(
-        "sf", averaged=True, gridnums=6, adaptive=True, structure="isotropic",
-        return_weights=True, extent=deposit_extent,
-    )
-
     pc = PointCloud(
         positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
         verbose=False, backend="taichi", arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=10, structure="isotropic")
-    pc.decompose()
     pc.find_neighbors()
     pc.compute_smoothing()
     pc.compute_density()
@@ -107,29 +84,25 @@ def _run_pipeline_under_mpi(out_path, periodic):
     none_ness_ok = comm.allreduce(local_none_ness_ok, op=MPI.LAND)
 
     if rank == 0:
-        result = {
-            "none_ness_ok": none_ness_ok,
-            "density_matches": np.allclose(
-                density_ref, density_gathered, rtol=1e-3, atol=1e-6
-            ),
-            "interp_particles_matches": np.allclose(
-                interp_particles_ref, interp_particles_gathered, rtol=1e-3, atol=1e-6
-            ),
-            "interp_query_matches": np.allclose(
-                interp_query_ref, interp_query_gathered, rtol=1e-3, atol=1e-6
-            ),
-            "fgrid_matches": np.allclose(fgrid_ref, fgrid_root, rtol=1e-3, atol=1e-5),
-            "wgrid_matches": np.allclose(wgrid_ref, wgrid_root, rtol=1e-3, atol=1e-5),
-        }
-        np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
+        np.savez(
+            out_path,
+            none_ness_ok=np.asarray(none_ness_ok),
+            density=density_gathered,
+            interp_particles=interp_particles_gathered,
+            interp_query=interp_query_gathered,
+            fgrid=fgrid_root,
+            wgrid=wgrid_root,
+        )
     print(f"RANK {rank} DONE")
 
 
 def _run_negative_tests_under_mpi(out_path):
-    """gather_particles before decompose(); gather_queries before any 4b
-    interpolate() call; a shape-mismatched local_array passed to
-    gather_particles -- each must raise a clear error, synchronized so no
-    rank hangs waiting on a peer that already raised."""
+    """gather_queries before any query-position interpolate() call, and a
+    shape-mismatched local_array passed to gather_particles -- each must
+    raise a clear error, synchronized so no rank hangs waiting on a peer
+    that already raised. (There is no "before decompose()" case anymore --
+    decomposition always exists by the time gather_particles could be
+    called at all.)"""
     from mpi4py import MPI
 
     from smudgy import PointCloud
@@ -147,19 +120,12 @@ def _run_negative_tests_under_mpi(out_path):
         backend="numpy",
     )
 
-    raised_without_decompose = False
-    try:
-        pc.gather_particles(np.zeros(5, dtype=np.float32))
-    except AttributeError:
-        raised_without_decompose = True
-
     raised_without_query_routing = False
     try:
         pc.gather_queries(np.zeros(5, dtype=np.float32))
     except AttributeError:
         raised_without_query_routing = True
 
-    pc.decompose()
     raised_on_shape_mismatch = False
     try:
         wrong_shape = np.zeros(pc.decomposition.local_global_indices.shape[0] + 7, dtype=np.float32)
@@ -168,8 +134,7 @@ def _run_negative_tests_under_mpi(out_path):
         raised_on_shape_mismatch = True
 
     all_ok = comm.allreduce(
-        raised_without_decompose and raised_without_query_routing and raised_on_shape_mismatch,
-        op=MPI.LAND,
+        raised_without_query_routing and raised_on_shape_mismatch, op=MPI.LAND,
     )
     if rank == 0:
         np.savez(out_path, all_ok=np.asarray(all_ok))
@@ -177,9 +142,8 @@ def _run_negative_tests_under_mpi(out_path):
 
 
 def _run_zero_local_rows_under_mpi(out_path):
-    """N < P (gather_particles) and a tiny query batch (gather_queries): some
-    ranks have zero local rows to contribute. Must not deadlock, and the
-    reassembled result on root must still be correct."""
+    """N < P: some ranks have zero local rows to contribute. Must not
+    deadlock, and the reassembled result on root must still be correct."""
     from mpi4py import MPI
 
     from smudgy import PointCloud
@@ -194,27 +158,10 @@ def _run_zero_local_rows_under_mpi(out_path):
     scalar_field = np.arange(n, dtype=np.float32)
     query = np.array([[0.2, 0.3, 0.4], [0.6, 0.5, 0.5]], dtype=np.float32)
 
-    # Non-periodic deliberately: this dataset is tiny enough (N=5, k=2) that
-    # a periodic domain would legitimately trip the ghost-exchange half-box
-    # guard (see test_mpi_ghosts.py's own dedicated guard test) -- that's a
-    # different, already-covered property, not what this test is checking.
-    pc_ref = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=None,
-        verbose=False, backend="taichi", arch="cpu",
-    ).global_setup(kernel_name="cubic_spline", num_neighbors=2, structure="isotropic")
-    pc_ref.compute_smoothing()
-    pc_ref.compute_density()
-    pc_ref.add_fields("sf", scalar_field)
-    density_ref = pc_ref.smoothing.density_isotropic.copy()
-    interp_query_ref = pc_ref.interpolate(
-        "sf", query_positions=query.copy(), structure="isotropic"
-    ).copy()
-
     pc = PointCloud(
         positions=positions.copy(), weights=weights.copy(), boxsize=None,
         verbose=False, backend="taichi", arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=2, structure="isotropic")
-    pc.decompose()
     pc.find_neighbors()
     pc.compute_smoothing()
     pc.compute_density()
@@ -226,13 +173,7 @@ def _run_zero_local_rows_under_mpi(out_path):
     )
 
     if rank == 0:
-        result = {
-            "density_matches": np.allclose(density_ref, density_gathered, rtol=1e-3, atol=1e-6),
-            "interp_query_matches": np.allclose(
-                interp_query_ref, interp_query_gathered, rtol=1e-3, atol=1e-6
-            ),
-        }
-        np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
+        np.savez(out_path, density=density_gathered, interp_query=interp_query_gathered)
     print(f"RANK {rank} DONE")
 
 
@@ -270,18 +211,21 @@ def _mpiexec(n_ranks, args, timeout=90):
     assert seen_ranks == set(range(n_ranks)), (seen_ranks, result.stdout, result.stderr)
 
 
-@pytest.mark.parametrize("periodic,n_ranks", [(False, 1), (False, 3), (True, 3), (True, 4)])
-def test_gather_to_root_matches_full_replication_reference(tmp_path, periodic, n_ranks):
+@pytest.mark.parametrize("periodic,n_ranks", [(False, 3), (True, 3), (True, 4)])
+def test_gather_to_root_matches_single_rank_reference(tmp_path, periodic, n_ranks):
+    ref_path = tmp_path / "ref.npz"
     out_path = tmp_path / "result.npz"
-    _mpiexec(n_ranks, ["pipeline", str(out_path), "1" if periodic else "0"])
+    args_tail = ["1" if periodic else "0"]
+    _mpiexec(1, ["pipeline", str(ref_path), *args_tail])
+    _mpiexec(n_ranks, ["pipeline", str(out_path), *args_tail])
+
+    ref = np.load(ref_path)
     result = np.load(out_path)
 
     assert int(result["none_ness_ok"]) == 1
-    assert int(result["density_matches"]) == 1
-    assert int(result["interp_particles_matches"]) == 1
-    assert int(result["interp_query_matches"]) == 1
-    assert int(result["fgrid_matches"]) == 1
-    assert int(result["wgrid_matches"]) == 1
+    for key in ("density", "interp_particles", "interp_query", "fgrid", "wgrid"):
+        atol = 1e-5 if key in ("fgrid", "wgrid") else 1e-6
+        assert np.allclose(ref[key], result[key], rtol=1e-3, atol=atol), key
 
 
 def test_negative_cases_raise_clear_errors(tmp_path):
@@ -292,11 +236,15 @@ def test_negative_cases_raise_clear_errors(tmp_path):
 
 
 def test_zero_local_rows_no_deadlock(tmp_path):
+    ref_path = tmp_path / "ref.npz"
     out_path = tmp_path / "result.npz"
+    _mpiexec(1, ["zero_local_rows", str(ref_path)], timeout=60)
     _mpiexec(5, ["zero_local_rows", str(out_path)], timeout=60)
+
+    ref = np.load(ref_path)
     result = np.load(out_path)
-    assert int(result["density_matches"]) == 1
-    assert int(result["interp_query_matches"]) == 1
+    assert np.allclose(ref["density"], result["density"], rtol=1e-3, atol=1e-6)
+    assert np.allclose(ref["interp_query"], result["interp_query"], rtol=1e-3, atol=1e-6)
 
 
 if __name__ == "__main__":

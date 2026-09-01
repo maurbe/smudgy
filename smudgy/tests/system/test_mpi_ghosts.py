@@ -88,10 +88,14 @@ def _run_knn_under_mpi(out_path, mode, k):
             s.add(int(local_global[idx]) if idx < n_local else int(ghost_global[idx - n_local]))
         global_sets.append(s)
 
-    # reference: full-dataset tree (pc.positions is still the full replicated
-    # array today -- decompose()/find_neighbors() don't touch it)
-    ref_tree = cKDTree(pc.positions, boxsize=boxsize)
-    ref_dists, ref_inds = ref_tree.query(pc.positions, k=k)
+    # reference: full-dataset tree, built from the original (pre-decomposition)
+    # `positions` array -- pc.positions is now always this rank's local slice
+    # only, never the full dataset. Cast to float32 to match the precision
+    # PointCloud itself computes with internally (avoids spurious mismatches
+    # from float32-vs-float64 tie-breaking on near-equidistant neighbors).
+    positions_f32 = positions.astype(np.float32)
+    ref_tree = cKDTree(positions_f32, boxsize=boxsize)
+    ref_dists, ref_inds = ref_tree.query(positions_f32, k=k)
     if k == 1:
         ref_dists, ref_inds = ref_dists.reshape(-1, 1), ref_inds.reshape(-1, 1)
 
@@ -127,83 +131,6 @@ def _run_knn_under_mpi(out_path, mode, k):
             "total_cross_rank_hits": sum(r["cross_rank_hits"] for r in all_results),
         }
         np.savez(out_path, **{k2: np.asarray(v) for k2, v in agg.items()})
-    print(f"RANK {rank} DONE")
-
-
-def _run_pipeline_regression_under_mpi(out_path):
-    """Since Step 4a, `find_neighbors()` is no longer a no-op for the
-    pipeline -- compute_smoothing/compute_density/interpolate now actually
-    take the local+ghost path when it's available, producing LOCAL-sized (not
-    full-N) results. So this compares the OLD path's full-N results against
-    the NEW path's results gathered + reassembled into original-particle
-    order, with a numerical tolerance (not exact equality -- the two paths
-    sum contributions in a different order, so float32 rounding differs at
-    the ~1e-4 level, same as any reordered floating-point summation).
-    `deposit`'s grids need no such reassembly: its `allreduce`-based grid-sum
-    is already global regardless of path.
-    """
-    from mpi4py import MPI
-
-    from smudgy import PointCloud
-
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-
-    rng = np.random.default_rng(3)
-    # N=53 (an earlier choice) was too sparse for k=8 neighbors in a
-    # periodic unit cube split across 3 ranks -- it legitimately tripped
-    # the half-box safety guard (needed radius ~0.75 > boxsize/2). 300
-    # keeps this fast while staying well clear of that.
-    n, dim = 300, 3
-    positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
-    weights = rng.uniform(0.5, 1.5, size=n).astype(np.float32)
-    scalar_field = rng.uniform(size=n).astype(np.float32)
-
-    def run_pipeline(call_find_neighbors):
-        pc = PointCloud(
-            positions=positions.copy(), weights=weights.copy(), boxsize=1.0,
-            verbose=False, backend="numpy",
-        ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure="isotropic")
-        if call_find_neighbors:
-            pc.decompose()
-            pc.find_neighbors()
-        pc.compute_smoothing()
-        pc.compute_density()
-        pc.add_fields("sf", scalar_field)
-        density = pc.smoothing.density_isotropic.copy()
-        interp = pc.interpolate("sf", structure="isotropic").copy()
-        fgrid, wgrid = pc.deposit(
-            "sf", averaged=True, gridnums=6, adaptive=False, kernel_name="cic",
-            return_weights=True,
-        )
-
-        if call_find_neighbors:
-            # local-sized -> gather + reassemble into original particle order
-            local_global = pc.decomposition.local_global_indices
-            all_global = comm.gather(local_global, root=0)
-            all_density = comm.gather(density, root=0)
-            all_interp = comm.gather(interp, root=0)
-            if rank == 0:
-                density_full = np.empty(n, dtype=density.dtype)
-                interp_full = np.empty((n, interp.shape[1]), dtype=interp.dtype)
-                for g, d, itp in zip(all_global, all_density, all_interp):
-                    density_full[g] = d
-                    interp_full[g] = itp
-                density, interp = density_full, interp_full
-
-        return density, interp, fgrid.copy(), wgrid.copy()
-
-    density_a, interp_a, fgrid_a, wgrid_a = run_pipeline(call_find_neighbors=False)
-    density_b, interp_b, fgrid_b, wgrid_b = run_pipeline(call_find_neighbors=True)
-
-    if rank == 0:
-        result = {
-            "density_matches": np.allclose(density_a, density_b, rtol=1e-3, atol=1e-6),
-            "interp_matches": np.allclose(interp_a, interp_b, rtol=1e-3, atol=1e-6),
-            "fgrid_matches": np.allclose(fgrid_a, fgrid_b, rtol=1e-3, atol=1e-6),
-            "wgrid_matches": np.allclose(wgrid_a, wgrid_b, rtol=1e-3, atol=1e-6),
-        }
-        np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
     print(f"RANK {rank} DONE")
 
 
@@ -534,8 +461,6 @@ def _run_under_mpi():
         _run_sparse_target_density_under_mpi(sys.argv[2])
     elif mode == "knn":
         _run_knn_under_mpi(sys.argv[2], sys.argv[3], int(sys.argv[4]))
-    elif mode == "pipeline":
-        _run_pipeline_regression_under_mpi(sys.argv[2])
     elif mode == "deadlock":
         _run_deadlock_check_under_mpi(sys.argv[2])
     elif mode == "negative":
@@ -621,20 +546,6 @@ def test_half_box_guard_raises_on_every_rank_without_deadlock():
     _mpiexec(5, ["half_box_guard"], timeout=30)
 
 
-def test_find_neighbors_gives_equivalent_pipeline_results(tmp_path):
-    """Since Step 4a, find_neighbors() changes WHICH code path the pipeline
-    takes (local+ghost vs. full-replication) -- this checks the two paths
-    still agree numerically, not that find_neighbors() is a no-op (it isn't,
-    by design; see `test_mpi_local_pipeline.py` for the fuller version of
-    this same check across structures/periodicity/rank counts)."""
-    out_path = tmp_path / "result.npz"
-    _mpiexec(3, ["pipeline", str(out_path)])
-    result = np.load(out_path)
-
-    assert int(result["density_matches"]) == 1
-    assert int(result["interp_matches"]) == 1
-    assert int(result["fgrid_matches"]) == 1
-    assert int(result["wgrid_matches"]) == 1
 
 
 def test_push_to_ghosts_routes_values_correctly(tmp_path):

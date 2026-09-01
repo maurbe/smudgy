@@ -11,12 +11,12 @@ class SmoothingInfo:
 
     Parameters
     ----------
-    tree : object
-        Neighbor search tree (e.g., KDTree) for efficient neighbor queries.
     num_neighbors : int
         Number of nearest neighbors used for smoothing.
     nn_inds : np.ndarray
-        Indices of nearest neighbors for each particle.
+        Indices of nearest neighbors for each particle, into the combined
+        [local particles, ghost particles] array -- see `ghost_positions`/
+        `ghost_weights` below for the ghost half of that array.
     nn_dists : np.ndarray
         Distances to nearest neighbors for each particle.
     nn_dists_vec : np.ndarray
@@ -35,21 +35,21 @@ class SmoothingInfo:
         Isotropic density estimates for each particle.
     density_covariant : np.ndarray
         Anisotropic density estimates for each particle.
-    used_ghosts : bool
-        Whether the most recent `compute_smoothing()` call used the
-        local+ghost path (see `PointCloud._using_decomposition`) rather than
-        the full-replication path. `compute_density`/`interpolate`/`deposit`
-        key off this (not off `_using_decomposition()` independently) so
-        every stage's path decision is provably consistent with what
-        `compute_smoothing()` actually produced -- e.g. `nn_inds` and
-        `smoothing_lengths`/`smoothing_tensors` are local-sized when this is
-        True, full-N-sized when False, and indexing one with the wrong
-        convention would silently read the wrong particle's data rather than
-        raise.
+    ghost_positions : np.ndarray
+        The ghost positions `nn_inds` values `>= n_local` index into
+        (`n_local` = `decomposition.local_positions.shape[0]`), aliased
+        (not copied) from whichever `GhostInfo` the last `compute_smoothing()`
+        call actually used -- `self.ghosts` for the particle-position case,
+        or a freshly-routed query-position ghost exchange otherwise.
+        `compute_density`/`interpolate` reuse this (not `self.ghosts`
+        directly) so they stay consistent with whichever ghost set actually
+        produced the currently-stored smoothing data, rather than assuming
+        it was always `self.ghosts`.
+    ghost_weights : np.ndarray
+        Companion to `ghost_positions`, same provenance.
 
     """
 
-    tree: object = None
     num_neighbors: int = None
     nn_inds: np.ndarray = None
     nn_dists: np.ndarray = None
@@ -63,4 +63,5 @@ class SmoothingInfo:
     kernel_name: str = None
     density_isotropic: np.ndarray = None
     density_covariant: np.ndarray = None
-    used_ghosts: bool = False
+    ghost_positions: np.ndarray = None
+    ghost_weights: np.ndarray = None

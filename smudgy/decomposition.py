@@ -63,6 +63,18 @@ class DecompositionInfo:
         local particles gets a zero-width interval (its own boundary equals
         the next non-empty rank's), so it is correctly never routed anything.
         See `route_query_positions`.
+    root_order : np.ndarray
+        Shape (N,) int64, the Hilbert-sort permutation used to build every
+        rank's chunk above -- populated on `root` only (`None` on every
+        other rank; the one intentionally rank-asymmetric field on this
+        dataclass). This is the one piece of O(N) bookkeeping deliberately
+        kept on `root` after construction: a field added later (`add_fields`)
+        needs to be split across ranks *consistently* with how positions/
+        weights were originally split, and by the time a field arrives,
+        `root` no longer has the full positions array to re-derive that
+        split from -- `values[root_order]` reorders a newly-arriving full-N
+        field into the same order `local_global_indices` already encodes in
+        scattered form, before it's chunked out via `execution._scatterv_rows`.
 
     """
 
@@ -73,6 +85,7 @@ class DecompositionInfo:
     domain_min: np.ndarray = None
     domain_max: np.ndarray = None
     boundary_codes: np.ndarray = None
+    root_order: np.ndarray = None
 
 
 @dataclass
@@ -137,13 +150,26 @@ def _quantize(
 
     frac = np.where(degenerate, 0.0, rel / safe_extent)
     num_bins = 1 << bits_per_dim
-    max_index = num_bins - 1
     # Scale by num_bins (not max_index) so bins are evenly filled -- frac==1.0
     # (a clipped position exactly at domain_max) is the only case that can
-    # reach num_bins itself, which the final clip pulls back down to max_index.
-    coords = np.clip(np.floor(frac * float(num_bins)), 0, float(max_index)).astype(
-        np.uint64
-    )
+    # reach num_bins itself, which the final clip pulls back down below it.
+    #
+    # The clip's upper bound is deliberately computed via np.nextafter, not
+    # float(num_bins - 1): for bits_per_dim=64 (dim=1's default -- the only
+    # case wide enough to matter, since 2/3D's 32/21 bits stay well within
+    # float64's exact-integer range), float64 cannot distinguish 2**64 - 1
+    # from 2**64 at all (both round to the same value) -- so float(max_index)
+    # was silently equal to float(num_bins) in that case, and the clip did
+    # nothing: a value of exactly num_bins (2**64) could reach the final
+    # `.astype(np.uint64)` cast, which is out of uint64's representable range
+    # ([0, 2**64 - 1]) and undefined behavior (numpy warns "invalid value
+    # encountered in cast" and the result is not well-defined). nextafter
+    # gives the largest float64 strictly below num_bins regardless of bit
+    # width -- off by a handful of bins out of 2**64 at the very top for the
+    # 64-bit case, utterly negligible for Hilbert-curve bucketing at any
+    # real particle count, and exact for the 32/21-bit cases.
+    safe_max = np.nextafter(float(num_bins), 0.0)
+    coords = np.clip(np.floor(frac * float(num_bins)), 0.0, safe_max).astype(np.uint64)
     return coords
 
 
@@ -312,6 +338,10 @@ def hilbert_partition_and_scatter(
         domain_min=np.asarray(domain_min),
         domain_max=np.asarray(domain_max),
         boundary_codes=boundary_codes,
+        # global_indices_sorted IS the sort permutation (order), already
+        # computed above and None on non-root ranks -- kept here rather
+        # than discarded, see DecompositionInfo.root_order's docstring.
+        root_order=global_indices_sorted,
     )
 
 

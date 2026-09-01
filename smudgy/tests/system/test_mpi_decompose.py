@@ -1,14 +1,16 @@
-"""Multi-rank correctness tests for `PointCloud.decompose()` (Step 1 of the
-domain-decomposition roadmap: Hilbert-curve partitioning + Scatterv
-redistribution).
+"""Multi-rank correctness tests for Hilbert-curve domain decomposition
+(construction-time now -- see Problem 1's "decomposed loading" refactor;
+`PointCloud.decompose()` itself is a no-op kept only for call-chain
+compatibility, since decomposition already happened by the time it could be
+called).
 
 Guards the properties a decomposition must have regardless of rank count or
 particle distribution: every particle assigned to exactly one rank and none
 dropped (bijection), counts balanced to within 1, the original array is
-exactly reconstructible from local chunks + provenance, and -- most
-importantly -- that `decompose()` is truly opt-in and doesn't perturb
-`self.positions`/`self.weights` or the existing compute pipeline's results
-at all (the property that makes Step 1 safely landable on its own).
+exactly reconstructible from local chunks + provenance, and that the
+`decompose()` method call itself is a genuine no-op (identity-check on
+`self.decomposition`, and byte-identical full-pipeline results with vs.
+without an explicit call).
 
 Run directly under MPI:
     mpiexec -n 3 python test_mpi_decompose.py props <out.npz> 37 uniform 0
@@ -51,13 +53,15 @@ def _run_props_under_mpi(out_path, n, dist_mode, periodic):
         positions=positions, weights=weights, boxsize=boxsize, verbose=False,
         backend="numpy",
     )
-    positions_before = pc.positions.copy()
-    weights_before = pc.weights.copy()
+    # `positions`/`weights` above are the ground truth to reconstruct against
+    # -- computed from a fixed seed, so identical on every rank already (not
+    # just rank 0), and untouched by construction (which casts into a copy).
 
+    # decompose() is a no-op now (decomposition already happened at
+    # construction) -- confirmed via identity, not just equal value.
+    decomposition_before = pc.decomposition
     pc.decompose()
-
-    positions_unchanged = np.array_equal(pc.positions, positions_before)
-    weights_unchanged = np.array_equal(pc.weights, weights_before)
+    decompose_is_noop = pc.decomposition is decomposition_before
 
     local_pos = pc.decomposition.local_positions
     local_w = pc.decomposition.local_weights
@@ -74,14 +78,14 @@ def _run_props_under_mpi(out_path, n, dist_mode, periodic):
     all_w = comm.gather(local_w, root=0)
     all_idx = comm.gather(local_idx, root=0)
     all_shape_ok = comm.gather(local_shape_ok, root=0)
-    all_unchanged = comm.gather((positions_unchanged, weights_unchanged), root=0)
+    all_noop = comm.gather(decompose_is_noop, root=0)
 
     if rank == 0:
         concatenated_idx = np.concatenate(all_idx)
         bijection_ok = np.array_equal(np.sort(concatenated_idx), np.arange(n))
 
-        reconstructed_pos = np.empty_like(positions_before)
-        reconstructed_w = np.empty_like(weights_before)
+        reconstructed_pos = np.empty_like(positions)
+        reconstructed_w = np.empty_like(weights)
         for p, w, idx in zip(all_pos, all_w, all_idx):
             if idx.shape[0] == 0:
                 continue
@@ -95,22 +99,21 @@ def _run_props_under_mpi(out_path, n, dist_mode, periodic):
             "count_balance_ok": (counts.max() - counts.min()) <= 1,
             "count_sum_ok": counts.sum() == n,
             "bijection_ok": bijection_ok,
-            "reconstruct_positions_exact": np.array_equal(
-                reconstructed_pos, positions_before
-            ),
-            "reconstruct_weights_exact": np.array_equal(reconstructed_w, weights_before),
+            "reconstruct_positions_exact": np.array_equal(reconstructed_pos, positions),
+            "reconstruct_weights_exact": np.array_equal(reconstructed_w, weights),
             "local_shapes_ok": all(all_shape_ok),
-            "positions_unchanged": all(u[0] for u in all_unchanged),
-            "weights_unchanged": all(u[1] for u in all_unchanged),
+            "decompose_is_noop": all(all_noop),
         }
         np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
     print(f"RANK {rank} DONE")
 
 
 def _run_pipeline_regression_under_mpi(out_path):
-    """Same pipeline, with vs. without an inserted `.decompose()` call --
-    results must be byte-identical, proving decompose() has zero effect on
-    the existing (still full-replication-based) compute path."""
+    """Same full pipeline, with vs. without an EXPLICIT `.decompose()` call
+    inserted (decomposition itself already happened at construction either
+    way) -- results must be byte-identical, proving the explicit call is a
+    true no-op for the compute pipeline too, not just for the decomposition
+    artifact itself."""
     from mpi4py import MPI
 
     from smudgy import PointCloud
@@ -119,31 +122,34 @@ def _run_pipeline_regression_under_mpi(out_path):
     rank = comm.Get_rank()
 
     rng = np.random.default_rng(1)
-    n, dim = 41, 3
+    # Comfortably clear of the periodic ghost-exchange half-box guard at
+    # k=8/3 ranks (41 -- an earlier choice here -- was too sparse).
+    n, dim = 300, 3
     positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
     weights = rng.uniform(0.5, 1.5, size=n).astype(np.float32)
     scalar_field = rng.uniform(size=n).astype(np.float32)
 
-    def run_pipeline(call_decompose):
+    def run_pipeline(call_decompose_explicitly):
         pc = PointCloud(
             positions=positions.copy(), weights=weights.copy(), boxsize=1.0,
             verbose=False, backend="numpy",
         ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure="isotropic")
-        if call_decompose:
+        if call_decompose_explicitly:
             pc.decompose()
+        pc.find_neighbors()
         pc.compute_smoothing()
         pc.compute_density()
         pc.add_fields("sf", scalar_field)
-        density = pc.smoothing.density_isotropic.copy()
-        interp = pc.interpolate("sf", structure="isotropic").copy()
+        density = pc.gather_particles(pc.smoothing.density_isotropic.copy())
+        interp = pc.gather_particles(pc.interpolate("sf", structure="isotropic").copy())
         fgrid, wgrid = pc.deposit(
             "sf", averaged=True, gridnums=6, adaptive=False, kernel_name="cic",
             return_weights=True,
         )
         return density, interp, fgrid.copy(), wgrid.copy()
 
-    density_a, interp_a, fgrid_a, wgrid_a = run_pipeline(call_decompose=False)
-    density_b, interp_b, fgrid_b, wgrid_b = run_pipeline(call_decompose=True)
+    density_a, interp_a, fgrid_a, wgrid_a = run_pipeline(call_decompose_explicitly=False)
+    density_b, interp_b, fgrid_b, wgrid_b = run_pipeline(call_decompose_explicitly=True)
 
     if rank == 0:
         result = {
@@ -295,8 +301,7 @@ def test_decomposition_properties(tmp_path, n_particles, n_ranks, dist_mode, per
     assert int(result["reconstruct_positions_exact"]) == 1
     assert int(result["reconstruct_weights_exact"]) == 1
     assert int(result["local_shapes_ok"]) == 1
-    assert int(result["positions_unchanged"]) == 1
-    assert int(result["weights_unchanged"]) == 1
+    assert int(result["decompose_is_noop"]) == 1
 
 
 def test_decompose_does_not_change_pipeline_results(tmp_path):

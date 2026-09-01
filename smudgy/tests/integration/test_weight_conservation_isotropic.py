@@ -57,6 +57,7 @@ def test_weight_conservation(
         structure=structure,
         kernel_name=kernel_name,
     )
+    pc.find_neighbors()
     pc.compute_smoothing()
 
     _, weights_sph = pc.deposit(
