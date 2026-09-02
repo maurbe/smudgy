@@ -310,8 +310,7 @@ class PointCloud:
         )
         if self.verbose and self.rank == 0:
             print(
-                f"[smudgy] Found neighbors via ghost exchange "
-                f"({num_neighbors_temp} neighbors per particle)"
+                f"[smudgy] Found {num_neighbors_temp} neighbors per particle"
             )
         return self
 
@@ -480,12 +479,25 @@ class PointCloud:
                 f"Neighbor index {max_idx} is out of bounds for {n_valid} particles. This indicates a bug in the neighbor search or input setup."
             )
 
-    def _check_neighbors_found(self) -> None:
-        """Verify that `find_neighbors()` has been called."""
+    def _ensure_neighbors_found(self, num_neighbors: int) -> None:
+        """Lazily run `find_neighbors()` on first use, mirroring the pre-
+        decomposition-refactor behavior of building the tree and finding
+        neighbors automatically at the first call that actually needs them,
+        rather than requiring an explicit `find_neighbors()` call first.
+
+        Safe as a collective: `self.ghosts.nn_inds` starts identically `None`
+        on every rank (set once, together, either here or by an explicit
+        `find_neighbors()` call -- never by rank-dependent branching), so
+        every rank reaches the same decision on whether to call
+        `find_neighbors()` here. Relies on particle positions never changing
+        after construction (no re-decomposition/rebalancing is supported, see
+        `decompose()`'s docstring) -- once found, ghosts/neighbors remain
+        valid for this `PointCloud`'s lifetime, so this triggers at most once;
+        every call after the first sees `nn_inds` already populated and is a
+        no-op.
+        """
         if self.ghosts.nn_inds is None:
-            raise AttributeError(
-                "No neighbors have been found yet; call 'find_neighbors' first."
-            )
+            self.find_neighbors(num_neighbors=num_neighbors)
 
     def _combined_local_and_ghost(
         self, local_arr: npt.NDArray[Any], ghost_arr: npt.NDArray[Any]
@@ -861,7 +873,7 @@ class PointCloud:
         """
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
         structure_temp = self._resolve_structure(structure)
-        self._check_neighbors_found()
+        self._ensure_neighbors_found(num_neighbors_temp)
 
         # whether query_positions was supplied is decided by rank 0 alone
         # (other ranks may pass anything, e.g. None) -- otherwise ranks
@@ -1418,7 +1430,7 @@ class PointCloud:
         # ----------------------------
         # Setup
         # ----------------------------
-        self._check_neighbors_found()
+        self._ensure_neighbors_found(self._resolve_num_neighbors())
         if mode not in INTERPOLATION_MODES:
             raise ValueError(
                 f"'mode' must be one of {INTERPOLATION_MODES}, got '{mode}'"
