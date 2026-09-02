@@ -92,6 +92,15 @@ def _run_props_under_mpi(out_path, n, dist_mode, periodic):
             reconstructed_pos[idx] = p
             reconstructed_w[idx] = w
 
+        # At size==1 there's no other rank to partition against, so
+        # `hilbert_partition_and_scatter` skips the Hilbert sort entirely and
+        # `local_global_indices` must be the identity permutation
+        # np.arange(n), not just "some" valid bijection (which the
+        # `bijection_ok` check above already accepts for ANY permutation,
+        # Hilbert-sorted included) -- vacuously true at size>1, where a
+        # genuine Hilbert sort is expected instead.
+        identity_order_ok = size != 1 or np.array_equal(concatenated_idx, np.arange(n))
+
         result = {
             "n": n,
             "size": size,
@@ -103,6 +112,7 @@ def _run_props_under_mpi(out_path, n, dist_mode, periodic):
             "reconstruct_weights_exact": np.array_equal(reconstructed_w, weights),
             "local_shapes_ok": all(all_shape_ok),
             "decompose_is_noop": all(all_noop),
+            "identity_order_ok": identity_order_ok,
         }
         np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
     print(f"RANK {rank} DONE")
@@ -177,6 +187,7 @@ def _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodi
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+    size = comm.Get_size()
 
     rng = np.random.default_rng(4)
     dim = 3
@@ -235,12 +246,17 @@ def _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodi
             reconstructed[g] = p
         reconstruct_exact = np.array_equal(reconstructed, query)
 
+        # Same identity-permutation check as `_run_props_under_mpi`, for
+        # `route_query_positions`'s own size==1 fast path.
+        identity_order_ok = size != 1 or np.array_equal(concatenated, np.arange(n_query))
+
         result = {
             "bijection_ok": bijection_ok,
             "reconstruct_exact": reconstruct_exact,
             "local_shapes_ok": all(all_shape_ok),
             "routing_correct": all(all_routing_correct),
             "counts_sum_ok": routing.counts.sum() == n_query,
+            "identity_order_ok": identity_order_ok,
         }
         np.savez(out_path, **{k: np.asarray(v) for k, v in result.items()})
     print(f"RANK {rank} DONE")
@@ -302,6 +318,7 @@ def test_decomposition_properties(tmp_path, n_particles, n_ranks, dist_mode, per
     assert int(result["reconstruct_weights_exact"]) == 1
     assert int(result["local_shapes_ok"]) == 1
     assert int(result["decompose_is_noop"]) == 1
+    assert int(result["identity_order_ok"]) == 1
 
 
 def test_decompose_does_not_change_pipeline_results(tmp_path):
@@ -338,6 +355,7 @@ def test_route_query_positions_properties(tmp_path, n_particles, n_query, n_rank
     assert int(result["local_shapes_ok"]) == 1
     assert int(result["routing_correct"]) == 1
     assert int(result["counts_sum_ok"]) == 1
+    assert int(result["identity_order_ok"]) == 1
 
 
 if __name__ == "__main__":

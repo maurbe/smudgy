@@ -1,5 +1,6 @@
 """Core PointCloud class for particle-based computations."""
 
+import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -202,6 +203,42 @@ class PointCloud:
                 f"particles {periodic_str} (decomposed across {rank_str})"
             )
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Plain attribute assignment (`pc.a = b`) is treated as per-rank
+        metadata -- set as-is on this rank only, never scattered. Warns
+        (doesn't block) when that looks like a likely mistake: an `ndarray`
+        whose length equals the *global* particle count, on a run with more
+        than one rank -- the sanctioned way to add a per-particle field is
+        `add_fields`, which validates shape against the global count,
+        Hilbert-reorders, and scatters it into local-sized shares.
+
+        Scoped to `self.size > 1` only: at `size == 1`, local count == global
+        count, so a bare `pc.a = np.ones(N)` is already a fully valid,
+        correctly-ordered assignment there (indistinguishable, by shape
+        alone, from what `add_fields` itself would produce) -- nothing to
+        warn about.
+        """
+        if (
+            isinstance(value, np.ndarray)
+            and getattr(self, "size", 1) > 1
+            and name not in ("positions", "weights")
+            and getattr(self, "decomposition", None) is not None
+            and value.ndim >= 1
+            and value.shape[0] == int(self.decomposition.counts.sum())
+        ):
+            warnings.warn(
+                f"Setting 'pc.{name}' directly to an array of length "
+                f"{value.shape[0]}, matching the total particle count, looks "
+                "like an attempt to add a per-particle field. Plain attribute "
+                "assignment is treated as per-rank/meta-information and is "
+                "set as-is on this rank only, unscattered. If this is meant "
+                f"to be a per-particle field, use 'pc.add_fields({name!r}, "
+                f"values)' instead (and 'pc.delete_fields({name!r})' to "
+                "remove it) so it's properly chunked across ranks.",
+                stacklevel=2,
+            )
+        object.__setattr__(self, name, value)
+
     # =============================================================================
     # Set utilities
     # =============================================================================
@@ -345,6 +382,37 @@ class PointCloud:
         return execution._gather_to_root(
             self.comm, local_global_indices, local_array, n_total, root=root,
         )
+
+    def get(self, name: str, root: int = 0) -> npt.NDArray[Any] | None:
+        """Gather a named per-particle field back to `root`, reassembled into
+        original input order -- the read-only, results-out-of-the-pipeline
+        counterpart to `add_fields`.
+
+        `name` resolves against `self.smoothing` first (e.g.
+        `'smoothing_lengths'`, `'density_isotropic'`), then against `self`
+        directly (a custom field added via `add_fields`, or `'positions'`/
+        `'weights'`). Meant only for handing a final result back to the
+        caller -- internal computation should keep reading the per-rank
+        attribute directly (e.g. `self.smoothing.density_isotropic`), never
+        `get()`, since this triggers a real MPI collective (`gather_particles`)
+        and returns `None` on every rank but `root`.
+
+        Returns
+        -------
+        np.ndarray, shape (n_particles, ...), on `root`; `None` elsewhere.
+        """
+        if hasattr(self.smoothing, name):
+            local_arr = getattr(self.smoothing, name)
+        elif hasattr(self, name):
+            local_arr = getattr(self, name)
+        else:
+            raise AttributeError(
+                f"No field named {name!r} found (checked 'pc.smoothing.{name}' "
+                f"and 'pc.{name}')."
+            )
+        if local_arr is None:
+            raise AttributeError(f"'{name}' has not been computed yet.")
+        return self.gather_particles(local_arr, root=root)
 
     def _set_property(self, name: str, value: Any) -> None:
         """Set a global property with centralized validation."""

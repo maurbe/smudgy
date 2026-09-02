@@ -197,3 +197,118 @@ class TestPartitionBoundaryCodes:
         max_code = np.iinfo(np.uint64).max
         assert boundaries[1] == max_code
         assert boundaries[2] == max_code
+
+
+class _FakeSingleRankComm:
+    """Minimal stand-in for `mpi4py.MPI.Comm` covering only what a size==1
+    call needs. `bcast`/`Scatterv`/etc. deliberately raise if reached, since
+    the whole point of `hilbert_partition_and_scatter`/`route_query_positions`'s
+    size==1 fast path is to never touch any of them."""
+
+    def Get_rank(self):
+        return 0
+
+    def Get_size(self):
+        return 1
+
+    def bcast(self, *args, **kwargs):
+        raise AssertionError("bcast must not be called on the size==1 fast path")
+
+    def Scatterv(self, *args, **kwargs):
+        raise AssertionError("Scatterv must not be called on the size==1 fast path")
+
+
+class TestSizeOneFastPath:
+    """`hilbert_partition_and_scatter`/`route_query_positions` skip Hilbert
+    encoding/sorting/scattering entirely at size==1 (no other rank to
+    partition against) -- see their docstrings/inline comments. These tests
+    confirm the fast path is actually taken (not just that results happen to
+    look right), and that it produces the identity permutation in original
+    input order."""
+
+    def test_hilbert_partition_and_scatter_skips_encode_and_sort(self, monkeypatch):
+        from smudgy import decomposition
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("hilbert_encode must not be called at size==1")
+
+        monkeypatch.setattr(decomposition, "hilbert_encode", _boom)
+
+        rng = np.random.default_rng(0)
+        n, dim = 12, 3
+        positions = rng.uniform(0, 1, size=(n, dim)).astype(np.float32)
+        weights = rng.uniform(0.5, 1.5, size=n).astype(np.float32)
+
+        info = decomposition.hilbert_partition_and_scatter(
+            _FakeSingleRankComm(),
+            positions,
+            weights,
+            domain_min=positions.min(axis=0),
+            domain_max=positions.max(axis=0),
+        )
+
+        np.testing.assert_array_equal(info.local_positions, positions)
+        np.testing.assert_array_equal(info.local_weights, weights)
+        np.testing.assert_array_equal(info.local_global_indices, np.arange(n))
+        np.testing.assert_array_equal(info.root_order, np.arange(n))
+        np.testing.assert_array_equal(info.counts, [n])
+        assert info.boundary_codes[0] == 0
+        assert info.boundary_codes[-1] == np.iinfo(np.uint64).max
+
+    def test_hilbert_partition_and_scatter_ignores_root_at_size_one(self, monkeypatch):
+        """A caller-supplied non-default `root` must not matter at size==1:
+        `comm.Get_rank()` is always 0 there, so gating on `rank == root`
+        (instead of `size == 1`) would take the wrong branch and try to
+        `comm.bcast(None, ...)` from a rank that doesn't exist -- this is the
+        latent crash the size==1 gating fixes as a side effect."""
+        from smudgy import decomposition
+
+        monkeypatch.setattr(
+            decomposition,
+            "hilbert_encode",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("unexpected call")),
+        )
+
+        rng = np.random.default_rng(0)
+        n, dim = 5, 2
+        positions = rng.uniform(0, 1, size=(n, dim)).astype(np.float32)
+        weights = np.ones(n, dtype=np.float32)
+
+        info = decomposition.hilbert_partition_and_scatter(
+            _FakeSingleRankComm(),
+            positions,
+            weights,
+            domain_min=positions.min(axis=0),
+            domain_max=positions.max(axis=0),
+            root=1,  # non-default, non-existent rank in a 1-process comm
+        )
+        np.testing.assert_array_equal(info.local_positions, positions)
+
+    def test_route_query_positions_skips_encode_and_searchsorted(self, monkeypatch):
+        from smudgy import decomposition
+
+        rng = np.random.default_rng(1)
+        n, dim = 12, 3
+        positions = rng.uniform(0, 1, size=(n, dim)).astype(np.float32)
+        weights = np.ones(n, dtype=np.float32)
+        info = decomposition.hilbert_partition_and_scatter(
+            _FakeSingleRankComm(),
+            positions,
+            weights,
+            domain_min=positions.min(axis=0),
+            domain_max=positions.max(axis=0),
+        )
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("hilbert_encode must not be called at size==1")
+
+        monkeypatch.setattr(decomposition, "hilbert_encode", _boom)
+
+        query = rng.uniform(0, 1, size=(5, dim)).astype(np.float32)
+        routing = decomposition.route_query_positions(
+            _FakeSingleRankComm(), info, query,
+        )
+
+        np.testing.assert_array_equal(routing.local_positions, query)
+        np.testing.assert_array_equal(routing.local_global_indices, np.arange(5))
+        np.testing.assert_array_equal(routing.counts, [5])

@@ -5,8 +5,9 @@ since Problem 1 made decomposition-at-construction mandatory).
 
 The strongest check: run the full pipeline (find_neighbors ->
 compute_smoothing -> compute_density -> add_fields -> interpolate ->
-deposit) at a single rank (trivially "the full dataset", just Hilbert-
-sorted) and again at several rank counts on identical input, gather each
+deposit) at a single rank (trivially "the full dataset", and in original
+input order -- decomposition skips the Hilbert sort entirely at size==1)
+and again at several rank counts on identical input, gather each
 back into original-particle order, and confirm they agree numerically (not
 exactly -- different rank counts partition particles differently, reordering
 floating-point summation; `deposit`'s grids, whose `allreduce`-based sum is

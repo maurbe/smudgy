@@ -307,6 +307,40 @@ def hilbert_partition_and_scatter(
     rank = comm.Get_rank()
     size = comm.Get_size()
 
+    if size == 1:
+        # No other rank to partition against -- skip the Hilbert encode/sort/
+        # scatter entirely (expensive: O(N) encode + O(N log N) sort, on the
+        # same order as the neighbor search itself) and hand back this
+        # process's own arrays unchanged, in their original order, as a
+        # single-rank "partition". Gated on `size == 1` rather than
+        # `rank == root`: with one process `comm.Get_rank()` is always 0, so
+        # gating on `rank == root` would (for a caller-supplied `root != 0`)
+        # take the `else` branch below and `comm.bcast` from a rank that
+        # doesn't exist in a 1-process communicator -- this also incidentally
+        # fixes that latent crash, since there is exactly one process and its
+        # `positions`/`weights` are necessarily the real (only) data
+        # regardless of what `root` was asked for.
+        n = positions.shape[0]
+        counts = np.array([n], dtype=np.int64)
+        local_global_indices = np.arange(n, dtype=np.int64)
+        return DecompositionInfo(
+            local_positions=np.ascontiguousarray(positions),
+            local_weights=np.ascontiguousarray(weights),
+            local_global_indices=local_global_indices,
+            counts=counts,
+            domain_min=np.asarray(domain_min),
+            domain_max=np.asarray(domain_max),
+            # Reuses the general formula (rather than hand-writing
+            # [0, max_uint64]) so this stays byte-for-byte consistent with
+            # what the size>1 path would produce for a single-rank `counts`
+            # by construction: with an empty `codes_sorted`, its `if n > 0`
+            # fill branch never runs, always leaving [0, max_uint64].
+            boundary_codes=_partition_boundary_codes(
+                np.empty(0, dtype=np.uint64), counts
+            ),
+            root_order=local_global_indices,
+        )
+
     if rank == root:
         n = positions.shape[0]
         codes = hilbert_encode(positions, domain_min, domain_max, periodic=periodic)
@@ -405,6 +439,20 @@ def route_query_positions(
     """
     rank = comm.Get_rank()
     size = comm.Get_size()
+
+    if size == 1:
+        # Provably a no-op at size==1: `decomposition.boundary_codes` is
+        # always [0, max_uint64] there (see `hilbert_partition_and_scatter`'s
+        # own size==1 path), so `searchsorted` against it would always
+        # resolve every query point to rank 0 anyway -- skip computing that
+        # and just route everything here directly, in original order.
+        m = query_positions.shape[0]
+        local_global_indices = np.arange(m, dtype=np.int64)
+        return QueryRouting(
+            local_positions=np.ascontiguousarray(query_positions),
+            local_global_indices=local_global_indices,
+            counts=np.array([m], dtype=np.int64),
+        )
 
     if rank == root:
         codes = hilbert_encode(

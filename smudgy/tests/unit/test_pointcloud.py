@@ -639,6 +639,88 @@ class TestDeposit:
         assert grid.shape[1:] == (4, 6, 8)
 
 
+# =============================================================================
+# get() -- results-out-of-the-pipeline accessor
+# =============================================================================
+class TestGet:
+    def _setup_pc_with_density(self, rng, n=50, dim=3):
+        positions = make_positions(rng, n=n, dim=dim)
+        pc = PointCloud(positions, verbose=False)
+        pc.global_setup(
+            structure="isotropic", kernel_name="cubic_spline", num_neighbors=8
+        )
+        pc.find_neighbors()
+        pc.compute_smoothing()
+        pc.compute_density()
+        return pc, positions
+
+    def test_get_smoothing_field_matches_local_attribute_at_single_rank(self, rng):
+        # At size==1 (these tests run single-process), the fast decomposition
+        # path (Part 1) preserves original order, so `get()` (a gather to
+        # root) must equal the underlying local attribute exactly -- no
+        # reordering to undo.
+        pc, _ = self._setup_pc_with_density(rng, n=50)
+        gathered = pc.get("density_isotropic")
+        np.testing.assert_array_equal(gathered, pc.smoothing.density_isotropic)
+
+    def test_get_custom_field_matches_original_values(self, rng):
+        n = 30
+        pc = PointCloud(make_positions(rng, n=n), verbose=False)
+        values = rng.uniform(size=n).astype(np.float32)
+        pc.add_fields("sf", values)
+        gathered = pc.get("sf")
+        np.testing.assert_array_equal(gathered, values)
+
+    def test_get_positions_matches_original_input_order(self, rng):
+        n = 30
+        positions = make_positions(rng, n=n)
+        pc = PointCloud(positions, verbose=False)
+        gathered = pc.get("positions")
+        np.testing.assert_array_equal(gathered, positions)
+
+    def test_get_unknown_name_raises(self, rng):
+        pc = PointCloud(make_positions(rng, n=20), verbose=False)
+        with pytest.raises(AttributeError):
+            pc.get("does_not_exist")
+
+    def test_get_not_yet_computed_raises(self, rng):
+        pc = PointCloud(make_positions(rng, n=20), verbose=False)
+        with pytest.raises(AttributeError):
+            pc.get("density_isotropic")
+
+
+# =============================================================================
+# __setattr__ field-assignment warning
+# =============================================================================
+class TestSetattrFieldWarning:
+    """Only the size==1 side lives here (these tests run single-process, so
+    self.size is always 1 and the warning -- scoped to size > 1 by design,
+    see __setattr__'s docstring -- must never fire). The size>1 "does it
+    actually warn" behavior is covered by
+    tests/system/test_mpi_get_and_setattr_guard.py, which spawns real
+    multi-rank mpiexec processes."""
+
+    def test_full_length_array_assignment_does_not_warn_at_size_one(self, rng, recwarn):
+        # size==1: local count == global count, so this is actually a fully
+        # valid, correctly-ordered assignment -- nothing to warn about.
+        n = 20
+        pc = PointCloud(make_positions(rng, n=n), verbose=False)
+        pc.new_field = np.ones(n, dtype=np.float32)
+        assert len(recwarn) == 0
+
+    def test_ordinary_metadata_assignment_never_warns(self, rng, recwarn):
+        pc = PointCloud(make_positions(rng, n=20), verbose=False)
+        pc.step = 3
+        pc.label = "run1"
+        assert len(recwarn) == 0
+
+    def test_add_fields_internal_assignment_never_warns(self, rng, recwarn):
+        n = 20
+        pc = PointCloud(make_positions(rng, n=n), verbose=False)
+        pc.add_fields("temperature", rng.uniform(size=n))
+        assert len(recwarn) == 0
+
+
 if __name__ == "__main__":
     import sys
 
