@@ -812,10 +812,10 @@ def _tsc_3d(
 
 
 # =============================================================================
-# PCS
+# BSPLINE4 (cubic B-spline, was "pcs")
 # =============================================================================
 @ti.kernel
-def _pcs_1d(
+def _bspline4_1d(
     periodic: ti.template(),
     particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
     particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -866,7 +866,7 @@ def _pcs_1d(
 
 
 @ti.kernel
-def _pcs_2d(
+def _bspline4_2d(
     periodic: ti.template(),
     particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
     particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -937,7 +937,7 @@ def _pcs_2d(
 
 
 @ti.kernel
-def _pcs_3d(
+def _bspline4_3d(
     periodic: ti.template(),
     particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
     particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1030,10 +1030,318 @@ def _pcs_3d(
 
 
 # =============================================================================
-# PQS
+# BSPLINE5 (quartic B-spline, order-5, 5-point -- the correct textbook "PQS")
 # =============================================================================
 @ti.kernel
-def _pqs_1d(
+def _bspline5_1d(
+    periodic: ti.template(),
+    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
+    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
+    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
+    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
+    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
+    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
+):
+    Nx = grid_weights.shape[0]
+    F = grid_fields.shape[1]
+    SHIFT = 2
+    K = 5
+
+    inv_dx = ti.Vector([Nx / boxsizes[0]])
+
+    for p in range(particle_positions.shape[0]):
+        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
+        ix = ti.floor(gx + 0.5, int)
+        dx = gx - ix
+
+        wx = ti.Vector(
+            [
+                (1.0 - 2.0 * dx) ** 4 / 384.0,
+                (
+                    55.0
+                    + 20.0 * (1.0 + dx)
+                    - 120.0 * (1.0 + dx) ** 2
+                    + 80.0 * (1.0 + dx) ** 3
+                    - 16.0 * (1.0 + dx) ** 4
+                )
+                / 96.0,
+                115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
+                (
+                    55.0
+                    + 20.0 * (1.0 - dx)
+                    - 120.0 * (1.0 - dx) ** 2
+                    + 80.0 * (1.0 - dx) ** 3
+                    - 16.0 * (1.0 - dx) ** 4
+                )
+                / 96.0,
+                (1.0 + 2.0 * dx) ** 4 / 384.0,
+            ]
+        )
+
+        ox_min, ox_max = 0, K - 1
+        if ti.static(not periodic):
+            ox_min = ti.max(0, SHIFT - ix)
+            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
+
+        w_particle = particle_weights[p]
+
+        for ox in range(ox_min, ox_max + 1):
+            x = ix + ox - SHIFT
+            if ti.static(periodic):
+                x = _apply_pbc(x, Nx)
+
+            w = wx[ox] * w_particle
+            ti.atomic_add(grid_weights[x], w)
+            for f in range(F):
+                ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
+
+
+@ti.kernel
+def _bspline5_2d(
+    periodic: ti.template(),
+    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
+    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
+    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
+    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
+    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
+    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
+):
+    Nx = grid_weights.shape[0]
+    Ny = grid_weights.shape[1]
+    F = grid_fields.shape[2]
+    SHIFT = 2
+    K = 5
+
+    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
+
+    for p in range(particle_positions.shape[0]):
+        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
+        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
+
+        ix = ti.floor(gx + 0.5, int)
+        iy = ti.floor(gy + 0.5, int)
+
+        dx = gx - ix
+        dy = gy - iy
+
+        wx = ti.Vector(
+            [
+                (1.0 - 2.0 * dx) ** 4 / 384.0,
+                (
+                    55.0
+                    + 20.0 * (1.0 + dx)
+                    - 120.0 * (1.0 + dx) ** 2
+                    + 80.0 * (1.0 + dx) ** 3
+                    - 16.0 * (1.0 + dx) ** 4
+                )
+                / 96.0,
+                115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
+                (
+                    55.0
+                    + 20.0 * (1.0 - dx)
+                    - 120.0 * (1.0 - dx) ** 2
+                    + 80.0 * (1.0 - dx) ** 3
+                    - 16.0 * (1.0 - dx) ** 4
+                )
+                / 96.0,
+                (1.0 + 2.0 * dx) ** 4 / 384.0,
+            ]
+        )
+        wy = ti.Vector(
+            [
+                (1.0 - 2.0 * dy) ** 4 / 384.0,
+                (
+                    55.0
+                    + 20.0 * (1.0 + dy)
+                    - 120.0 * (1.0 + dy) ** 2
+                    + 80.0 * (1.0 + dy) ** 3
+                    - 16.0 * (1.0 + dy) ** 4
+                )
+                / 96.0,
+                115.0 / 192.0 - (5.0 / 8.0) * dy**2 + (1.0 / 4.0) * dy**4,
+                (
+                    55.0
+                    + 20.0 * (1.0 - dy)
+                    - 120.0 * (1.0 - dy) ** 2
+                    + 80.0 * (1.0 - dy) ** 3
+                    - 16.0 * (1.0 - dy) ** 4
+                )
+                / 96.0,
+                (1.0 + 2.0 * dy) ** 4 / 384.0,
+            ]
+        )
+
+        ox_min, ox_max = 0, K - 1
+        oy_min, oy_max = 0, K - 1
+        if ti.static(not periodic):
+            ox_min = ti.max(0, SHIFT - ix)
+            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
+            oy_min = ti.max(0, SHIFT - iy)
+            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
+
+        w_particle = particle_weights[p]
+
+        for ox in range(ox_min, ox_max + 1):
+            x = ix + ox - SHIFT
+            if ti.static(periodic):
+                x = _apply_pbc(x, Nx)
+
+            for oy in range(oy_min, oy_max + 1):
+                y = iy + oy - SHIFT
+                if ti.static(periodic):
+                    y = _apply_pbc(y, Ny)
+
+                w = wx[ox] * wy[oy] * w_particle
+                ti.atomic_add(grid_weights[x, y], w)
+                for f in range(F):
+                    ti.atomic_add(grid_fields[x, y, f], particle_fields[p, f] * w)
+
+
+@ti.kernel
+def _bspline5_3d(
+    periodic: ti.template(),
+    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
+    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
+    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
+    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
+    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
+    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
+):
+    Nx = grid_weights.shape[0]
+    Ny = grid_weights.shape[1]
+    Nz = grid_weights.shape[2]
+    F = grid_fields.shape[3]
+    SHIFT = 2
+    K = 5
+
+    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
+
+    for p in range(particle_positions.shape[0]):
+        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
+        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
+        gz = particle_positions[p, 2] * inv_dx[2] - 0.5
+
+        ix = ti.floor(gx + 0.5, int)
+        iy = ti.floor(gy + 0.5, int)
+        iz = ti.floor(gz + 0.5, int)
+
+        dx = gx - ix
+        dy = gy - iy
+        dz = gz - iz
+
+        wx = ti.Vector(
+            [
+                (1.0 - 2.0 * dx) ** 4 / 384.0,
+                (
+                    55.0
+                    + 20.0 * (1.0 + dx)
+                    - 120.0 * (1.0 + dx) ** 2
+                    + 80.0 * (1.0 + dx) ** 3
+                    - 16.0 * (1.0 + dx) ** 4
+                )
+                / 96.0,
+                115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
+                (
+                    55.0
+                    + 20.0 * (1.0 - dx)
+                    - 120.0 * (1.0 - dx) ** 2
+                    + 80.0 * (1.0 - dx) ** 3
+                    - 16.0 * (1.0 - dx) ** 4
+                )
+                / 96.0,
+                (1.0 + 2.0 * dx) ** 4 / 384.0,
+            ]
+        )
+        wy = ti.Vector(
+            [
+                (1.0 - 2.0 * dy) ** 4 / 384.0,
+                (
+                    55.0
+                    + 20.0 * (1.0 + dy)
+                    - 120.0 * (1.0 + dy) ** 2
+                    + 80.0 * (1.0 + dy) ** 3
+                    - 16.0 * (1.0 + dy) ** 4
+                )
+                / 96.0,
+                115.0 / 192.0 - (5.0 / 8.0) * dy**2 + (1.0 / 4.0) * dy**4,
+                (
+                    55.0
+                    + 20.0 * (1.0 - dy)
+                    - 120.0 * (1.0 - dy) ** 2
+                    + 80.0 * (1.0 - dy) ** 3
+                    - 16.0 * (1.0 - dy) ** 4
+                )
+                / 96.0,
+                (1.0 + 2.0 * dy) ** 4 / 384.0,
+            ]
+        )
+        wz = ti.Vector(
+            [
+                (1.0 - 2.0 * dz) ** 4 / 384.0,
+                (
+                    55.0
+                    + 20.0 * (1.0 + dz)
+                    - 120.0 * (1.0 + dz) ** 2
+                    + 80.0 * (1.0 + dz) ** 3
+                    - 16.0 * (1.0 + dz) ** 4
+                )
+                / 96.0,
+                115.0 / 192.0 - (5.0 / 8.0) * dz**2 + (1.0 / 4.0) * dz**4,
+                (
+                    55.0
+                    + 20.0 * (1.0 - dz)
+                    - 120.0 * (1.0 - dz) ** 2
+                    + 80.0 * (1.0 - dz) ** 3
+                    - 16.0 * (1.0 - dz) ** 4
+                )
+                / 96.0,
+                (1.0 + 2.0 * dz) ** 4 / 384.0,
+            ]
+        )
+
+        ox_min, ox_max = 0, K - 1
+        oy_min, oy_max = 0, K - 1
+        oz_min, oz_max = 0, K - 1
+        if ti.static(not periodic):
+            ox_min = ti.max(0, SHIFT - ix)
+            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
+            oy_min = ti.max(0, SHIFT - iy)
+            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
+            oz_min = ti.max(0, SHIFT - iz)
+            oz_max = ti.min(K - 1, SHIFT - iz + Nz - 1)
+
+        w_particle = particle_weights[p]
+
+        for ox in range(ox_min, ox_max + 1):
+            x = ix + ox - SHIFT
+            if ti.static(periodic):
+                x = _apply_pbc(x, Nx)
+
+            for oy in range(oy_min, oy_max + 1):
+                y = iy + oy - SHIFT
+                if ti.static(periodic):
+                    y = _apply_pbc(y, Ny)
+
+                for oz in range(oz_min, oz_max + 1):
+                    z = iz + oz - SHIFT
+                    if ti.static(periodic):
+                        z = _apply_pbc(z, Nz)
+
+                    w = wx[ox] * wy[oy] * wz[oz] * w_particle
+                    ti.atomic_add(grid_weights[x, y, z], w)
+                    for f in range(F):
+                        ti.atomic_add(
+                            grid_fields[x, y, z, f], particle_fields[p, f] * w
+                        )
+
+
+# =============================================================================
+# BSPLINE6 (quintic B-spline, was "pqs" -- 6-point, order-6 math unchanged,
+# only renamed; the order-5 quartic that "pqs" was supposed to be lives in
+# BSPLINE5 above)
+# =============================================================================
+@ti.kernel
+def _bspline6_1d(
     periodic: ti.template(),
     particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
     particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1085,7 +1393,7 @@ def _pqs_1d(
 
 
 @ti.kernel
-def _pqs_2d(
+def _bspline6_2d(
     periodic: ti.template(),
     particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
     particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -1162,7 +1470,7 @@ def _pqs_2d(
 
 
 @ti.kernel
-def _pqs_3d(
+def _bspline6_3d(
     periodic: ti.template(),
     particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
     particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
@@ -2608,12 +2916,15 @@ _KERNELS = {
         ("tsc", 1): _tsc_1d,
         ("tsc", 2): _tsc_2d,
         ("tsc", 3): _tsc_3d,
-        ("pcs", 1): _pcs_1d,
-        ("pcs", 2): _pcs_2d,
-        ("pcs", 3): _pcs_3d,
-        ("pqs", 1): _pqs_1d,
-        ("pqs", 2): _pqs_2d,
-        ("pqs", 3): _pqs_3d,
+        ("bspline4", 1): _bspline4_1d,
+        ("bspline4", 2): _bspline4_2d,
+        ("bspline4", 3): _bspline4_3d,
+        ("bspline5", 1): _bspline5_1d,
+        ("bspline5", 2): _bspline5_2d,
+        ("bspline5", 3): _bspline5_3d,
+        ("bspline6", 1): _bspline6_1d,
+        ("bspline6", 2): _bspline6_2d,
+        ("bspline6", 3): _bspline6_3d,
     },
     True: {  # adaptive (smoothing-length-dependent) methods
         ("separable", 1): _separable_1d,
@@ -2628,7 +2939,7 @@ _KERNELS = {
     },
 }
 
-FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "pcs", "pqs"]
+FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "bspline4", "bspline5", "bspline6"]
 ADAPTIVE_STRUCTURES = ["separable", "isotropic", "covariant"]
 
 
@@ -2966,7 +3277,8 @@ def deposit(
     structure : {"separable", "isotropic", "covariant"}, optional
         Required when ``adaptive=True``. Separable kernels use names such as
         ``"tsc_rect"``; isotropic and covariant kernels are spherical.
-        - fixed-grid: `kernel_name` is one of "ngp"/"cic"/"tsc"/"pcs"/"pqs".
+        - fixed-grid: `kernel_name` is one of
+          "ngp"/"cic"/"tsc"/"bspline4"/"bspline5"/"bspline6".
         - separable: needs `particle_hsml` (N, D). Integrated exactly;
           `integration_method` is ignored.
         - isotropic: needs `particle_hsml` (N,), a spherical kernel such as

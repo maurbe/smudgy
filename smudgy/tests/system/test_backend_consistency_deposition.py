@@ -7,7 +7,7 @@ from smudgy import PointCloud
 
 DIMS = [1, 2, 3]
 GRIDNUM = 128
-KERNEL_NAMES = ["ngp", "cic", "tsc", "pcs", "pqs"]
+KERNEL_NAMES = ["ngp", "cic", "tsc", "bspline4", "bspline5", "bspline6"]
 
 
 def _generate_dataset(dim: int):

@@ -1563,8 +1563,8 @@ class PointCloud:
         extent : Optional[Sequence[Sequence[float]]], optional
             Domain bounds [[xmin, xmax], [ymin, ymax], ...]. If None, uses `boxsize`.
         kernel_name : str, optional
-            Fixed-grid stencil (``ngp``, ``cic``, ``tsc``, ``pcs``, or
-            ``pqs``) when ``adaptive=False``. For adaptive deposition, a
+            Fixed-grid stencil (``ngp``, ``cic``, ``tsc``, ``bspline4``,
+            ``bspline5``, or ``bspline6``) when ``adaptive=False``. For adaptive deposition, a
             rectangular kernel such as ``tsc_rect`` for ``separable``, or a
             spherical kernel for ``isotropic`` and ``covariant``.
         structure : Structure, optional

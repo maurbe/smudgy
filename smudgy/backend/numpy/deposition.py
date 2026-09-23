@@ -923,9 +923,9 @@ def _tsc_3d(
 
 
 # =============================================================================
-# PCS
+# BSPLINE4 (cubic B-spline, was "pcs")
 # =============================================================================
-def _pcs_1d(
+def _bspline4_1d(
     particle_positions,
     particle_fields,
     particle_weights,
@@ -952,14 +952,14 @@ def _pcs_1d(
     ix = np.floor(grid_pos[:, 0]).astype(np.int32)
     dx = grid_pos[:, 0] - ix
 
-    def pcs_weights(d):
+    def bspline4_weights(d):
         w0 = ((1.0 - d) ** 3) / 6.0
         w1 = (4.0 - 6.0 * d**2 + 3.0 * d**3) / 6.0
         w2 = (1.0 + 3.0 * d + 3.0 * d**2 - 3.0 * d**3) / 6.0
         w3 = d**3 / 6.0
         return w0, w1, w2, w3
 
-    wx0, wx1, wx2, wx3 = pcs_weights(dx)
+    wx0, wx1, wx2, wx3 = bspline4_weights(dx)
     wx = (wx0, wx1, wx2, wx3)
     ixs = (ix - 1, ix, ix + 1, ix + 2)
 
@@ -1009,7 +1009,7 @@ def _pcs_1d(
     )
 
 
-def _pcs_2d(
+def _bspline4_2d(
     particle_positions,
     particle_fields,
     particle_weights,
@@ -1039,15 +1039,15 @@ def _pcs_2d(
     dx = grid_pos[:, 0] - ix
     dy = grid_pos[:, 1] - iy
 
-    def pcs_weights(d):
+    def bspline4_weights(d):
         w0 = ((1.0 - d) ** 3) / 6.0
         w1 = (4.0 - 6.0 * d**2 + 3.0 * d**3) / 6.0
         w2 = (1.0 + 3.0 * d + 3.0 * d**2 - 3.0 * d**3) / 6.0
         w3 = d**3 / 6.0
         return w0, w1, w2, w3
 
-    wx0, wx1, wx2, wx3 = pcs_weights(dx)
-    wy0, wy1, wy2, wy3 = pcs_weights(dy)
+    wx0, wx1, wx2, wx3 = bspline4_weights(dx)
+    wy0, wy1, wy2, wy3 = bspline4_weights(dy)
 
     wx = (wx0, wx1, wx2, wx3)
     wy = (wy0, wy1, wy2, wy3)
@@ -1102,7 +1102,7 @@ def _pcs_2d(
     )
 
 
-def _pcs_3d(
+def _bspline4_3d(
     particle_positions,
     particle_fields,
     particle_weights,
@@ -1134,16 +1134,16 @@ def _pcs_3d(
     dy = grid_pos[:, 1] - iy
     dz = grid_pos[:, 2] - iz
 
-    def pcs_weights(d):
+    def bspline4_weights(d):
         w0 = ((1.0 - d) ** 3) / 6.0
         w1 = (4.0 - 6.0 * d**2 + 3.0 * d**3) / 6.0
         w2 = (1.0 + 3.0 * d + 3.0 * d**2 - 3.0 * d**3) / 6.0
         w3 = d**3 / 6.0
         return w0, w1, w2, w3
 
-    wx0, wx1, wx2, wx3 = pcs_weights(dx)
-    wy0, wy1, wy2, wy3 = pcs_weights(dy)
-    wz0, wz1, wz2, wz3 = pcs_weights(dz)
+    wx0, wx1, wx2, wx3 = bspline4_weights(dx)
+    wy0, wy1, wy2, wy3 = bspline4_weights(dy)
+    wz0, wz1, wz2, wz3 = bspline4_weights(dz)
 
     wx = (wx0, wx1, wx2, wx3)
     wy = (wy0, wy1, wy2, wy3)
@@ -1207,9 +1207,331 @@ def _pcs_3d(
 
 
 # =============================================================================
-# PQS
+# BSPLINE5 (quartic B-spline, order-5, 5-point — the correct textbook "PQS")
 # =============================================================================
-def _pqs_1d(
+def _bspline5_1d(
+    particle_positions,
+    particle_fields,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
+    particle_positions = _as_float32(particle_positions)
+    particle_fields = _as_float32(particle_fields)
+    particle_weights = _as_float32(particle_weights)
+    boxsizes = _as_float32(boxsizes)
+
+    Nx = gridnums[0]
+    F = particle_fields.shape[1]
+
+    inv_dx = np.array([Nx], dtype=np.float32) / boxsizes
+
+    # Cell-centered coordinates
+    grid_pos = particle_positions * inv_dx - 0.5
+
+    if periodic:
+        grid_pos = np.mod(grid_pos, [Nx])
+
+    ix = np.floor(grid_pos[:, 0] + 0.5).astype(np.int32)
+    dx = grid_pos[:, 0] - ix
+
+    def bspline5_weights(d):
+        w_m2 = (1.0 - 2.0 * d) ** 4 / 384.0
+        w_m1 = (
+            55.0
+            + 20.0 * (1.0 + d)
+            - 120.0 * (1.0 + d) ** 2
+            + 80.0 * (1.0 + d) ** 3
+            - 16.0 * (1.0 + d) ** 4
+        ) / 96.0
+        w_0 = 115.0 / 192.0 - (5.0 / 8.0) * d**2 + (1.0 / 4.0) * d**4
+        w_p1 = (
+            55.0
+            + 20.0 * (1.0 - d)
+            - 120.0 * (1.0 - d) ** 2
+            + 80.0 * (1.0 - d) ** 3
+            - 16.0 * (1.0 - d) ** 4
+        ) / 96.0
+        w_p2 = (1.0 + 2.0 * d) ** 4 / 384.0
+        return w_m2, w_m1, w_0, w_p1, w_p2
+
+    wxm2, wxm1, wx0, wxp1, wxp2 = bspline5_weights(dx)
+    wx = (wxm2, wxm1, wx0, wxp1, wxp2)
+    ixs = (ix - 2, ix - 1, ix, ix + 1, ix + 2)
+    flat_size = Nx
+
+    grid_fields = np.zeros((F, flat_size), dtype=np.float32)
+    grid_weights = np.zeros(flat_size, dtype=np.float32)
+
+    weighted_fields = particle_fields * particle_weights[:, None]
+
+    for ox in range(5):
+        xi = ixs[ox]
+        w = wx[ox]
+
+        if periodic:
+            xi = xi % Nx
+            valid = slice(None)
+        else:
+            valid = (0 <= xi) & (xi < Nx)
+
+            if not np.any(valid):
+                continue
+
+            xi = xi[valid]
+            w = w[valid]
+
+        flat_idx = xi
+
+        deposit_weight = particle_weights if periodic else particle_weights[valid]
+        deposit_fields = weighted_fields if periodic else weighted_fields[valid]
+
+        np.add.at(grid_weights, flat_idx, deposit_weight * w)
+
+        for f in range(F):
+            np.add.at(
+                grid_fields[f],
+                flat_idx,
+                deposit_fields[:, f] * w,
+            )
+
+    return (
+        grid_fields.reshape(F, Nx),
+        grid_weights.reshape(
+            Nx,
+        ),
+    )
+
+
+def _bspline5_2d(
+    particle_positions,
+    particle_fields,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
+    particle_positions = _as_float32(particle_positions)
+    particle_fields = _as_float32(particle_fields)
+    particle_weights = _as_float32(particle_weights)
+    boxsizes = _as_float32(boxsizes)
+
+    Nx, Ny = gridnums
+    F = particle_fields.shape[1]
+
+    inv_dx = np.array([Nx, Ny], dtype=np.float32) / boxsizes
+
+    # Cell-centered coordinates
+    grid_pos = particle_positions * inv_dx - 0.5
+
+    if periodic:
+        grid_pos = np.mod(grid_pos, [Nx, Ny])
+
+    ix = np.floor(grid_pos[:, 0] + 0.5).astype(np.int32)
+    iy = np.floor(grid_pos[:, 1] + 0.5).astype(np.int32)
+
+    dx = grid_pos[:, 0] - ix
+    dy = grid_pos[:, 1] - iy
+
+    def bspline5_weights(d):
+        w_m2 = (1.0 - 2.0 * d) ** 4 / 384.0
+        w_m1 = (
+            55.0
+            + 20.0 * (1.0 + d)
+            - 120.0 * (1.0 + d) ** 2
+            + 80.0 * (1.0 + d) ** 3
+            - 16.0 * (1.0 + d) ** 4
+        ) / 96.0
+        w_0 = 115.0 / 192.0 - (5.0 / 8.0) * d**2 + (1.0 / 4.0) * d**4
+        w_p1 = (
+            55.0
+            + 20.0 * (1.0 - d)
+            - 120.0 * (1.0 - d) ** 2
+            + 80.0 * (1.0 - d) ** 3
+            - 16.0 * (1.0 - d) ** 4
+        ) / 96.0
+        w_p2 = (1.0 + 2.0 * d) ** 4 / 384.0
+        return w_m2, w_m1, w_0, w_p1, w_p2
+
+    wxm2, wxm1, wx0, wxp1, wxp2 = bspline5_weights(dx)
+    wym2, wym1, wy0, wyp1, wyp2 = bspline5_weights(dy)
+
+    wx = (wxm2, wxm1, wx0, wxp1, wxp2)
+    wy = (wym2, wym1, wy0, wyp1, wyp2)
+
+    ixs = (ix - 2, ix - 1, ix, ix + 1, ix + 2)
+    iys = (iy - 2, iy - 1, iy, iy + 1, iy + 2)
+
+    flat_size = Nx * Ny
+
+    grid_fields = np.zeros((F, flat_size), dtype=np.float32)
+    grid_weights = np.zeros(flat_size, dtype=np.float32)
+
+    weighted_fields = particle_fields * particle_weights[:, None]
+
+    for ox, oy in product(range(5), repeat=2):
+
+        xi = ixs[ox]
+        yi = iys[oy]
+        w = wx[ox] * wy[oy]
+
+        if periodic:
+            xi = xi % Nx
+            yi = yi % Ny
+            valid = slice(None)
+        else:
+            valid = (0 <= xi) & (xi < Nx) & (0 <= yi) & (yi < Ny)
+
+            if not np.any(valid):
+                continue
+
+            xi = xi[valid]
+            yi = yi[valid]
+            w = w[valid]
+
+        flat_idx = xi * Ny + yi
+
+        deposit_weight = particle_weights if periodic else particle_weights[valid]
+        deposit_fields = weighted_fields if periodic else weighted_fields[valid]
+
+        np.add.at(grid_weights, flat_idx, deposit_weight * w)
+
+        for f in range(F):
+            np.add.at(
+                grid_fields[f],
+                flat_idx,
+                deposit_fields[:, f] * w,
+            )
+
+    return (
+        grid_fields.reshape(F, Nx, Ny),
+        grid_weights.reshape(Nx, Ny),
+    )
+
+
+def _bspline5_3d(
+    particle_positions,
+    particle_fields,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+):
+    particle_positions = _as_float32(particle_positions)
+    particle_fields = _as_float32(particle_fields)
+    particle_weights = _as_float32(particle_weights)
+    boxsizes = _as_float32(boxsizes)
+
+    Nx, Ny, Nz = gridnums
+    F = particle_fields.shape[1]
+
+    inv_dx = np.array([Nx, Ny, Nz], dtype=np.float32) / boxsizes
+
+    # Cell-centered coordinates
+    grid_pos = particle_positions * inv_dx - 0.5
+
+    if periodic:
+        grid_pos = np.mod(grid_pos, [Nx, Ny, Nz])
+
+    ix = np.floor(grid_pos[:, 0] + 0.5).astype(np.int32)
+    iy = np.floor(grid_pos[:, 1] + 0.5).astype(np.int32)
+    iz = np.floor(grid_pos[:, 2] + 0.5).astype(np.int32)
+
+    dx = grid_pos[:, 0] - ix
+    dy = grid_pos[:, 1] - iy
+    dz = grid_pos[:, 2] - iz
+
+    def bspline5_weights(d):
+        w_m2 = (1.0 - 2.0 * d) ** 4 / 384.0
+        w_m1 = (
+            55.0
+            + 20.0 * (1.0 + d)
+            - 120.0 * (1.0 + d) ** 2
+            + 80.0 * (1.0 + d) ** 3
+            - 16.0 * (1.0 + d) ** 4
+        ) / 96.0
+        w_0 = 115.0 / 192.0 - (5.0 / 8.0) * d**2 + (1.0 / 4.0) * d**4
+        w_p1 = (
+            55.0
+            + 20.0 * (1.0 - d)
+            - 120.0 * (1.0 - d) ** 2
+            + 80.0 * (1.0 - d) ** 3
+            - 16.0 * (1.0 - d) ** 4
+        ) / 96.0
+        w_p2 = (1.0 + 2.0 * d) ** 4 / 384.0
+        return w_m2, w_m1, w_0, w_p1, w_p2
+
+    wxm2, wxm1, wx0, wxp1, wxp2 = bspline5_weights(dx)
+    wym2, wym1, wy0, wyp1, wyp2 = bspline5_weights(dy)
+    wzm2, wzm1, wz0, wzp1, wzp2 = bspline5_weights(dz)
+
+    wx = (wxm2, wxm1, wx0, wxp1, wxp2)
+    wy = (wym2, wym1, wy0, wyp1, wyp2)
+    wz = (wzm2, wzm1, wz0, wzp1, wzp2)
+
+    ixs = (ix - 2, ix - 1, ix, ix + 1, ix + 2)
+    iys = (iy - 2, iy - 1, iy, iy + 1, iy + 2)
+    izs = (iz - 2, iz - 1, iz, iz + 1, iz + 2)
+
+    flat_size = Nx * Ny * Nz
+
+    grid_fields = np.zeros((F, flat_size), dtype=np.float32)
+    grid_weights = np.zeros(flat_size, dtype=np.float32)
+
+    weighted_fields = particle_fields * particle_weights[:, None]
+
+    for ox, oy, oz in product(range(5), repeat=3):
+
+        xi = ixs[ox]
+        yi = iys[oy]
+        zi = izs[oz]
+        w = wx[ox] * wy[oy] * wz[oz]
+
+        if periodic:
+            xi = xi % Nx
+            yi = yi % Ny
+            zi = zi % Nz
+            valid = slice(None)
+        else:
+            valid = (
+                (0 <= xi) & (xi < Nx) & (0 <= yi) & (yi < Ny) & (0 <= zi) & (zi < Nz)
+            )
+
+            if not np.any(valid):
+                continue
+
+            xi = xi[valid]
+            yi = yi[valid]
+            zi = zi[valid]
+            w = w[valid]
+
+        flat_idx = xi * Ny * Nz + yi * Nz + zi
+
+        deposit_weight = particle_weights if periodic else particle_weights[valid]
+        deposit_fields = weighted_fields if periodic else weighted_fields[valid]
+
+        np.add.at(grid_weights, flat_idx, deposit_weight * w)
+
+        for f in range(F):
+            np.add.at(
+                grid_fields[f],
+                flat_idx,
+                deposit_fields[:, f] * w,
+            )
+
+    return (
+        grid_fields.reshape(F, Nx, Ny, Nz),
+        grid_weights.reshape(Nx, Ny, Nz),
+    )
+
+
+# =============================================================================
+# BSPLINE6 (quintic B-spline, was "pqs" — 6-point, order-6 math unchanged, only
+# renamed; the order-5 quartic that "pqs" was supposed to be lives in BSPLINE5
+# above)
+# =============================================================================
+def _bspline6_1d(
     particle_positions,
     particle_fields,
     particle_weights,
@@ -1237,7 +1559,7 @@ def _pqs_1d(
 
     dx = grid_pos[:, 0] - ix
 
-    def pqs_weights(d):
+    def bspline6_weights(d):
         w0 = (1.0 - d) ** 5 / 120.0
         w1 = ((2.0 - d) ** 5 - 6.0 * (1.0 - d) ** 5) / 120.0
         w2 = ((3.0 - d) ** 5 - 6.0 * (2.0 - d) ** 5 + 15.0 * (1.0 - d) ** 5) / 120.0
@@ -1246,7 +1568,7 @@ def _pqs_1d(
         w5 = d**5 / 120.0
         return w0, w1, w2, w3, w4, w5
 
-    wx0, wx1, wx2, wx3, wx4, wx5 = pqs_weights(dx)
+    wx0, wx1, wx2, wx3, wx4, wx5 = bspline6_weights(dx)
     wx = (wx0, wx1, wx2, wx3, wx4, wx5)
     ixs = (ix - 2, ix - 1, ix, ix + 1, ix + 2, ix + 3)
     flat_size = Nx
@@ -1294,7 +1616,7 @@ def _pqs_1d(
     )
 
 
-def _pqs_2d(
+def _bspline6_2d(
     particle_positions,
     particle_fields,
     particle_weights,
@@ -1324,7 +1646,7 @@ def _pqs_2d(
     dx = grid_pos[:, 0] - ix
     dy = grid_pos[:, 1] - iy
 
-    def pqs_weights(d):
+    def bspline6_weights(d):
         w0 = (1.0 - d) ** 5 / 120.0
         w1 = ((2.0 - d) ** 5 - 6.0 * (1.0 - d) ** 5) / 120.0
         w2 = ((3.0 - d) ** 5 - 6.0 * (2.0 - d) ** 5 + 15.0 * (1.0 - d) ** 5) / 120.0
@@ -1333,8 +1655,8 @@ def _pqs_2d(
         w5 = d**5 / 120.0
         return w0, w1, w2, w3, w4, w5
 
-    wx0, wx1, wx2, wx3, wx4, wx5 = pqs_weights(dx)
-    wy0, wy1, wy2, wy3, wy4, wy5 = pqs_weights(dy)
+    wx0, wx1, wx2, wx3, wx4, wx5 = bspline6_weights(dx)
+    wy0, wy1, wy2, wy3, wy4, wy5 = bspline6_weights(dy)
 
     wx = (wx0, wx1, wx2, wx3, wx4, wx5)
     wy = (wy0, wy1, wy2, wy3, wy4, wy5)
@@ -1389,7 +1711,7 @@ def _pqs_2d(
     )
 
 
-def _pqs_3d(
+def _bspline6_3d(
     particle_positions,
     particle_fields,
     particle_weights,
@@ -1421,7 +1743,7 @@ def _pqs_3d(
     dy = grid_pos[:, 1] - iy
     dz = grid_pos[:, 2] - iz
 
-    def pqs_weights(d):
+    def bspline6_weights(d):
         w0 = (1.0 - d) ** 5 / 120.0
         w1 = ((2.0 - d) ** 5 - 6.0 * (1.0 - d) ** 5) / 120.0
         w2 = ((3.0 - d) ** 5 - 6.0 * (2.0 - d) ** 5 + 15.0 * (1.0 - d) ** 5) / 120.0
@@ -1430,9 +1752,9 @@ def _pqs_3d(
         w5 = d**5 / 120.0
         return w0, w1, w2, w3, w4, w5
 
-    wx0, wx1, wx2, wx3, wx4, wx5 = pqs_weights(dx)
-    wy0, wy1, wy2, wy3, wy4, wy5 = pqs_weights(dy)
-    wz0, wz1, wz2, wz3, wz4, wz5 = pqs_weights(dz)
+    wx0, wx1, wx2, wx3, wx4, wx5 = bspline6_weights(dx)
+    wy0, wy1, wy2, wy3, wy4, wy5 = bspline6_weights(dy)
+    wz0, wz1, wz2, wz3, wz4, wz5 = bspline6_weights(dz)
 
     wx = (wx0, wx1, wx2, wx3, wx4, wx5)
     wy = (wy0, wy1, wy2, wy3, wy4, wy5)
@@ -1474,7 +1796,7 @@ def _pqs_3d(
             zi = zi[valid]
             w = w[valid]
 
-        flat_idx = xi * Ny * Ny + yi * Nz + zi
+        flat_idx = xi * Ny * Nz + yi * Nz + zi
 
         deposit_weight = particle_weights if periodic else particle_weights[valid]
         deposit_fields = weighted_fields if periodic else weighted_fields[valid]
@@ -1497,7 +1819,7 @@ def _pqs_3d(
 # =============================================================================
 # Python-level dispatch
 # =============================================================================
-FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "pcs", "pqs"]
+FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "bspline4", "bspline5", "bspline6"]
 
 _KERNELS = {
     ("ngp", 1): _ngp_1d,
@@ -1509,12 +1831,15 @@ _KERNELS = {
     ("tsc", 1): _tsc_1d,
     ("tsc", 2): _tsc_2d,
     ("tsc", 3): _tsc_3d,
-    ("pcs", 1): _pcs_1d,
-    ("pcs", 2): _pcs_2d,
-    ("pcs", 3): _pcs_3d,
-    ("pqs", 1): _pqs_1d,
-    ("pqs", 2): _pqs_2d,
-    ("pqs", 3): _pqs_3d,
+    ("bspline4", 1): _bspline4_1d,
+    ("bspline4", 2): _bspline4_2d,
+    ("bspline4", 3): _bspline4_3d,
+    ("bspline5", 1): _bspline5_1d,
+    ("bspline5", 2): _bspline5_2d,
+    ("bspline5", 3): _bspline5_3d,
+    ("bspline6", 1): _bspline6_1d,
+    ("bspline6", 2): _bspline6_2d,
+    ("bspline6", 3): _bspline6_3d,
 }
 
 
@@ -1573,7 +1898,7 @@ def deposit(
 # ============================================================
 if __name__ == "__main__":
 
-    kernel_name = "pqs"
+    kernel_name = "bspline6"
     dim = 1
     N = int(1e6)
     F = 3
