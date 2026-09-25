@@ -784,6 +784,7 @@ class PointCloud:
         ghost_info: GhostInfo,
         num_neighbors_temp: int,
         structure_temp: Structure,
+        tensor_options: dict,
     ) -> None:
         """Shared body of `compute_smoothing()`'s two branches: particle
         positions (`ghost_info` is `self.ghosts`, from `find_neighbors()`)
@@ -821,12 +822,19 @@ class PointCloud:
                 neighbor_positions=combined_positions[nn_inds_local],
                 neighbor_weights=combined_weights[nn_inds_local],
                 boxsize=self.boxsize,
+                hsml=(
+                    nn_dists_local[:, -1]
+                    if tensor_options["volume_preserving"]
+                    else None
+                ),
+                **tensor_options,
                 reduce=False,
             )
             self.smoothing.smoothing_tensors = smoothing_tensors
             self.smoothing.smoothing_tensors_eigvals = smoothing_tensors_eigvals
             self.smoothing.smoothing_tensors_eigvecs = smoothing_tensors_eigvecs
             self.smoothing.nn_dists_vec = nn_dists_vec
+            self.smoothing.tensor_options = dict(tensor_options)
 
         self.smoothing.nn_inds, self.smoothing.nn_dists = (
             nn_inds_local,
@@ -848,6 +856,9 @@ class PointCloud:
         num_neighbors: int | None = None,
         structure: Structure | None = None,
         # backend: str = None,
+        ratio_max: float = 10.0,
+        min_axis: float | None = None,
+        volume_preserving: bool = False,
     ) -> None:
         """Compute smoothing lengths/tensors for SPH calculations.
 
@@ -861,6 +872,18 @@ class PointCloud:
             Smoothing structure for computation.
         backend : {"numpy", "taichi"}, default "numpy"
             Backend used for the smoothing computation.
+        ratio_max : float, default 10.0
+            ``covariant`` only. Maximum axis ratio h_max / h_min of the
+            smoothing tensors (>= 1); guards against degenerate (coplanar or
+            collinear) neighbor sets.
+        min_axis : float, optional
+            ``covariant`` only. Floor on every axis of the smoothing tensors,
+            e.g. a softening length or cell size. Only ever enlarges axes.
+        volume_preserving : bool, default False
+            ``covariant`` only. If True, rescale each tensor so that
+            det H = h^dim, with h the isotropic smoothing length (distance to
+            the `num_neighbors`-th neighbor): anisotropy in shape only. May
+            break the property that the kernel support encloses all neighbors.
 
         Returns
         -------
@@ -868,11 +891,22 @@ class PointCloud:
 
         Notes
         -----
-        Results are stored in the ``smoothing`` attribute.
+        Results are stored in the ``smoothing`` attribute. Covariant smoothing
+        tensors follow Marinho (2021): H = zeta_max * Sigma^(1/2), with Sigma
+        the weighted second-moment tensor of the neighbors about the query
+        and zeta_max their largest Mahalanobis distance, so the kernel
+        support is the smallest ellipsoid of that shape enclosing all
+        neighbors. Like every collective call, all MPI ranks must pass the
+        same `ratio_max`/`min_axis`/`volume_preserving`.
 
         """
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
         structure_temp = self._resolve_structure(structure)
+        tensor_options = {
+            "ratio_max": ratio_max,
+            "min_axis": min_axis,
+            "volume_preserving": volume_preserving,
+        }
         self._ensure_neighbors_found(num_neighbors_temp)
 
         # whether query_positions was supplied is decided by rank 0 alone
@@ -910,6 +944,7 @@ class PointCloud:
                 self.ghosts,
                 num_neighbors_temp,
                 structure_temp,
+                tensor_options,
             )
             return
 
@@ -943,6 +978,7 @@ class PointCloud:
             query_ghosts,
             num_neighbors_temp,
             structure_temp,
+            tensor_options,
         )
 
     def compute_density(

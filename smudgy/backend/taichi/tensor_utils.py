@@ -3,6 +3,8 @@
 import numpy as np
 import taichi as ti
 
+from .smoothing import _sym_eig_jacobi
+
 E1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 E2 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 E3 = np.array([0.0, 0.0, 1.0], dtype=np.float32)
@@ -30,11 +32,18 @@ def _project_2d_kernel(
                 H[a, b] = h_tensor[n, a, b]
 
         h2d = (P @ H.inverse() @ P.transpose()).inverse()
-        eigvals, eigvecs = ti.sym_eig(h2d, ti.f32)
+        h2d = 0.5 * (h2d + h2d.transpose())  # symmetric up to f32 round-off
+
+        # Not ti.sym_eig: it returns non-orthogonal, often wrong eigenvectors
+        # (and NaNs) for 2x2 matrices -- see _sym_eig_jacobi. A single Jacobi
+        # rotation diagonalises a 2x2 exactly. Rescale to a unit-order
+        # magnitude band first, then undo the scale on the eigenvalues.
+        alpha = 1.0 / ti.max(ti.abs(h2d.trace()), 1e-30)
+        eigvals, eigvecs = _sym_eig_jacobi(alpha * h2d, 2, 1)
+        eigvals = eigvals / alpha
 
         # ==========================================================================================
-        # Fix for annyoing taichi bug in 2D:
-        # eigvals/vecs are returned in descending order, 3D is fine and follows numpy backend
+        # Jacobi gives no ordering guarantee: sort ascending, matching np.linalg.eigh
         if eigvals[0] > eigvals[1]:
             eigvals[0], eigvals[1] = eigvals[1], eigvals[0]
             for a in ti.static(range(2)):

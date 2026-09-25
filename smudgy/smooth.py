@@ -29,6 +29,9 @@ class SmoothingInfo:
         Eigenvalues of the smoothing tensors.
     smoothing_tensors_eigvecs : np.ndarray
         Eigenvectors of the smoothing tensors.
+    tensor_options : dict
+        Options the smoothing tensors were last computed with
+        (`ratio_max`, `min_axis`, `volume_preserving`).
     kernel_name : str
         Name of the smoothing kernel used.
     density_isotropic : np.ndarray
@@ -59,6 +62,7 @@ class SmoothingInfo:
     smoothing_tensors: np.ndarray = None
     smoothing_tensors_eigvals: np.ndarray = None
     smoothing_tensors_eigvecs: np.ndarray = None
+    tensor_options: dict = None
 
     kernel_name: str = None
     density_isotropic: np.ndarray = None

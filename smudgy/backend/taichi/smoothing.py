@@ -41,6 +41,45 @@ def _coordinate_difference_with_pbc(
     return r
 
 
+@ti.func
+def _sym_eig_jacobi(A, dim: ti.template(), sweeps: ti.template()):
+    """Eigendecomposition of a small symmetric matrix by cyclic Jacobi rotations.
+
+    Used instead of ti.sym_eig, which returns non-orthogonal eigenvectors that
+    can be off by tens of degrees for nearly degenerate matrices, i.e. for
+    near-isotropic neighbourhoods. Jacobi's V is orthonormal by construction,
+    one rotation diagonalises a 2x2 exactly, and a 3x3 converges to f32
+    precision in a few sweeps. Returns (eigvals, V), unordered, with
+    A = V diag(eigvals) V^T.
+    """
+    V = ti.Matrix.identity(ti.f32, dim)
+    for _ in range(sweeps):
+        for p in ti.static(range(dim)):
+            for r in ti.static(range(p + 1, dim)):
+                apr = A[p, r]
+                if apr != 0.0:
+                    # rotation angle that zeroes A[p, r] (Golub & Van Loan, sym.schur2)
+                    tau = (A[r, r] - A[p, p]) / (2.0 * apr)
+                    t = 1.0 / (ti.abs(tau) + ti.sqrt(1.0 + tau * tau))
+                    if tau < 0.0:
+                        t = -t
+                    c = 1.0 / ti.sqrt(1.0 + t * t)
+                    s = t * c
+                    J = ti.Matrix.identity(ti.f32, dim)
+                    J[p, p] = c
+                    J[r, r] = c
+                    J[p, r] = s
+                    J[r, p] = -s
+                    A = J.transpose() @ A @ J
+                    A[p, r] = 0.0
+                    A[r, p] = 0.0
+                    V = V @ J
+    eigvals = ti.Vector.zero(ti.f32, dim)
+    for a in ti.static(range(dim)):
+        eigvals[a] = A[a, a]
+    return eigvals, V
+
+
 @ti.kernel
 def _compute_hmat_kernel(
     query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
@@ -51,9 +90,13 @@ def _compute_hmat_kernel(
         dtype=ti.f32, ndim=2
     ),  # (N, K)    -- pre-gathered
     boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    hsml: ti.types.ndarray(dtype=ti.f32, ndim=1),  # only read if volume_preserving
     periodic: ti.template(),
     dim: ti.template(),
+    volume_preserving: ti.template(),
     eps: ti.f32,
+    ratio_max: ti.f32,
+    min_axis: ti.f32,  # 0.0 disables
     H_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
     eigvals_out: ti.types.ndarray(dtype=ti.f32, ndim=2),
     eigvecs_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
@@ -61,6 +104,7 @@ def _compute_hmat_kernel(
 ):
     K = neighbor_positions.shape[1]
     for q in range(query_positions.shape[0]):
+        # --- second-moment tensor about the query (Marinho eq. 37) ------------
         Sigma = ti.Matrix.zero(ti.f32, dim, dim)
         wsum = 0.0
         for k in range(K):
@@ -77,48 +121,90 @@ def _compute_hmat_kernel(
             Sigma += w * d.outer_product(d)
             wsum += w
         Sigma /= wsum
-        Sigma += eps * Sigma.trace() * ti.Matrix.identity(ti.f32, dim)
+        trace = ti.max(Sigma.trace(), 1e-30)
+        Sigma += eps * trace * ti.Matrix.identity(ti.f32, dim)
 
-        # ti.sym_eig is numerically unreliable (non-orthonormal eigenvectors,
-        # wrong eigenvalues) when the matrix entries are small in absolute
-        # magnitude, which is exactly the regime Sigma lives in for typical
-        # unit-scale point clouds. Rescale to a safe magnitude band before
-        # eigendecomposition, then undo the scale on the eigenvalues.
-        alpha = 10.0 / Sigma.trace()
-        eigvals, eigvecs = ti.sym_eig(alpha * Sigma, ti.f32)
+        # Rescale to a unit-order magnitude band before the eigendecomposition
+        # (Sigma's entries are tiny for unit-scale point clouds), then undo the
+        # scale on the eigenvalues. H itself is invariant under an overall
+        # rescaling of Sigma. 1x1 needs no rotations: zero sweeps.
+        alpha = 10.0 / trace
+        eigvals, eigvecs = _sym_eig_jacobi(
+            alpha * Sigma, dim, ti.static(0 if dim == 1 else 6)
+        )
         eigvals = eigvals / alpha
 
         # ==========================================================================================
-        # Fix for annyoing taichi bug in 2D:
-        # eigvals/vecs are returned in descending order
-        if ti.static(dim == 2):
-            if eigvals[0] > eigvals[1]:
-                eigvals[0], eigvals[1] = eigvals[1], eigvals[0]
-                for a in ti.static(range(2)):
-                    eigvecs[a, 0], eigvecs[a, 1] = eigvecs[a, 1], eigvecs[a, 0]
+        # Jacobi gives no ordering guarantee. Sort descending explicitly, matching the numpy
+        # backend, so that index 0 is the largest principal component -- the
+        # axis-ratio clamp below depends on it.
+        for i in ti.static(range(dim)):
+            for j in ti.static(range(i + 1, dim)):
+                if eigvals[i] < eigvals[j]:
+                    eigvals[i], eigvals[j] = eigvals[j], eigvals[i]
+                    for a in ti.static(range(dim)):
+                        eigvecs[a, i], eigvecs[a, j] = eigvecs[a, j], eigvecs[a, i]
 
-            # Eigenvector orientation convention:
-            # Numpy and Taichi have no convention about the sign of the eigenvectors,
-            # impose a consistent sign convention for comparison with Taichi backend
-            # (largest-magnitude component of each eigenvector is positive).
-            for col in ti.static(range(2)):
-                max_abs = 0.0
-                sign = 1.0
-                for row in ti.static(range(2)):
-                    v = eigvecs[row, col]
-                    if ti.abs(v) > max_abs:
-                        max_abs = ti.abs(v)
-                        sign = 1.0 if v >= 0.0 else -1.0
-                for row in ti.static(range(2)):
-                    eigvecs[row, col] *= sign
+        # Eigenvector orientation convention:
+        # Numpy and Taichi have no convention about the sign of the eigenvectors,
+        # impose a consistent sign convention for comparison with the numpy backend
+        # (largest-magnitude component of each eigenvector is positive). H itself is
+        # invariant under column sign flips; this only affects eigvecs_out.
+        for col in ti.static(range(dim)):
+            max_abs = 0.0
+            sign = 1.0
+            for row in ti.static(range(dim)):
+                v = eigvecs[row, col]
+                if ti.abs(v) > max_abs:
+                    max_abs = ti.abs(v)
+                    sign = 1.0 if v >= 0.0 else -1.0
+            for row in ti.static(range(dim)):
+                eigvecs[row, col] *= sign
         # ==========================================================================================
 
+        # --- shape: principal components, with an axis-ratio clamp ---------------
+        sigma = ti.Vector.zero(ti.f32, dim)
         for a in ti.static(range(dim)):
-            eigvals_out[q, a] = ti.sqrt(ti.max(eigvals[a], 0.0))
+            sigma[a] = ti.sqrt(ti.max(eigvals[a], 0.0))
+        for a in ti.static(range(dim)):
+            sigma[a] = ti.max(sigma[a], sigma[0] / ratio_max)
+
+        # --- scale: enclosing-hull condition, Marinho (2021) eq. 39 -------------
+        # zeta_max = largest Mahalanobis distance among the K neighbours, using
+        # the clamped metric so the hull property holds for the returned tensor.
+        maha2_max = 0.0
+        for k in range(K):
+            maha2 = 0.0
+            for j in ti.static(range(dim)):
+                proj = 0.0
+                for a in ti.static(range(dim)):
+                    proj += rel_coords_out[q, k, a] * eigvecs[a, j]
+                maha2 += proj * proj / ti.max(sigma[j] * sigma[j], 1e-37)
+            maha2_max = ti.max(maha2_max, maha2)
+        zeta_max = ti.sqrt(maha2_max)
+
+        axes = ti.Vector.zero(ti.f32, dim)
+        for a in ti.static(range(dim)):
+            axes[a] = zeta_max * sigma[a]  # eq. 44: h_1, h_2, h_3
+
+        if ti.static(volume_preserving):  # det H = hsml^dim
+            det = 1.0
+            for a in ti.static(range(dim)):
+                det *= axes[a]
+            scale = hsml[q] / ti.pow(ti.max(det, 1e-30), 1.0 / dim)
+            for a in ti.static(range(dim)):
+                axes[a] *= scale
+
+        if min_axis > 0.0:  # only ever enlarges axes
+            for a in ti.static(range(dim)):
+                axes[a] = ti.max(axes[a], min_axis)
+
+        for a in ti.static(range(dim)):
+            eigvals_out[q, a] = axes[a]
 
         Lam = ti.Matrix.zero(ti.f32, dim, dim)
         for a in ti.static(range(dim)):
-            Lam[a, a] = eigvals_out[q, a]
+            Lam[a, a] = axes[a]
         H = eigvecs @ Lam @ eigvecs.transpose()
 
         for a in ti.static(range(dim)):
@@ -132,8 +218,17 @@ def compute_hmat(
     neighbor_positions: np.ndarray,
     neighbor_weights: np.ndarray,
     boxsize: np.ndarray | None = None,
+    ratio_max: float = 10.0,
+    min_axis: float | None = None,
+    volume_preserving: bool = False,
+    hsml: np.ndarray | None = None,
 ):
     """Compute anisotropic smoothing tensors from neighbor positions and weights.
+
+    H = zeta_max * Sigma^(1/2), following Marinho (2021), eqs. 39-44: the support
+    ellipsoid is the smallest one of the covariance's shape that still contains
+    every neighbour. In the isotropic limit each axis reduces to the distance to
+    the farthest neighbour, i.e. to the usual smoothing length, for any K.
 
     Parameters
     ----------
@@ -145,24 +240,40 @@ def compute_hmat(
         Array of neighbor weights for each query position.
     boxsize : np.ndarray, optional
         Array of box sizes for periodic boundary conditions. If None, no periodicity is applied.
+    ratio_max : float, optional
+        Maximum axis ratio h_max / h_min (>= 1). Guards against degenerate
+        (coplanar or collinear) neighbor sets.
+    min_axis : float, optional
+        Physical floor on the shortest axis, e.g. the softening length or cell
+        size. Only ever enlarges axes, so the hull property is preserved. Also
+        keeps H invertible if every neighbor coincides with the query (H = 0
+        otherwise).
+    volume_preserving : bool, optional
+        If True, rescale the axes so that det H = hsml^dim, i.e. anisotropy in
+        shape only. Requires `hsml`. Note that this can shrink the longest axis
+        and so may break the enclosing-hull property.
+    hsml : np.ndarray, optional
+        Isotropic smoothing lengths, required if `volume_preserving` is True.
 
     Returns
     -------
     H : np.ndarray
         Array of smoothing tensors for each query position.
     eigvals : np.ndarray
-        Array of eigenvalues of the smoothing tensors for each query position.
+        Eigenvalues of H, i.e. the principal smoothing lengths, descending.
     eigvecs : np.ndarray
-        Array of eigenvectors of the smoothing tensors for each query position.
+        Eigenvectors of H (columns), matching the order of `eigvals`.
     rel_coords : np.ndarray
         Array of relative coordinates of neighbors with respect to query positions.
 
     """
     dim = query_positions.shape[-1]
-    if dim not in (2, 3):
+    if dim not in (1, 2, 3):
         raise ValueError(
-            "[smudgy] Only 2D and 3D positions are supported for anisotropic smoothing tensors."
+            "[smudgy] Only 1D, 2D and 3D positions are supported for anisotropic smoothing tensors."
         )
+    if not ratio_max >= 1.0:
+        raise ValueError(f"[smudgy] ratio_max must be >= 1, got {ratio_max}.")
 
     query_positions = _as_float32(query_positions)
     neighbor_positions = _as_float32(neighbor_positions)
@@ -172,6 +283,17 @@ def compute_hmat(
     box = _as_float32(boxsize) if periodic else np.zeros(dim, dtype=np.float32)
 
     Nq, K = neighbor_weights.shape
+    if volume_preserving:
+        if hsml is None:
+            raise ValueError("[smudgy] volume_preserving=True requires hsml.")
+        hsml_arr = _as_float32(hsml)
+        if hsml_arr.shape != (Nq,):
+            raise ValueError(
+                f"[smudgy] hsml must have shape ({Nq},), got {hsml_arr.shape}."
+            )
+    else:
+        hsml_arr = np.zeros(Nq, dtype=np.float32)
+
     H = np.zeros((Nq, dim, dim), dtype=np.float32)
     eigvals = np.zeros((Nq, dim), dtype=np.float32)
     eigvecs = np.zeros((Nq, dim, dim), dtype=np.float32)
@@ -182,9 +304,13 @@ def compute_hmat(
         neighbor_positions,
         neighbor_weights,
         box,
+        hsml_arr,
         periodic,
         dim,
+        bool(volume_preserving),
         float(_EPS),
+        float(ratio_max),
+        float(min_axis) if min_axis is not None else 0.0,
         H,
         eigvals,
         eigvecs,

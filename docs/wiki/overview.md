@@ -57,11 +57,20 @@ With the kd-tree instance, we can now compute the relevant smoothing information
 
 + For `separable` and `isotropic` structures, the smoothing length is equal to the distance to the n-th nearest neighbor particle, i.e. $h = \|\mathbf r - \mathbf r_n\|$ where $n$ = `num_neighbors`. For `separable` kernels, the kernel shape is a square where $h$ is used along every axis. In the `isotropic` case, this results in spherically symmetric kernels.
 
-+ For `covariant` structures, the smoothing length is promoted to a **smoothing tensor** $H$. Instead of a spherical kernel, we now have elliptical (in 2D) or ellipsoidal (in 3D) kernel structures. Using the kd-tree, the code first identifies a cluster $C$ of nearest neighbors with positions $\mathbf r_j$ and weights $w_j$. Then, with the center of mass $\mathbf r_C$, it estimates the local covariance matrix via
++ For `covariant` structures, the smoothing length is promoted to a **smoothing tensor** $H$. Instead of a spherical kernel, we now have elliptical (in 2D) or ellipsoidal (in 3D) kernel structures. Following Marinho (2021), the code first uses the kd-tree to find the $n$ nearest neighbors, with positions $\mathbf r_j$ and weights $w_j$, of the query point $\mathbf r$. It then estimates the local second-moment tensor about $\mathbf r$ via
 
-    $$\Sigma_C = \frac{\sum_{j=1}^{n} w_j\, (\mathbf r_j- \mathbf r_C)(\mathbf r_j - \mathbf r_C)^{T}}{\sum_j w_j},$$
+    $$\Sigma = \frac{\sum_{j=1}^{n} w_j\, (\mathbf r_j- \mathbf r)(\mathbf r_j - \mathbf r)^{T}}{\sum_j w_j}.$$
 
-    where $H = \sqrt{\Sigma_C}$. Then, the eigenvalues $h_i$ and -vectors $e_i$ of $H$ represent the smoothing lengths and principal axes of the kernel.
+    $\Sigma$ fixes only the *shape* of the kernel. The *size* comes from the largest Mahalanobis distance among the neighbors, $\zeta_{\max} = \max_j \sqrt{(\mathbf r_j - \mathbf r)^T \Sigma^{-1} (\mathbf r_j - \mathbf r)}$, and
+
+    $$H = \zeta_{\max}\, \Sigma^{1/2}.$$
+
+    The kernel support is therefore the smallest ellipsoid of the shape of $\Sigma$ that still contains every neighbor. For an isotropic neighborhood, each axis reduces to the distance to the farthest neighbor, i.e. to the isotropic smoothing length $h$. The eigenvalues $h_i$ (sorted in descending order) and eigenvectors $e_i$ of $H$ are the smoothing lengths and principal axes of the kernel.
+
+    Three options of {py:meth}`~smudgy.pointcloud.PointCloud.compute_smoothing` control $H$:
+    + `ratio_max` (default `10`) caps the axis ratio $h_{\max}/h_{\min}$, which guards against coplanar or collinear neighbor sets.
+    + `min_axis` sets a lower bound on every axis, e.g. a softening length.
+    + `volume_preserving=True` rescales $H$ so that $\det H = h^{\rm dim}$, keeping only the anisotropic shape. Note that this can shrink the longest axis, so the support may no longer contain every neighbor.
 
 In `smudgy`, we can compute this informaton via the {py:meth}`~smudgy.pointcloud.PointCloud.compute_smoothing` method as
 
