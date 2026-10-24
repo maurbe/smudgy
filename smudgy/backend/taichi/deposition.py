@@ -42,6 +42,33 @@ def _cell_index_from_pos(
     return idx, valid
 
 
+@ti.func
+def _cell_index_from_int(idx: ti.i32, gridnum: ti.i32, periodic: ti.template()):
+    """`_cell_index_from_pos` for an already-integer (unwrapped) cell index."""
+    valid = True
+    if ti.static(periodic):
+        idx = _apply_pbc(idx, gridnum)
+    else:
+        if idx < 0 or idx >= gridnum:
+            valid = False
+    return idx, valid
+
+
+def _sample_buffer_size(eta_crit, dim):
+    """Cells per axis of the per-particle local buffer used by the sample
+    branch of isotropic/covariant deposition.
+
+    A particle in that branch has kernel diameter eta < eta_crit cells along
+    its narrowest axis, so (for isotropic kernels on cubic cells) it touches
+    at most ceil(eta_crit) + 1 cells per axis. Particles that don't fit
+    (elongated covariant ellipsoids, anisotropic cells) fall back to direct
+    per-sample deposition. Capped so the local buffer (B**dim floats) stays
+    small; a compile-time constant so Taichi can keep it in registers/stack.
+    """
+    b = int(np.ceil(eta_crit)) + 1
+    return max(1, min(b, {1: 64, 2: 16, 3: 6}[dim]))
+
+
 def _as_float32(array):
     """Return a C-contiguous float32 array. No copy if `array` is
     already float32 and C-contiguous; copies otherwise.
@@ -254,7 +281,7 @@ def _covariant_cell_integral_1d(
         # scale by that axis's own semi-axis length -- this is what
         # turns the isotropic q = |d| / h into the ellipsoidal q
         xi0 = (e0x * dx) / eval0
-        q = xi0
+        q = ti.abs(xi0)  # kernels expect q >= 0 (2D/3D get it from the sqrt)
         s += coeff * kernel_prefactor * evaluate_fn(q, dim)
 
     return s * cellSize_x
@@ -356,1219 +383,198 @@ def _covariant_cell_integral_3d(
 # =============================================================================
 
 
-# =============================================================================
-# NGP
-# =============================================================================
-@ti.kernel
-def _ngp_1d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
-):
-    Nx = grid_weights.shape[0]
-    F = grid_fields.shape[1]
-
-    inv_dx = Nx / boxsizes[0]
-
-    for p in range(particle_positions.shape[0]):
-        ix = ti.floor(particle_positions[p, 0] * inv_dx, int)
-
-        keep = True
-        if ti.static(periodic):
-            ix = _apply_pbc(ix, Nx)
-        else:
-            keep = 0 <= ix < Nx
-
-        if keep:
-            w = particle_weights[p]
-            ti.atomic_add(grid_weights[ix], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[ix, f], particle_fields[p, f] * w)
+# -----------------------------------------------------------------------------
+# 1D stencils. Each takes g = position in cell units (pos * N / L, NOT shifted
+# by the half-cell offset) and returns (base, w): the stencil covers cells
+# base - SHIFT + o for o in [0, K), with weights w[o]. The weight formulas are
+# the textbook B-spline assignment functions (cell-centred grid).
+# -----------------------------------------------------------------------------
+@ti.func
+def _ngp_stencil(g: ti.f32):
+    return ti.floor(g, int), ti.Vector([1.0])
 
 
-@ti.kernel
-def _ngp_2d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    F = grid_fields.shape[2]
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
-
-    for p in range(particle_positions.shape[0]):
-        ix = ti.floor(particle_positions[p, 0] * inv_dx[0], int)
-        iy = ti.floor(particle_positions[p, 1] * inv_dx[1], int)
-
-        keep = True
-        if ti.static(periodic):
-            ix = _apply_pbc(ix, Nx)
-            iy = _apply_pbc(iy, Ny)
-        else:
-            keep = (0 <= ix < Nx) and (0 <= iy < Ny)
-
-        if keep:
-            w = particle_weights[p]
-            ti.atomic_add(grid_weights[ix, iy], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[ix, iy, f], particle_fields[p, f] * w)
+@ti.func
+def _cic_stencil(g: ti.f32):
+    gx = g - 0.5
+    ix = ti.floor(gx, int)
+    fx = gx - ix
+    return ix, ti.Vector([1.0 - fx, fx])
 
 
-@ti.kernel
-def _ngp_3d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    Nz = grid_weights.shape[2]
-    F = grid_fields.shape[3]
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
-
-    for p in range(particle_positions.shape[0]):
-        ix = ti.floor(particle_positions[p, 0] * inv_dx[0], int)
-        iy = ti.floor(particle_positions[p, 1] * inv_dx[1], int)
-        iz = ti.floor(particle_positions[p, 2] * inv_dx[2], int)
-
-        keep = True
-        if ti.static(periodic):
-            ix = _apply_pbc(ix, Nx)
-            iy = _apply_pbc(iy, Ny)
-            iz = _apply_pbc(iz, Nz)
-        else:
-            keep = (0 <= ix < Nx) and (0 <= iy < Ny) and (0 <= iz < Nz)  # BUGFIX (a)
-
-        if keep:
-            w = particle_weights[p]
-            ti.atomic_add(grid_weights[ix, iy, iz], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[ix, iy, iz, f], particle_fields[p, f] * w)
+@ti.func
+def _tsc_stencil(g: ti.f32):
+    gx = g - 0.5
+    ix = ti.round(gx, int)
+    dx = gx - ix
+    return ix, ti.Vector(
+        [0.5 * (0.5 - dx) ** 2, 0.75 - dx * dx, 0.5 * (0.5 + dx) ** 2]
+    )
 
 
-# =============================================================================
-# CIC
-# =============================================================================
-@ti.kernel
-def _cic_1d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
-):
-    Nx = grid_weights.shape[0]
-    F = grid_fields.shape[1]
-    SHIFT = 0
-    K = 2
-
-    inv_dx = Nx / boxsizes[0]
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx - 0.5
-
-        ix = ti.floor(gx, int)
-        fx = gx - ix
-
-        wx = ti.Vector([1.0 - fx, fx])
-
-        ox_min, ox_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            w = wx[ox] * w_particle
-            ti.atomic_add(grid_weights[x], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
+@ti.func
+def _bspline4_stencil(g: ti.f32):
+    """Cubic B-spline (was "pcs")."""
+    gx = g - 0.5
+    ix = ti.floor(gx, int)
+    dx = gx - ix
+    return ix, ti.Vector(
+        [
+            (1.0 - dx) ** 3 / 6.0,
+            (4.0 - 6.0 * dx**2 + 3.0 * dx**3) / 6.0,
+            (1.0 + 3.0 * dx + 3.0 * dx**2 - 3.0 * dx**3) / 6.0,
+            dx**3 / 6.0,
+        ]
+    )
 
 
-@ti.kernel
-def _cic_2d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    F = grid_fields.shape[2]
-    SHIFT = 0
-    K = 2
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-
-        ix = ti.floor(gx, int)
-        iy = ti.floor(gy, int)
-
-        fx = gx - ix
-        fy = gy - iy
-
-        wx = ti.Vector([1.0 - fx, fx])
-        wy = ti.Vector([1.0 - fy, fy])
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                w = wx[ox] * wy[oy] * w_particle
-                ti.atomic_add(grid_weights[x, y], w)
-                for f in range(F):
-                    ti.atomic_add(grid_fields[x, y, f], particle_fields[p, f] * w)
+@ti.func
+def _bspline5_stencil(g: ti.f32):
+    """Quartic B-spline (order 5, 5-point -- the textbook "PQS")."""
+    gx = g - 0.5
+    ix = ti.floor(gx + 0.5, int)
+    dx = gx - ix
+    return ix, ti.Vector(
+        [
+            (1.0 - 2.0 * dx) ** 4 / 384.0,
+            (
+                55.0
+                + 20.0 * (1.0 + dx)
+                - 120.0 * (1.0 + dx) ** 2
+                + 80.0 * (1.0 + dx) ** 3
+                - 16.0 * (1.0 + dx) ** 4
+            )
+            / 96.0,
+            115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
+            (
+                55.0
+                + 20.0 * (1.0 - dx)
+                - 120.0 * (1.0 - dx) ** 2
+                + 80.0 * (1.0 - dx) ** 3
+                - 16.0 * (1.0 - dx) ** 4
+            )
+            / 96.0,
+            (1.0 + 2.0 * dx) ** 4 / 384.0,
+        ]
+    )
 
 
-@ti.kernel
-def _cic_3d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    Nz = grid_weights.shape[2]
-    F = grid_fields.shape[3]
-    SHIFT = 0
-    K = 2
+@ti.func
+def _bspline6_stencil(g: ti.f32):
+    """Quintic B-spline (6-point, was "pqs")."""
+    gx = g - 0.5
+    ix = ti.floor(gx, int)
+    dx = gx - ix
+    return ix, ti.Vector(
+        [
+            (1.0 - dx) ** 5 / 120.0,
+            ((2.0 - dx) ** 5 - 6.0 * (1.0 - dx) ** 5) / 120.0,
+            ((3.0 - dx) ** 5 - 6.0 * (2.0 - dx) ** 5 + 15.0 * (1.0 - dx) ** 5)
+            / 120.0,
+            ((2.0 + dx) ** 5 - 6.0 * (1.0 + dx) ** 5 + 15.0 * dx**5) / 120.0,
+            ((1.0 + dx) ** 5 - 6.0 * dx**5) / 120.0,
+            dx**5 / 120.0,
+        ]
+    )
 
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
 
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-        gz = particle_positions[p, 2] * inv_dx[2] - 0.5
+# name -> (stencil func, K = stencil width, SHIFT = offset of the first cell)
+_FIXED_STENCILS = {
+    "ngp": (_ngp_stencil, 1, 0),
+    "cic": (_cic_stencil, 2, 0),
+    "tsc": (_tsc_stencil, 3, 1),
+    "bspline4": (_bspline4_stencil, 4, 1),
+    "bspline5": (_bspline5_stencil, 5, 2),
+    "bspline6": (_bspline6_stencil, 6, 2),
+}
 
-        ix = ti.floor(gx, int)
-        iy = ti.floor(gy, int)
-        iz = ti.floor(gz, int)
 
-        fx = gx - ix
-        fy = gy - iy
-        fz = gz - iz
+def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
+    """Build the fixed-grid deposition kernel for one (stencil, dim).
 
-        wx = ti.Vector([1.0 - fx, fx])
-        wy = ti.Vector([1.0 - fy, fy])
-        wz = ti.Vector([1.0 - fz, fz])
+    Per particle, the K weights and K (wrapped) cell indices of every axis
+    are computed once; the K**dim stencil loop is then fully unrolled
+    (ti.static), so all weight/index lookups are static and the periodic
+    wrap is done K*dim times instead of once per stencil point. Out-of-grid
+    stencil points are skipped for non-periodic grids.
+    """
 
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        oz_min, oz_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-            oz_min = ti.max(0, SHIFT - iz)
-            oz_max = ti.min(
-                K - 1, SHIFT - iz + Nz - 1
-            )  # BUGFIX (b) -- was `0 <= Nz < Nz`
+    @ti.kernel
+    def kernel(
+        periodic: ti.template(),
+        particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, D)
+        particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
+        particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
+        boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (D,)
+        grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=dim + 1),  # (*gridnums, F)
+        grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=dim),  # gridnums
+    ):
+        F = grid_fields.shape[dim]
+        N = ti.Vector.zero(ti.i32, dim)
+        inv_dx = ti.Vector.zero(ti.f32, dim)
+        for d in ti.static(range(dim)):
+            N[d] = grid_weights.shape[d]
+            inv_dx[d] = N[d] / boxsizes[d]
 
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                for oz in range(oz_min, oz_max + 1):
-                    z = iz + oz - SHIFT
+        for p in range(particle_positions.shape[0]):
+            idx = ti.Matrix.zero(ti.i32, dim, K)
+            wgt = ti.Matrix.zero(ti.f32, dim, K)
+            ok = ti.Matrix.zero(ti.i32, dim, K)
+            for d in ti.static(range(dim)):
+                base, w1d = stencil_fn(particle_positions[p, d] * inv_dx[d])
+                for o in ti.static(range(K)):
+                    i = base + o - SHIFT
                     if ti.static(periodic):
-                        z = _apply_pbc(z, Nz)
-
-                    w = wx[ox] * wy[oy] * wz[oz] * w_particle
-                    ti.atomic_add(grid_weights[x, y, z], w)
-                    for f in range(F):
-                        ti.atomic_add(
-                            grid_fields[x, y, z, f], particle_fields[p, f] * w
-                        )
-
-
-# =============================================================================
-# TSC
-# =============================================================================
-@ti.kernel
-def _tsc_1d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
-):
-    Nx = grid_weights.shape[0]
-    F = grid_fields.shape[1]
-    SHIFT = 1
-    K = 3
-
-    inv_dx = ti.Vector([Nx / boxsizes[0]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        ix = ti.round(gx, int)
-        dx = gx - ix
-        wx = ti.Vector([0.5 * (0.5 - dx) ** 2, 0.75 - dx * dx, 0.5 * (0.5 + dx) ** 2])
-
-        ox_min, ox_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            w = wx[ox] * w_particle
-            ti.atomic_add(grid_weights[x], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _tsc_2d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    F = grid_fields.shape[2]
-    SHIFT = 1
-    K = 3
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-
-        ix = ti.round(gx, int)
-        iy = ti.round(gy, int)
-
-        dx = gx - ix
-        dy = gy - iy
-
-        wx = ti.Vector([0.5 * (0.5 - dx) ** 2, 0.75 - dx * dx, 0.5 * (0.5 + dx) ** 2])
-        wy = ti.Vector([0.5 * (0.5 - dy) ** 2, 0.75 - dy * dy, 0.5 * (0.5 + dy) ** 2])
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                w = wx[ox] * wy[oy] * w_particle
-                ti.atomic_add(grid_weights[x, y], w)
-                for f in range(F):
-                    ti.atomic_add(grid_fields[x, y, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _tsc_3d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    Nz = grid_weights.shape[2]
-    F = grid_fields.shape[3]
-    SHIFT = 1
-    K = 3
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-        gz = particle_positions[p, 2] * inv_dx[2] - 0.5
-
-        ix = ti.round(gx, int)
-        iy = ti.round(gy, int)
-        iz = ti.round(gz, int)
-
-        dx = gx - ix
-        dy = gy - iy
-        dz = gz - iz
-
-        wx = ti.Vector([0.5 * (0.5 - dx) ** 2, 0.75 - dx * dx, 0.5 * (0.5 + dx) ** 2])
-        wy = ti.Vector([0.5 * (0.5 - dy) ** 2, 0.75 - dy * dy, 0.5 * (0.5 + dy) ** 2])
-        wz = ti.Vector([0.5 * (0.5 - dz) ** 2, 0.75 - dz * dz, 0.5 * (0.5 + dz) ** 2])
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        oz_min, oz_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-            oz_min = ti.max(0, SHIFT - iz)
-            oz_max = ti.min(K - 1, SHIFT - iz + Nz - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                for oz in range(oz_min, oz_max + 1):
-                    z = iz + oz - SHIFT
-                    if ti.static(periodic):
-                        z = _apply_pbc(z, Nz)
-
-                    w = wx[ox] * wy[oy] * wz[oz] * w_particle
-                    ti.atomic_add(grid_weights[x, y, z], w)
-                    for f in range(F):
-                        ti.atomic_add(
-                            grid_fields[x, y, z, f], particle_fields[p, f] * w
-                        )
-
-
-# =============================================================================
-# BSPLINE4 (cubic B-spline, was "pcs")
-# =============================================================================
-@ti.kernel
-def _bspline4_1d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
-):
-    Nx = grid_weights.shape[0]
-    F = grid_fields.shape[1]
-    SHIFT = 1
-    K = 4
-
-    inv_dx = ti.Vector([Nx / boxsizes[0]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-
-        ix = ti.floor(gx, int)  # BUGFIX (c) -- was ti.round
-
-        dx = gx - ix
-
-        wx = ti.Vector(
-            [
-                (1.0 - dx) ** 3 / 6.0,
-                (4.0 - 6.0 * dx**2 + 3.0 * dx**3) / 6.0,
-                (1.0 + 3.0 * dx + 3.0 * dx**2 - 3.0 * dx**3) / 6.0,
-                dx**3 / 6.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            w = wx[ox] * w_particle
-            ti.atomic_add(grid_weights[x], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _bspline4_2d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    F = grid_fields.shape[2]
-    SHIFT = 1
-    K = 4
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-
-        ix = ti.floor(gx, int)  # BUGFIX (c) -- was ti.round
-        iy = ti.floor(gy, int)  # BUGFIX (c) -- was ti.round
-
-        dx = gx - ix
-        dy = gy - iy
-
-        wx = ti.Vector(
-            [
-                (1.0 - dx) ** 3 / 6.0,
-                (4.0 - 6.0 * dx**2 + 3.0 * dx**3) / 6.0,
-                (1.0 + 3.0 * dx + 3.0 * dx**2 - 3.0 * dx**3) / 6.0,
-                dx**3 / 6.0,
-            ]
-        )
-        wy = ti.Vector(
-            [
-                (1.0 - dy) ** 3 / 6.0,
-                (4.0 - 6.0 * dy**2 + 3.0 * dy**3) / 6.0,
-                (1.0 + 3.0 * dy + 3.0 * dy**2 - 3.0 * dy**3) / 6.0,
-                dy**3 / 6.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                w = wx[ox] * wy[oy] * w_particle
-                ti.atomic_add(grid_weights[x, y], w)
-                for f in range(F):
-                    ti.atomic_add(grid_fields[x, y, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _bspline4_3d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    Nz = grid_weights.shape[2]
-    F = grid_fields.shape[3]
-    SHIFT = 1
-    K = 4
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-        gz = particle_positions[p, 2] * inv_dx[2] - 0.5
-
-        ix = ti.floor(gx, int)  # BUGFIX (c) -- was ti.round
-        iy = ti.floor(gy, int)  # BUGFIX (c) -- was ti.round
-        iz = ti.floor(gz, int)  # BUGFIX (c) -- was ti.round
-
-        dx = gx - ix
-        dy = gy - iy
-        dz = gz - iz
-
-        wx = ti.Vector(
-            [
-                (1.0 - dx) ** 3 / 6.0,
-                (4.0 - 6.0 * dx**2 + 3.0 * dx**3) / 6.0,
-                (1.0 + 3.0 * dx + 3.0 * dx**2 - 3.0 * dx**3) / 6.0,
-                dx**3 / 6.0,
-            ]
-        )
-        wy = ti.Vector(
-            [
-                (1.0 - dy) ** 3 / 6.0,
-                (4.0 - 6.0 * dy**2 + 3.0 * dy**3) / 6.0,
-                (1.0 + 3.0 * dy + 3.0 * dy**2 - 3.0 * dy**3) / 6.0,
-                dy**3 / 6.0,
-            ]
-        )
-        wz = ti.Vector(
-            [
-                (1.0 - dz) ** 3 / 6.0,
-                (4.0 - 6.0 * dz**2 + 3.0 * dz**3) / 6.0,
-                (1.0 + 3.0 * dz + 3.0 * dz**2 - 3.0 * dz**3) / 6.0,
-                dz**3 / 6.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        oz_min, oz_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-            oz_min = ti.max(0, SHIFT - iz)
-            oz_max = ti.min(K - 1, SHIFT - iz + Nz - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                for oz in range(oz_min, oz_max + 1):
-                    z = iz + oz - SHIFT
-                    if ti.static(periodic):
-                        z = _apply_pbc(z, Nz)
-
-                    w = wx[ox] * wy[oy] * wz[oz] * w_particle
-                    ti.atomic_add(grid_weights[x, y, z], w)
-                    for f in range(F):
-                        ti.atomic_add(
-                            grid_fields[x, y, z, f], particle_fields[p, f] * w
-                        )
-
-
-# =============================================================================
-# BSPLINE5 (quartic B-spline, order-5, 5-point -- the correct textbook "PQS")
-# =============================================================================
-@ti.kernel
-def _bspline5_1d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
-):
-    Nx = grid_weights.shape[0]
-    F = grid_fields.shape[1]
-    SHIFT = 2
-    K = 5
-
-    inv_dx = ti.Vector([Nx / boxsizes[0]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        ix = ti.floor(gx + 0.5, int)
-        dx = gx - ix
-
-        wx = ti.Vector(
-            [
-                (1.0 - 2.0 * dx) ** 4 / 384.0,
-                (
-                    55.0
-                    + 20.0 * (1.0 + dx)
-                    - 120.0 * (1.0 + dx) ** 2
-                    + 80.0 * (1.0 + dx) ** 3
-                    - 16.0 * (1.0 + dx) ** 4
-                )
-                / 96.0,
-                115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
-                (
-                    55.0
-                    + 20.0 * (1.0 - dx)
-                    - 120.0 * (1.0 - dx) ** 2
-                    + 80.0 * (1.0 - dx) ** 3
-                    - 16.0 * (1.0 - dx) ** 4
-                )
-                / 96.0,
-                (1.0 + 2.0 * dx) ** 4 / 384.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            w = wx[ox] * w_particle
-            ti.atomic_add(grid_weights[x], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _bspline5_2d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    F = grid_fields.shape[2]
-    SHIFT = 2
-    K = 5
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-
-        ix = ti.floor(gx + 0.5, int)
-        iy = ti.floor(gy + 0.5, int)
-
-        dx = gx - ix
-        dy = gy - iy
-
-        wx = ti.Vector(
-            [
-                (1.0 - 2.0 * dx) ** 4 / 384.0,
-                (
-                    55.0
-                    + 20.0 * (1.0 + dx)
-                    - 120.0 * (1.0 + dx) ** 2
-                    + 80.0 * (1.0 + dx) ** 3
-                    - 16.0 * (1.0 + dx) ** 4
-                )
-                / 96.0,
-                115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
-                (
-                    55.0
-                    + 20.0 * (1.0 - dx)
-                    - 120.0 * (1.0 - dx) ** 2
-                    + 80.0 * (1.0 - dx) ** 3
-                    - 16.0 * (1.0 - dx) ** 4
-                )
-                / 96.0,
-                (1.0 + 2.0 * dx) ** 4 / 384.0,
-            ]
-        )
-        wy = ti.Vector(
-            [
-                (1.0 - 2.0 * dy) ** 4 / 384.0,
-                (
-                    55.0
-                    + 20.0 * (1.0 + dy)
-                    - 120.0 * (1.0 + dy) ** 2
-                    + 80.0 * (1.0 + dy) ** 3
-                    - 16.0 * (1.0 + dy) ** 4
-                )
-                / 96.0,
-                115.0 / 192.0 - (5.0 / 8.0) * dy**2 + (1.0 / 4.0) * dy**4,
-                (
-                    55.0
-                    + 20.0 * (1.0 - dy)
-                    - 120.0 * (1.0 - dy) ** 2
-                    + 80.0 * (1.0 - dy) ** 3
-                    - 16.0 * (1.0 - dy) ** 4
-                )
-                / 96.0,
-                (1.0 + 2.0 * dy) ** 4 / 384.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                w = wx[ox] * wy[oy] * w_particle
-                ti.atomic_add(grid_weights[x, y], w)
-                for f in range(F):
-                    ti.atomic_add(grid_fields[x, y, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _bspline5_3d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    Nz = grid_weights.shape[2]
-    F = grid_fields.shape[3]
-    SHIFT = 2
-    K = 5
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-        gz = particle_positions[p, 2] * inv_dx[2] - 0.5
-
-        ix = ti.floor(gx + 0.5, int)
-        iy = ti.floor(gy + 0.5, int)
-        iz = ti.floor(gz + 0.5, int)
-
-        dx = gx - ix
-        dy = gy - iy
-        dz = gz - iz
-
-        wx = ti.Vector(
-            [
-                (1.0 - 2.0 * dx) ** 4 / 384.0,
-                (
-                    55.0
-                    + 20.0 * (1.0 + dx)
-                    - 120.0 * (1.0 + dx) ** 2
-                    + 80.0 * (1.0 + dx) ** 3
-                    - 16.0 * (1.0 + dx) ** 4
-                )
-                / 96.0,
-                115.0 / 192.0 - (5.0 / 8.0) * dx**2 + (1.0 / 4.0) * dx**4,
-                (
-                    55.0
-                    + 20.0 * (1.0 - dx)
-                    - 120.0 * (1.0 - dx) ** 2
-                    + 80.0 * (1.0 - dx) ** 3
-                    - 16.0 * (1.0 - dx) ** 4
-                )
-                / 96.0,
-                (1.0 + 2.0 * dx) ** 4 / 384.0,
-            ]
-        )
-        wy = ti.Vector(
-            [
-                (1.0 - 2.0 * dy) ** 4 / 384.0,
-                (
-                    55.0
-                    + 20.0 * (1.0 + dy)
-                    - 120.0 * (1.0 + dy) ** 2
-                    + 80.0 * (1.0 + dy) ** 3
-                    - 16.0 * (1.0 + dy) ** 4
-                )
-                / 96.0,
-                115.0 / 192.0 - (5.0 / 8.0) * dy**2 + (1.0 / 4.0) * dy**4,
-                (
-                    55.0
-                    + 20.0 * (1.0 - dy)
-                    - 120.0 * (1.0 - dy) ** 2
-                    + 80.0 * (1.0 - dy) ** 3
-                    - 16.0 * (1.0 - dy) ** 4
-                )
-                / 96.0,
-                (1.0 + 2.0 * dy) ** 4 / 384.0,
-            ]
-        )
-        wz = ti.Vector(
-            [
-                (1.0 - 2.0 * dz) ** 4 / 384.0,
-                (
-                    55.0
-                    + 20.0 * (1.0 + dz)
-                    - 120.0 * (1.0 + dz) ** 2
-                    + 80.0 * (1.0 + dz) ** 3
-                    - 16.0 * (1.0 + dz) ** 4
-                )
-                / 96.0,
-                115.0 / 192.0 - (5.0 / 8.0) * dz**2 + (1.0 / 4.0) * dz**4,
-                (
-                    55.0
-                    + 20.0 * (1.0 - dz)
-                    - 120.0 * (1.0 - dz) ** 2
-                    + 80.0 * (1.0 - dz) ** 3
-                    - 16.0 * (1.0 - dz) ** 4
-                )
-                / 96.0,
-                (1.0 + 2.0 * dz) ** 4 / 384.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        oz_min, oz_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-            oz_min = ti.max(0, SHIFT - iz)
-            oz_max = ti.min(K - 1, SHIFT - iz + Nz - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                for oz in range(oz_min, oz_max + 1):
-                    z = iz + oz - SHIFT
-                    if ti.static(periodic):
-                        z = _apply_pbc(z, Nz)
-
-                    w = wx[ox] * wy[oy] * wz[oz] * w_particle
-                    ti.atomic_add(grid_weights[x, y, z], w)
-                    for f in range(F):
-                        ti.atomic_add(
-                            grid_fields[x, y, z, f], particle_fields[p, f] * w
-                        )
-
-
-# =============================================================================
-# BSPLINE6 (quintic B-spline, was "pqs" -- 6-point, order-6 math unchanged,
-# only renamed; the order-5 quartic that "pqs" was supposed to be lives in
-# BSPLINE5 above)
-# =============================================================================
-@ti.kernel
-def _bspline6_1d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (1,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nx,)
-):
-    Nx = grid_weights.shape[0]
-    F = grid_fields.shape[1]
-    SHIFT = 2  # BUGFIX (d) -- was 1
-    K = 6
-
-    inv_dx = ti.Vector([Nx / boxsizes[0]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        ix = ti.floor(gx, int)  # BUGFIX (c) -- was ti.round
-        dx = gx - ix
-
-        wx = ti.Vector(
-            [
-                (1.0 - dx) ** 5 / 120.0,
-                ((2.0 - dx) ** 5 - 6.0 * (1.0 - dx) ** 5) / 120.0,
-                ((3.0 - dx) ** 5 - 6.0 * (2.0 - dx) ** 5 + 15.0 * (1.0 - dx) ** 5)
-                / 120.0,
-                ((2.0 + dx) ** 5 - 6.0 * (1.0 + dx) ** 5 + 15.0 * dx**5) / 120.0,
-                ((1.0 + dx) ** 5 - 6.0 * dx**5) / 120.0,
-                dx**5 / 120.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            w = wx[ox] * w_particle
-            ti.atomic_add(grid_weights[x], w)
-            for f in range(F):
-                ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _bspline6_2d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (2,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nx, Ny)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    F = grid_fields.shape[2]
-    SHIFT = 2  # BUGFIX (d) -- was 1
-    K = 6
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-
-        ix = ti.floor(gx, int)  # BUGFIX (c) -- was ti.round
-        iy = ti.floor(gy, int)  # BUGFIX (c) -- was ti.round
-
-        dx = gx - ix
-        dy = gy - iy
-
-        wx = ti.Vector(
-            [
-                (1.0 - dx) ** 5 / 120.0,
-                ((2.0 - dx) ** 5 - 6.0 * (1.0 - dx) ** 5) / 120.0,
-                ((3.0 - dx) ** 5 - 6.0 * (2.0 - dx) ** 5 + 15.0 * (1.0 - dx) ** 5)
-                / 120.0,
-                ((2.0 + dx) ** 5 - 6.0 * (1.0 + dx) ** 5 + 15.0 * dx**5) / 120.0,
-                ((1.0 + dx) ** 5 - 6.0 * dx**5) / 120.0,
-                dx**5 / 120.0,
-            ]
-        )
-        wy = ti.Vector(
-            [
-                (1.0 - dy) ** 5 / 120.0,
-                ((2.0 - dy) ** 5 - 6.0 * (1.0 - dy) ** 5) / 120.0,
-                ((3.0 - dy) ** 5 - 6.0 * (2.0 - dy) ** 5 + 15.0 * (1.0 - dy) ** 5)
-                / 120.0,
-                ((2.0 + dy) ** 5 - 6.0 * (1.0 + dy) ** 5 + 15.0 * dy**5) / 120.0,
-                ((1.0 + dy) ** 5 - 6.0 * dy**5) / 120.0,
-                dy**5 / 120.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                w = wx[ox] * wy[oy] * w_particle
-                ti.atomic_add(grid_weights[x, y], w)
-                for f in range(F):
-                    ti.atomic_add(grid_fields[x, y, f], particle_fields[p, f] * w)
-
-
-@ti.kernel
-def _bspline6_3d(
-    periodic: ti.template(),
-    particle_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
-    particle_fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
-    particle_weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
-    boxsizes: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    grid_fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    grid_weights: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    Nx = grid_weights.shape[0]
-    Ny = grid_weights.shape[1]
-    Nz = grid_weights.shape[2]
-    F = grid_fields.shape[3]
-    SHIFT = 2  # BUGFIX (d) -- was 1
-    K = 6
-
-    inv_dx = ti.Vector([Nx / boxsizes[0], Ny / boxsizes[1], Nz / boxsizes[2]])
-
-    for p in range(particle_positions.shape[0]):
-        gx = particle_positions[p, 0] * inv_dx[0] - 0.5
-        gy = particle_positions[p, 1] * inv_dx[1] - 0.5
-        gz = particle_positions[p, 2] * inv_dx[2] - 0.5
-
-        ix = ti.floor(gx, int)  # BUGFIX (c) -- was ti.round
-        iy = ti.floor(gy, int)  # BUGFIX (c) -- was ti.round
-        iz = ti.floor(gz, int)  # BUGFIX (c) -- was ti.round
-
-        dx = gx - ix
-        dy = gy - iy
-        dz = gz - iz
-
-        wx = ti.Vector(
-            [
-                (1.0 - dx) ** 5 / 120.0,
-                ((2.0 - dx) ** 5 - 6.0 * (1.0 - dx) ** 5) / 120.0,
-                ((3.0 - dx) ** 5 - 6.0 * (2.0 - dx) ** 5 + 15.0 * (1.0 - dx) ** 5)
-                / 120.0,
-                ((2.0 + dx) ** 5 - 6.0 * (1.0 + dx) ** 5 + 15.0 * dx**5) / 120.0,
-                ((1.0 + dx) ** 5 - 6.0 * dx**5) / 120.0,
-                dx**5 / 120.0,
-            ]
-        )
-        wy = ti.Vector(
-            [  # BUGFIX (e) -- was built from dx
-                (1.0 - dy) ** 5 / 120.0,
-                ((2.0 - dy) ** 5 - 6.0 * (1.0 - dy) ** 5) / 120.0,
-                ((3.0 - dy) ** 5 - 6.0 * (2.0 - dy) ** 5 + 15.0 * (1.0 - dy) ** 5)
-                / 120.0,
-                ((2.0 + dy) ** 5 - 6.0 * (1.0 + dy) ** 5 + 15.0 * dy**5) / 120.0,
-                ((1.0 + dy) ** 5 - 6.0 * dy**5) / 120.0,
-                dy**5 / 120.0,
-            ]
-        )
-        wz = ti.Vector(
-            [  # BUGFIX (e) -- was built from dx
-                (1.0 - dz) ** 5 / 120.0,
-                ((2.0 - dz) ** 5 - 6.0 * (1.0 - dz) ** 5) / 120.0,
-                ((3.0 - dz) ** 5 - 6.0 * (2.0 - dz) ** 5 + 15.0 * (1.0 - dz) ** 5)
-                / 120.0,
-                ((2.0 + dz) ** 5 - 6.0 * (1.0 + dz) ** 5 + 15.0 * dz**5) / 120.0,
-                ((1.0 + dz) ** 5 - 6.0 * dz**5) / 120.0,
-                dz**5 / 120.0,
-            ]
-        )
-
-        ox_min, ox_max = 0, K - 1
-        oy_min, oy_max = 0, K - 1
-        oz_min, oz_max = 0, K - 1
-        if ti.static(not periodic):
-            ox_min = ti.max(0, SHIFT - ix)
-            ox_max = ti.min(K - 1, SHIFT - ix + Nx - 1)
-            oy_min = ti.max(0, SHIFT - iy)
-            oy_max = ti.min(K - 1, SHIFT - iy + Ny - 1)
-            oz_min = ti.max(0, SHIFT - iz)
-            oz_max = ti.min(K - 1, SHIFT - iz + Nz - 1)
-
-        w_particle = particle_weights[p]
-
-        for ox in range(ox_min, ox_max + 1):
-            x = ix + ox - SHIFT
-            if ti.static(periodic):
-                x = _apply_pbc(x, Nx)
-
-            for oy in range(oy_min, oy_max + 1):
-                y = iy + oy - SHIFT
-                if ti.static(periodic):
-                    y = _apply_pbc(y, Ny)
-
-                for oz in range(oz_min, oz_max + 1):
-                    z = iz + oz - SHIFT
-                    if ti.static(periodic):
-                        z = _apply_pbc(z, Nz)
-
-                    w = wx[ox] * wy[oy] * wz[oz] * w_particle
-                    ti.atomic_add(grid_weights[x, y, z], w)
-                    for f in range(F):
-                        ti.atomic_add(
-                            grid_fields[x, y, z, f], particle_fields[p, f] * w
-                        )
+                        i = _apply_pbc(i, N[d])
+                        ok[d, o] = 1
+                    else:
+                        ok[d, o] = 0 <= i < N[d]
+                    idx[d, o] = i
+                    wgt[d, o] = w1d[o]
+
+            w_particle = particle_weights[p]
+
+            if ti.static(dim == 1):
+                for ox in ti.static(range(K)):
+                    if ok[0, ox]:
+                        x = idx[0, ox]
+                        w = wgt[0, ox] * w_particle
+                        ti.atomic_add(grid_weights[x], w)
+                        for f in range(F):
+                            ti.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
+            elif ti.static(dim == 2):
+                for ox in ti.static(range(K)):
+                    for oy in ti.static(range(K)):
+                        if ok[0, ox] and ok[1, oy]:
+                            x, y = idx[0, ox], idx[1, oy]
+                            w = wgt[0, ox] * wgt[1, oy] * w_particle
+                            ti.atomic_add(grid_weights[x, y], w)
+                            for f in range(F):
+                                ti.atomic_add(
+                                    grid_fields[x, y, f], particle_fields[p, f] * w
+                                )
+            else:
+                for ox in ti.static(range(K)):
+                    for oy in ti.static(range(K)):
+                        for oz in ti.static(range(K)):
+                            if ok[0, ox] and ok[1, oy] and ok[2, oz]:
+                                x, y, z = idx[0, ox], idx[1, oy], idx[2, oz]
+                                w = wgt[0, ox] * wgt[1, oy] * wgt[2, oz] * w_particle
+                                ti.atomic_add(grid_weights[x, y, z], w)
+                                for f in range(F):
+                                    ti.atomic_add(
+                                        grid_fields[x, y, z, f],
+                                        particle_fields[p, f] * w,
+                                    )
+
+    return kernel
+
+
+_FIXED_GRID_KERNELS = {
+    (name, dim): _make_fixed_grid_kernel(dim, fn, K, SHIFT)
+    for name, (fn, K, SHIFT) in _FIXED_STENCILS.items()
+    for dim in (1, 2, 3)
+}
 
 
 # =============================================================================
@@ -1905,6 +911,7 @@ def _isotropic_1d(
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
+    B: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 1)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
     smoothing_lengths: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
@@ -1941,8 +948,33 @@ def _isotropic_1d(
 
         wj = particle_weights[n]
 
-        if eta < eta_crit:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples ---
+        i0 = ti.floor(x_cell - support_x_cell, int)
+        fits = ti.floor(x_cell + support_x_cell, int) - i0 < B
+
+        if eta < eta_crit and fits:
+            # --- anti-aliasing branch: deposit via precomputed kernel samples,
+            # summed per cell in a local buffer first (one atomic per touched
+            # cell instead of one per sample) ---
+            buf = ti.Vector.zero(ti.f32, B)
+            for s in range(num_samples):
+                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
+                li = ti.floor(x_sample * cellSize_x_inv, int) - i0
+                if 0 <= li < B:
+                    buf[li] += sample_integrals[s]
+
+            for a in range(B):
+                v = buf[a]
+                if v != 0.0:
+                    ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
+                    if ix_valid:
+                        w = wj * v
+                        ti.atomic_add(weights[ix], w)
+                        for f in range(F):
+                            ti.atomic_add(fields[ix, f], quantities[n, f] * w)
+
+        elif eta < eta_crit:
+            # --- same, direct per-sample deposition (particle too large for
+            # the local buffer) ---
             for s in range(num_samples):
                 x_sample = x_phys + sample_coords[s, 0] * hsm_phys
 
@@ -1960,8 +992,10 @@ def _isotropic_1d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            i_min = ti.floor(x_cell - support_x_cell, int)
-            i_max = ti.ceil(x_cell + support_x_cell, int)
+            # cell ceil(x + s) lies entirely outside the (compact) support,
+            # so the stencil stops one cell before it
+            i_min = i0
+            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
 
             if ti.static(not periodic):
                 i_min = ti.max(i_min, 0)
@@ -2017,6 +1051,7 @@ def _isotropic_2d(
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
+    B: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
     smoothing_lengths: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
@@ -2059,8 +1094,40 @@ def _isotropic_2d(
 
         wj = particle_weights[n]
 
-        if eta < eta_crit:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples ---
+        i0 = ti.floor(x_cell - support_x_cell, int)
+        j0 = ti.floor(y_cell - support_y_cell, int)
+        fits = (ti.floor(x_cell + support_x_cell, int) - i0 < B) and (
+            ti.floor(y_cell + support_y_cell, int) - j0 < B
+        )
+
+        if eta < eta_crit and fits:
+            # --- anti-aliasing branch: deposit via precomputed kernel samples,
+            # summed per cell in a local buffer first (one atomic per touched
+            # cell instead of one per sample) ---
+            buf = ti.Vector.zero(ti.f32, B * B)
+            for s in range(num_samples):
+                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
+                y_sample = y_phys + sample_coords[s, 1] * hsm_phys
+                li = ti.floor(x_sample * cellSize_x_inv, int) - i0
+                lj = ti.floor(y_sample * cellSize_y_inv, int) - j0
+                if 0 <= li < B and 0 <= lj < B:
+                    buf[li * B + lj] += sample_integrals[s]
+
+            for a in range(B):
+                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
+                for b in range(B):
+                    v = buf[a * B + b]
+                    if v != 0.0:
+                        iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
+                        if ix_valid and iy_valid:
+                            w = wj * v
+                            ti.atomic_add(weights[ix, iy], w)
+                            for f in range(F):
+                                ti.atomic_add(fields[ix, iy, f], quantities[n, f] * w)
+
+        elif eta < eta_crit:
+            # --- same, direct per-sample deposition (particle too large for
+            # the local buffer) ---
             for s in range(num_samples):
                 x_sample = x_phys + sample_coords[s, 0] * hsm_phys
                 y_sample = y_phys + sample_coords[s, 1] * hsm_phys
@@ -2082,10 +1149,12 @@ def _isotropic_2d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            i_min = ti.floor(x_cell - support_x_cell, int)
-            i_max = ti.ceil(x_cell + support_x_cell, int)
-            j_min = ti.floor(y_cell - support_y_cell, int)
-            j_max = ti.ceil(y_cell + support_y_cell, int)
+            # cell ceil(x + s) lies entirely outside the (compact) support,
+            # so the stencil stops one cell before it
+            i_min = i0
+            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
+            j_min = j0
+            j_max = ti.ceil(y_cell + support_y_cell, int) - 1
 
             if ti.static(not periodic):
                 i_min = ti.max(i_min, 0)
@@ -2155,6 +1224,7 @@ def _isotropic_3d(
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
+    B: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
     smoothing_lengths: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (N,)
@@ -2204,8 +1274,49 @@ def _isotropic_3d(
         )  # diameter convention
         wj = particle_weights[n]
 
-        if eta < eta_crit:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples ---
+        i0 = ti.floor(x_cell - support_x_cell, int)
+        j0 = ti.floor(y_cell - support_y_cell, int)
+        k0 = ti.floor(z_cell - support_z_cell, int)
+        fits = (
+            (ti.floor(x_cell + support_x_cell, int) - i0 < B)
+            and (ti.floor(y_cell + support_y_cell, int) - j0 < B)
+            and (ti.floor(z_cell + support_z_cell, int) - k0 < B)
+        )
+
+        if eta < eta_crit and fits:
+            # --- anti-aliasing branch: deposit via precomputed kernel samples,
+            # summed per cell in a local buffer first (one atomic per touched
+            # cell instead of one per sample) ---
+            buf = ti.Vector.zero(ti.f32, B * B * B)
+            for s in range(num_samples):
+                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
+                y_sample = y_phys + sample_coords[s, 1] * hsm_phys
+                z_sample = z_phys + sample_coords[s, 2] * hsm_phys
+                li = ti.floor(x_sample * cellSize_x_inv, int) - i0
+                lj = ti.floor(y_sample * cellSize_y_inv, int) - j0
+                lk = ti.floor(z_sample * cellSize_z_inv, int) - k0
+                if 0 <= li < B and 0 <= lj < B and 0 <= lk < B:
+                    buf[(li * B + lj) * B + lk] += sample_integrals[s]
+
+            for a in range(B):
+                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
+                for b in range(B):
+                    iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
+                    for c in range(B):
+                        v = buf[(a * B + b) * B + c]
+                        if v != 0.0:
+                            iz, iz_valid = _cell_index_from_int(k0 + c, Nz, periodic)
+                            if ix_valid and iy_valid and iz_valid:
+                                w = wj * v
+                                ti.atomic_add(weights[ix, iy, iz], w)
+                                for f in range(F):
+                                    ti.atomic_add(
+                                        fields[ix, iy, iz, f], quantities[n, f] * w
+                                    )
+
+        elif eta < eta_crit:
+            # --- same, direct per-sample deposition (particle too large for
+            # the local buffer) ---
             for s in range(num_samples):
                 x_sample = x_phys + sample_coords[s, 0] * hsm_phys
                 y_sample = y_phys + sample_coords[s, 1] * hsm_phys
@@ -2231,12 +1342,14 @@ def _isotropic_3d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            i_min = ti.floor(x_cell - support_x_cell, int)
-            i_max = ti.ceil(x_cell + support_x_cell, int)
-            j_min = ti.floor(y_cell - support_y_cell, int)
-            j_max = ti.ceil(y_cell + support_y_cell, int)
-            k_min = ti.floor(z_cell - support_z_cell, int)
-            k_max = ti.ceil(z_cell + support_z_cell, int)
+            # cell ceil(x + s) lies entirely outside the (compact) support,
+            # so the stencil stops one cell before it
+            i_min = i0
+            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
+            j_min = j0
+            j_max = ti.ceil(y_cell + support_y_cell, int) - 1
+            k_min = k0
+            k_max = ti.ceil(z_cell + support_z_cell, int) - 1
 
             if ti.static(not periodic):
                 i_min = ti.max(i_min, 0)
@@ -2325,6 +1438,7 @@ def _covariant_1d(
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
+    B: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N,1)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N,F)
     hmat_eigvecs: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N,1)
@@ -2364,7 +1478,30 @@ def _covariant_1d(
         eta = 2.0 * support_x_cell  # diameter convention
         wj = particle_weights[n]
 
-        if eta < eta_crit:
+        i0 = ti.floor(x_cell - support_x_cell, int)
+        fits = ti.floor(x_cell + support_x_cell, int) - i0 < B
+
+        if eta < eta_crit and fits:
+            # sample deposition summed per cell in a local buffer first (one
+            # atomic per touched cell instead of one per sample)
+            buf = ti.Vector.zero(ti.f32, B)
+            for s in range(num_samples):
+                x_sample = x_phys + e0 * (eval0 * sample_coords[s, 0])
+                li = ti.floor(x_sample * cellSize_x_inv, int) - i0
+                if 0 <= li < B:
+                    buf[li] += sample_integrals[s]
+
+            for a in range(B):
+                v = buf[a]
+                if v != 0.0:
+                    ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
+                    if ix_valid:
+                        w = wj * v
+                        ti.atomic_add(weights[ix], w)
+                        for f in range(F):
+                            ti.atomic_add(fields[ix, f], quantities[n, f] * w)
+
+        elif eta < eta_crit:
 
             for s in range(num_samples):
 
@@ -2396,8 +1533,9 @@ def _covariant_1d(
             detH = eval0
             kernel_prefactor = sig / detH
 
-            i_min = ti.floor(x_cell - support_x_cell, int)
-            i_max = ti.ceil(x_cell + support_x_cell, int)
+            # cell ceil(x + s) lies entirely outside the (compact) support
+            i_min = i0
+            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
 
             if ti.static(not periodic):
                 i_min = ti.max(i_min, 0)
@@ -2463,6 +1601,7 @@ def _covariant_2d(
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
+    B: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N,2)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N,F)
     hmat_eigvecs: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N,4) column-major
@@ -2528,7 +1667,44 @@ def _covariant_2d(
 
         wj = particle_weights[n]
 
-        if eta < eta_crit or degenerate:
+        x_cell = x_phys * cellSize_x_inv
+        y_cell = y_phys * cellSize_y_inv
+        i0 = ti.floor(x_cell - support_x_cell, int)
+        j0 = ti.floor(y_cell - support_y_cell, int)
+        fits = (ti.floor(x_cell + support_x_cell, int) - i0 < B) and (
+            ti.floor(y_cell + support_y_cell, int) - j0 < B
+        )
+        use_samples = eta < eta_crit or degenerate
+
+        if use_samples and fits:
+            # sample deposition summed per cell in a local buffer first (one
+            # atomic per touched cell instead of one per sample)
+            buf = ti.Vector.zero(ti.f32, B * B)
+            for s in range(num_samples):
+                cx = sample_coords[s, 0]
+                cy = sample_coords[s, 1]
+
+                x_sample = x_phys + e0x * (eval0 * cx) + e1x * (eval1 * cy)
+                y_sample = y_phys + e0y * (eval0 * cx) + e1y * (eval1 * cy)
+
+                li = ti.floor(x_sample * cellSize_x_inv, int) - i0
+                lj = ti.floor(y_sample * cellSize_y_inv, int) - j0
+                if 0 <= li < B and 0 <= lj < B:
+                    buf[li * B + lj] += sample_integrals[s]
+
+            for a in range(B):
+                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
+                for b in range(B):
+                    v = buf[a * B + b]
+                    if v != 0.0:
+                        iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
+                        if ix_valid and iy_valid:
+                            w = wj * v
+                            ti.atomic_add(weights[ix, iy], w)
+                            for f in range(F):
+                                ti.atomic_add(fields[ix, iy, f], quantities[n, f] * w)
+
+        elif use_samples:
 
             for s in range(num_samples):
 
@@ -2559,17 +1735,15 @@ def _covariant_2d(
 
         else:
 
-            x_cell = x_phys * cellSize_x_inv
-            y_cell = y_phys * cellSize_y_inv
-
             detH = eval0 * eval1
             kernel_prefactor = sig / detH
 
-            i_min = ti.floor(x_cell - support_x_cell, int)
-            i_max = ti.ceil(x_cell + support_x_cell, int)
+            # cell ceil(x + s) lies entirely outside the (compact) support
+            i_min = i0
+            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
 
-            j_min = ti.floor(y_cell - support_y_cell, int)
-            j_max = ti.ceil(y_cell + support_y_cell, int)
+            j_min = j0
+            j_max = ti.ceil(y_cell + support_y_cell, int) - 1
 
             if ti.static(not periodic):
                 i_min = ti.max(i_min, 0)
@@ -2658,6 +1832,7 @@ def _covariant_3d(
     quad_points: ti.template(),
     periodic: ti.template(),
     eta_crit: ti.f32,
+    B: ti.template(),
     positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 3)
     quantities: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
     hmat_eigvecs: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 9) column-major
@@ -2741,8 +1916,75 @@ def _covariant_3d(
         degenerate = eval0 <= 0.0 or eval1 <= 0.0 or eval2 <= 0.0
         wj = particle_weights[n]
 
-        if eta < eta_crit or degenerate:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples ---
+        x_cell = x_phys * cellSize_x_inv
+        y_cell = y_phys * cellSize_y_inv
+        z_cell = z_phys * cellSize_z_inv
+        i0 = ti.floor(x_cell - support_x_cell, int)
+        j0 = ti.floor(y_cell - support_y_cell, int)
+        k0 = ti.floor(z_cell - support_z_cell, int)
+        fits = (
+            (ti.floor(x_cell + support_x_cell, int) - i0 < B)
+            and (ti.floor(y_cell + support_y_cell, int) - j0 < B)
+            and (ti.floor(z_cell + support_z_cell, int) - k0 < B)
+        )
+        use_samples = eta < eta_crit or degenerate
+
+        if use_samples and fits:
+            # --- anti-aliasing branch: deposit via precomputed kernel samples,
+            # summed per cell in a local buffer first (one atomic per touched
+            # cell instead of one per sample) ---
+            buf = ti.Vector.zero(ti.f32, B * B * B)
+            for s in range(num_samples):
+                cx = sample_coords[s, 0]
+                cy = sample_coords[s, 1]
+                cz = sample_coords[s, 2]
+
+                # map the isotropic unit-sphere sample into the
+                # particle's physical ellipsoid: R diag(evals) c
+                x_sample = (
+                    x_phys
+                    + e0x * (eval0 * cx)
+                    + e1x * (eval1 * cy)
+                    + e2x * (eval2 * cz)
+                )
+                y_sample = (
+                    y_phys
+                    + e0y * (eval0 * cx)
+                    + e1y * (eval1 * cy)
+                    + e2y * (eval2 * cz)
+                )
+                z_sample = (
+                    z_phys
+                    + e0z * (eval0 * cx)
+                    + e1z * (eval1 * cy)
+                    + e2z * (eval2 * cz)
+                )
+
+                li = ti.floor(x_sample * cellSize_x_inv, int) - i0
+                lj = ti.floor(y_sample * cellSize_y_inv, int) - j0
+                lk = ti.floor(z_sample * cellSize_z_inv, int) - k0
+                if 0 <= li < B and 0 <= lj < B and 0 <= lk < B:
+                    buf[(li * B + lj) * B + lk] += sample_integrals[s]
+
+            for a in range(B):
+                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
+                for b in range(B):
+                    iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
+                    for c in range(B):
+                        v = buf[(a * B + b) * B + c]
+                        if v != 0.0:
+                            iz, iz_valid = _cell_index_from_int(k0 + c, Nz, periodic)
+                            if ix_valid and iy_valid and iz_valid:
+                                w = wj * v
+                                ti.atomic_add(weights[ix, iy, iz], w)
+                                for f in range(F):
+                                    ti.atomic_add(
+                                        fields[ix, iy, iz, f], quantities[n, f] * w
+                                    )
+
+        elif use_samples:
+            # --- same, direct per-sample deposition (particle too large for
+            # the local buffer) ---
             for s in range(num_samples):
                 cx = sample_coords[s, 0]
                 cy = sample_coords[s, 1]
@@ -2789,19 +2031,17 @@ def _covariant_3d(
 
         else:
             # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            x_cell = x_phys * cellSize_x_inv
-            y_cell = y_phys * cellSize_y_inv
-            z_cell = z_phys * cellSize_z_inv
-
             detH = eval0 * eval1 * eval2
             kernel_prefactor = sig / detH
 
-            i_min = ti.floor(x_cell - support_x_cell, int)
-            i_max = ti.ceil(x_cell + support_x_cell, int)
-            j_min = ti.floor(y_cell - support_y_cell, int)
-            j_max = ti.ceil(y_cell + support_y_cell, int)
-            k_min = ti.floor(z_cell - support_z_cell, int)
-            k_max = ti.ceil(z_cell + support_z_cell, int)
+            # cell ceil(x + s) lies entirely outside the (compact) support,
+            # so the stencil stops one cell before it
+            i_min = i0
+            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
+            j_min = j0
+            j_max = ti.ceil(y_cell + support_y_cell, int) - 1
+            k_min = k0
+            k_max = ti.ceil(z_cell + support_z_cell, int) - 1
 
             if ti.static(not periodic):
                 i_min = ti.max(i_min, 0)
@@ -2906,26 +2146,7 @@ def _covariant_3d(
 # ||                                                                         ||
 # =============================================================================
 _KERNELS = {
-    False: {  # static (fixed-stencil) methods
-        ("ngp", 1): _ngp_1d,
-        ("ngp", 2): _ngp_2d,
-        ("ngp", 3): _ngp_3d,
-        ("cic", 1): _cic_1d,
-        ("cic", 2): _cic_2d,
-        ("cic", 3): _cic_3d,
-        ("tsc", 1): _tsc_1d,
-        ("tsc", 2): _tsc_2d,
-        ("tsc", 3): _tsc_3d,
-        ("bspline4", 1): _bspline4_1d,
-        ("bspline4", 2): _bspline4_2d,
-        ("bspline4", 3): _bspline4_3d,
-        ("bspline5", 1): _bspline5_1d,
-        ("bspline5", 2): _bspline5_2d,
-        ("bspline5", 3): _bspline5_3d,
-        ("bspline6", 1): _bspline6_1d,
-        ("bspline6", 2): _bspline6_2d,
-        ("bspline6", 3): _bspline6_3d,
-    },
+    False: _FIXED_GRID_KERNELS,  # static (fixed-stencil) methods
     True: {  # adaptive (smoothing-length-dependent) methods
         ("separable", 1): _separable_1d,
         ("separable", 2): _separable_2d,
@@ -2978,6 +2199,7 @@ class KernelPreparation:
     max_stencil: int | None = None  # separable only
     num_samples: int | None = None  # isotropic / covariant only
     eta_crit: float | None = None  # isotropic / covariant only
+    sample_buffer: int | None = None  # isotropic / covariant only
 
 
 def _prepare_separable(
@@ -3082,6 +2304,7 @@ def _prepare_isotropic(
     quad_points = quad_table[integration_method]
 
     grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
+    sample_buffer = _sample_buffer_size(eta_crit, DIM)
     sample_coords, sample_integrals, num_samples = (
         grid["coords"],
         grid["integrals"],
@@ -3105,6 +2328,7 @@ def _prepare_isotropic(
         quad_points,
         bool(periodic),
         float(eta_crit),
+        sample_buffer,
         particle_positions,
         particle_fields,
         particle_hsml,
@@ -3133,6 +2357,7 @@ def _prepare_isotropic(
         max_support=float(max_support),
         num_samples=int(num_samples),
         eta_crit=float(eta_crit),
+        sample_buffer=int(sample_buffer),
     )
 
 
@@ -3179,6 +2404,7 @@ def _prepare_covariant(
     quad_points = quad_table[integration_method]
 
     grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
+    sample_buffer = _sample_buffer_size(eta_crit, DIM)
     sample_coords, sample_integrals, num_samples = (
         grid["coords"],
         grid["integrals"],
@@ -3202,6 +2428,7 @@ def _prepare_covariant(
         quad_points,
         bool(periodic),
         float(eta_crit),
+        sample_buffer,
         particle_positions,
         particle_fields,
         particle_hmat_eigvecs,
@@ -3231,6 +2458,7 @@ def _prepare_covariant(
         max_support=float(max_support),
         num_samples=int(num_samples),
         eta_crit=float(eta_crit),
+        sample_buffer=int(sample_buffer),
     )
 
 

@@ -629,7 +629,9 @@ class PointCloud:
         return num_neighbors
 
     def _resolve_fields(
-        self, fields: npt.ArrayLike | str | list[str]
+        self,
+        fields: npt.ArrayLike | str | list[str],
+        dtype: npt.DTypeLike | None = None,
     ) -> tuple[npt.NDArray[np.floating], list[int]]:
         """Resolve fields to a single array and return component counts.
 
@@ -637,6 +639,8 @@ class PointCloud:
         sized already). A field given directly as an array is *not*
         decomposed for the caller -- it must already be this rank's local
         slice (same convention `self.positions` uses), not a full-N array.
+        If `dtype` is given, the result is a C-contiguous array of that
+        dtype, built with a single copy (no extra cast afterwards).
         """
         if isinstance(fields, (str, np.ndarray)):
             fields = [fields]
@@ -658,7 +662,9 @@ class PointCloud:
         for i, arr in enumerate(arrays):
             self._check_shape(arr, f"field {i}")
 
-        return np.concatenate(arrays, axis=-1), field_sizes
+        if dtype is not None and len(arrays) == 1:
+            return np.ascontiguousarray(arrays[0], dtype=dtype), field_sizes
+        return np.concatenate(arrays, axis=-1, dtype=dtype), field_sizes
 
     def _resolve_deposition_options(
         self,
@@ -1569,7 +1575,7 @@ class PointCloud:
 
     def deposit(
         self,
-        fields: npt.ArrayLike | str | list[str],
+        fields: npt.ArrayLike | str | list[str] | None,
         averaged: bool | Sequence[bool],
         gridnums: int | Sequence[int],
         extent: Sequence[Sequence[float]] | None = None,
@@ -1590,8 +1596,10 @@ class PointCloud:
 
         Parameters
         ----------
-        fields : Union[npt.ArrayLike, str, List[str]]
-            Field data to deposit.
+        fields : Union[npt.ArrayLike, str, List[str], None]
+            Field data to deposit. ``None`` deposits only the particle
+            weights (mass assignment) and returns just the weights grid;
+            ``averaged`` must then be False.
         averaged : Union[bool, Sequence[bool]]
             Whether to divide the result by weights for each field component.
         gridnums : Union[int, Sequence[int]]
@@ -1631,23 +1639,27 @@ class PointCloud:
             `return_weights=True`).
         root : int, default 0
             Destination rank when `gather_to_root=True`; unused otherwise.
-        backend : {"numpy", "taichi"}, optional
-            Backend used for this deposition. Defaults to the PointCloud backend.
-        accelerator : str, optional
-            Accelerator for the Taichi backend. Defaults to GPU when None.
-        omp_threads : int, optional
-            Number of CPU threads when using Taichi CPU execution.
 
         Returns
         -------
         Union[npt.NDArray[np.floating], tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]]
-            Deposited field grid, and optionally the weights grid.
+            Deposited field grid, and optionally the weights grid. With
+            ``fields=None`` only the weights grid is deposited and returned.
 
         """
         kernel_name_temp, structure_temp = self._resolve_deposition_options(
             adaptive, kernel_name, structure
         )
-        fields, fields_sizes = self._resolve_fields(fields)
+        # fields=None: mass-only deposition (weights grid only, F=0 -- every
+        # backend kernel already skips its per-field loop for F=0).
+        weights_only = fields is None
+        if weights_only:
+            if np.any(averaged):
+                raise ValueError("'averaged' must be False when fields=None")
+            fields = np.empty((self.decomposition.local_positions.shape[0], 0), np.float32)
+            fields_sizes = []
+        else:
+            fields, fields_sizes = self._resolve_fields(fields, dtype=np.float32)
         averaged = self._resolve_averaged(averaged, fields_sizes)
 
         # construct the mask of particles falling into extent
@@ -1676,13 +1688,26 @@ class PointCloud:
         # was last called at particle positions (not query_positions) --
         # matching this method's own long-standing "use the instance's
         # smoothing data" contract.
+        #
+        # With extent=None every particle is selected: the box is periodic
+        # and __init__ already wrapped positions into [0, boxsize), so the
+        # mask would be all-True. slice(None) then turns every gather below
+        # (and in _prepare_deposition_smoothing) into a free view instead of
+        # a full copy -- these copies used to dominate fixed-grid runtimes.
         local_positions = self.decomposition.local_positions
-        mask = np.all(
-            (local_positions >= domain_min) & (local_positions <= domain_max),
-            axis=1,
-        )
-        idx_local = np.flatnonzero(mask)
-        pos_temp = local_positions[idx_local] - domain_min
+        if extent is None:
+            idx_local = slice(None)
+        else:
+            # column-wise: np.all(..., axis=1) over a length-D axis is
+            # pathologically slow in numpy
+            mask = np.ones(local_positions.shape[0], dtype=bool)
+            for d in range(self.dim):
+                col = local_positions[:, d]
+                mask &= (col >= domain_min[d]) & (col <= domain_max[d])
+            idx_local = slice(None) if mask.all() else np.flatnonzero(mask)
+        pos_temp = local_positions[idx_local]
+        if np.any(domain_min != 0):
+            pos_temp = pos_temp - domain_min
         weights_temp = self.decomposition.local_weights[idx_local]
         # fields is already this rank's local slice (add_fields() decomposes
         # fields the same way positions/weights are), so only idx_local's
@@ -1776,6 +1801,9 @@ class PointCloud:
                 backend=self.backend,
                 **deposit_kwargs,
             )
+
+        if weights_only:
+            return weights_grid
 
         if fields_grid is not None:
             for i, avg in enumerate(averaged):

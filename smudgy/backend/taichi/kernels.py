@@ -31,6 +31,7 @@ away there, so they're left as ordinary `if`/`elif`/`else` inside the funcs.
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from math import pi
 
 import numpy as np
@@ -1472,7 +1473,24 @@ def build_kernel_sample_grid(
         - "integrals": np.ndarray (count,), normalized kernel mass
           contribution of each sample (sums to ~1.0 over the full table)
 
+        The arrays are cached across calls (the table depends only on the
+        arguments) and therefore read-only.
+
     """
+    return dict(
+        _build_kernel_sample_grid_cached(
+            kernel_name, int(dim), float(eta_crit), float(nyquist_factor)
+        )
+    )
+
+
+@lru_cache(maxsize=64)
+def _build_kernel_sample_grid_cached(
+    kernel_name: str,
+    dim: int,
+    eta_crit: float,
+    nyquist_factor: float,
+):
     if eta_crit < 0:
         raise ValueError("eta_crit must be >= 0")
     if dim not in (1, 2, 3):
@@ -1565,6 +1583,8 @@ def build_kernel_sample_grid(
             integrals,
         )
 
+    for arr in (coords, q, integrals):
+        arr.flags.writeable = False
     return {
         "dim": dim,
         "count": count,
