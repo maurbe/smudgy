@@ -54,18 +54,15 @@ def fake_backend(monkeypatch):
             tensors = np.tile(np.eye(dim, dtype=np.float32), (n, 1, 1))
             eigvals = np.ones((n, dim), dtype=np.float32)
             eigvecs = np.tile(np.eye(dim, dtype=np.float32), (n, 1, 1))
-            nn_dists_vec = np.zeros(
-                (n, kwargs["neighbor_positions"].shape[1], dim), dtype=np.float32
-            )
-            return tensors, eigvals, eigvecs, nn_dists_vec
+            return tensors, eigvals, eigvecs
         if name == "compute_density":
-            n = kwargs["neighbor_weights"].shape[0]
+            n = kwargs["nn_inds"].shape[0]
             return np.ones(n, dtype=np.float32)
         if name == "interpolate":
             fields = kwargs["fields"]
             mode = kwargs["mode"]
-            m = fields.shape[0]
-            num_fields = fields.shape[-1]
+            m = kwargs["nn_inds"].shape[0]
+            num_fields = fields.shape[1]
             if mode == "field":
                 return np.ones((m, num_fields), dtype=np.float32)
             if mode == "gradient":

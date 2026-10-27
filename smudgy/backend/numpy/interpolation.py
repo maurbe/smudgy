@@ -1,6 +1,16 @@
 import numpy as np
 
+from ..neighbors import coordinate_difference_with_pbc
 from .kernels import get_kernel, prepare_kernel_inputs
+
+
+def _gather_rel_coords(query_positions, positions, nn_inds, boxsize):
+    """r_ij = x_i - x_j for every (query, neighbor) pair, shape (N, K, D)."""
+    return coordinate_difference_with_pbc(
+        np.asarray(query_positions)[:, np.newaxis, :],
+        np.asarray(positions)[nn_inds],
+        boxsize,
+    )
 
 
 # =============================================================================
@@ -10,12 +20,19 @@ def density(
     *,
     kernel_name,
     dim,
-    neighbor_weights,
-    r_ij,
+    query_positions,
+    positions,
+    weights,
+    nn_inds,
     h,
+    boxsize,
     structure,
 ):
-    """Compute SPH density using isotropic or covariant smoothing."""
+    """Compute SPH density using isotropic or covariant smoothing.
+
+    `positions`/`weights` are per-particle arrays that `nn_inds` (N, K)
+    indexes into; `h` is the smoothing length/tensor of each query.
+    """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
 
@@ -23,6 +40,8 @@ def density(
         kernel_name,
         dim=dim,
     )
+    r_ij = _gather_rel_coords(query_positions, positions, nn_inds, boxsize)
+    neighbor_weights = np.asarray(weights)[nn_inds]
 
     q, _, scale = prepare_kernel_inputs(
         kernel=kernel,
@@ -46,20 +65,31 @@ def interpolate(
     *,
     kernel_name,
     dim,
-    fields,
+    query_positions,
+    positions,
     weights,
-    r_ij,
+    nn_inds,
+    fields,
     h,
+    boxsize,
     mode,
     structure,
 ):
-    """Interpolate fields using isotropic or covariant smoothing."""
+    """Interpolate fields using isotropic or covariant smoothing.
+
+    `positions`, `weights` (m_j / rho_j), `fields` and `h` are per-particle
+    arrays that `nn_inds` (N, K) indexes into.
+    """
     if structure == "separable":
         raise ValueError(
             "structure='separable' is not supported for particle interpolation."
         )
 
     kernel = get_kernel(kernel_name, dim=dim)
+    r_ij = _gather_rel_coords(query_positions, positions, nn_inds, boxsize)
+    fields = np.asarray(fields)[nn_inds]
+    weights = np.asarray(weights)[nn_inds]
+    h = np.asarray(h)[nn_inds]
 
     q, grad_q, scale = prepare_kernel_inputs(
         kernel=kernel,

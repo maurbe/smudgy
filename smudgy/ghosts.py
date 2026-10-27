@@ -69,7 +69,8 @@ class GhostInfo:
         Original pre-decomposition row index of each ghost, shape (n_ghost,)
         int64 (== source rank's `local_global_indices[ghost_source_local_index]`).
     nn_inds : np.ndarray
-        Shape (n_target, k) int64, where n_target is n_local unless
+        Shape (n_target, k) int32 (int64 if the combined array has >= 2**31
+        rows), where n_target is n_local unless
         `exchange_ghosts` was called with an explicit `target_positions`
         (Step 4b: solving K-NN for an arbitrary point set, e.g. routed
         interpolation query positions, instead of this rank's own particles),
@@ -81,7 +82,7 @@ class GhostInfo:
         arrays directly; a value >= n_local indexes `ghost_*` at row
         (value - n_local).
     nn_dists : np.ndarray
-        Shape (n_target, k) float (see `nn_inds`).
+        Shape (n_target, k) float32 (see `nn_inds`).
     radius : float
         This rank's final converged padding radius.
     n_local : int
@@ -253,6 +254,45 @@ def _select_ghosts_to_send(
     )
 
 
+def _query_k(tree, points, k, chunk_size=1 << 20):
+    """K-NN of `points` as (n, k) float32 distances / int32 indices.
+
+    Queried in chunks so scipy's float64/int64 output (2x the size) only ever
+    exists for one chunk at a time. Indices are int64 only if the tree has
+    >= 2**31 points.
+    """
+    n = points.shape[0]
+    idx_dtype = np.int32 if tree.n < np.iinfo(np.int32).max else np.int64
+    nn_dists = np.empty((n, k), dtype=np.float32)
+    nn_inds = np.empty((n, k), dtype=idx_dtype)
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        d, i = query_kdtree(tree, points[start:stop], k=k)
+        nn_dists[start:stop] = d.reshape(-1, k)
+        nn_inds[start:stop] = i.reshape(-1, k)
+    return nn_dists, nn_inds
+
+
+def _remap_ghost_indices(nn_inds, n_local, old_ghost_gidx, new_ghost_gidx):
+    """Translate combined [local, ghost] indices from one ghost set to another.
+
+    Local rows (< n_local) are unchanged; ghost rows are matched by global
+    index. Every old ghost referenced must be present in the new set (true
+    for exchange_ghosts' growing-radius rounds), otherwise this raises.
+    """
+    nn_inds = nn_inds.copy()
+    is_ghost = nn_inds >= n_local
+    gid = old_ghost_gidx[nn_inds[is_ghost] - n_local]
+    order = np.argsort(new_ghost_gidx, kind="stable")
+    sorted_gidx = new_ghost_gidx[order]
+    pos = np.searchsorted(sorted_gidx, gid)
+    pos = np.minimum(pos, max(len(sorted_gidx) - 1, 0))
+    if gid.size and not np.array_equal(sorted_gidx[pos], gid):
+        raise RuntimeError("ghost set shrank between exchange rounds")
+    nn_inds[is_ghost] = order[pos] + n_local
+    return nn_inds
+
+
 def exchange_ghosts(
     comm: MPI.Comm,
     decomposition: DecompositionInfo,
@@ -363,7 +403,7 @@ def exchange_ghosts(
     )
 
     converged_mask = np.zeros(0, dtype=bool)
-    nn_inds = nn_dists = None
+    nn_inds = nn_dists = prev_ghost_gidx = None
     recv_positions = recv_weights = recv_source_rank = None
     recv_local_idx = recv_global_idx = None
 
@@ -410,17 +450,40 @@ def exchange_ghosts(
             # that could be returned as someone's neighbor).
             combined_positions = np.concatenate([wrapped_local, recv_positions], axis=0)
             tree = build_kdtree(combined_positions, boxsize=boxsize_arr if periodic else None)
-            nn_dists, nn_inds = query_kdtree(tree, wrapped_target, k=num_neighbors)
-            if num_neighbors == 1:
-                nn_dists = nn_dists.reshape(-1, 1)
-                nn_inds = nn_inds.reshape(-1, 1)
+            if nn_inds is None:
+                nn_dists, nn_inds = _query_k(tree, wrapped_target, num_neighbors)
+            else:
+                # Targets converged in an earlier round keep their (exact)
+                # neighbors: the radius only grows, so this round's ghost set
+                # is a superset of the one they were solved against -- only
+                # their ghost indices need remapping into the new combined
+                # array. Only the unconverged targets are re-queried.
+                nn_inds[converged_mask] = _remap_ghost_indices(
+                    nn_inds[converged_mask], n_local, prev_ghost_gidx, recv_global_idx
+                )
+                todo = np.flatnonzero(~converged_mask)
+                if todo.size:
+                    new_dists, new_inds = _query_k(
+                        tree, wrapped_target[todo], num_neighbors
+                    )
+                    nn_inds = nn_inds.astype(new_inds.dtype, copy=False)
+                    nn_dists[todo], nn_inds[todo] = new_dists, new_inds
+            prev_ghost_gidx = recv_global_idx
             d_k = nn_dists[:, -1]
             finite = np.isfinite(d_k)
-            converged_mask = finite & (d_k <= radius)
+            if size == 1:
+                # no other rank to import ghosts from: the local query is
+                # already the exact K-NN (it can't be infinite either, since
+                # total_n >= num_neighbors was checked above)
+                converged_mask = finite
+            else:
+                # margin: d_k is float32-rounded, so a d_k a hair beyond the
+                # radius could otherwise round down onto it
+                converged_mask = finite & (d_k <= radius * (1.0 - 1e-6))
             local_converged = bool(np.all(converged_mask))
         else:
-            nn_dists = np.empty((0, num_neighbors), dtype=np.float64)
-            nn_inds = np.empty((0, num_neighbors), dtype=np.int64)
+            nn_dists = np.empty((0, num_neighbors), dtype=np.float32)
+            nn_inds = np.empty((0, num_neighbors), dtype=np.int32)
             converged_mask = np.zeros(0, dtype=bool)
             local_converged = True
 

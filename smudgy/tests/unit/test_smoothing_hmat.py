@@ -29,10 +29,19 @@ def _hmat(backend, rel, weights=None, query=None, **kwargs):
     query = np.zeros((n, dim), dtype=np.float32) if query is None else query
     weights = np.ones((n, k), dtype=np.float32) if weights is None else weights
     return backend.compute_hmat(
+        **_flat_neighbors(query, query[:, np.newaxis, :] + rel, weights), **kwargs
+    )
+
+
+def _flat_neighbors(query, neighbor_positions, neighbor_weights):
+    """compute_hmat kwargs for pre-gathered (N, K, D) neighbors: flatten them
+    into a per-particle array and index it with nn_inds = arange(N * K)."""
+    n, k, dim = neighbor_positions.shape
+    return dict(
         query_positions=query,
-        neighbor_positions=query[:, np.newaxis, :] + rel,
-        neighbor_weights=weights,
-        **kwargs,
+        positions=neighbor_positions.reshape(n * k, dim),
+        weights=np.asarray(neighbor_weights).reshape(n * k),
+        nn_inds=np.arange(n * k).reshape(n, k),
     )
 
 
@@ -60,7 +69,7 @@ def test_isotropic_limit(backend, dim):
     """+-r along every axis: H = r I, the isotropic smoothing length."""
     r = 0.7
     rel = np.concatenate([r * np.eye(dim), -r * np.eye(dim)])
-    H, axes, _, _ = _hmat(backend, rel)
+    H, axes, _ = _hmat(backend, rel)
     np.testing.assert_allclose(H[0], r * np.eye(dim), atol=1e-6)
     np.testing.assert_allclose(axes[0], r, rtol=1e-6)
 
@@ -68,7 +77,7 @@ def test_isotropic_limit(backend, dim):
 def test_1d_axis_is_farthest_neighbor(backend):
     """1D: the single axis is the distance to the farthest neighbor."""
     rel = np.array([[0.0], [0.1], [-0.4], [0.25]])
-    H, axes, eigvecs, _ = _hmat(backend, rel)
+    H, axes, eigvecs = _hmat(backend, rel)
     np.testing.assert_allclose(H[0], [[0.4]], rtol=1e-6)
     np.testing.assert_allclose(axes[0], [0.4], rtol=1e-6)
     np.testing.assert_array_equal(eigvecs[0], [[1.0]])
@@ -79,7 +88,7 @@ def test_analytic_ellipsoid(backend, dim):
     """+-a e1, +-b e2 (+-c e3): axes (a, b, c) along the coordinate axes."""
     lengths = np.array([3.0, 2.0, 1.0])[:dim]
     rel = np.concatenate([np.diag(lengths), -np.diag(lengths)])
-    H, axes, eigvecs, _ = _hmat(backend, rel)
+    H, axes, eigvecs = _hmat(backend, rel)
     np.testing.assert_allclose(axes[0], lengths, rtol=1e-5)
     np.testing.assert_allclose(eigvecs[0], np.eye(dim), atol=1e-5)
     np.testing.assert_allclose(H[0], np.diag(lengths), atol=1e-5)
@@ -92,8 +101,8 @@ def test_rotation_equivariance(backend, dim):
     rel = _random_offsets(dim, n=16, scales=[1.0, 0.4, 0.2])
     R, _ = np.linalg.qr(rng.normal(size=(dim, dim)))
     R *= np.sign(np.linalg.det(R))
-    H, _, _, _ = _hmat(backend, rel)
-    H_rot, _, _, _ = _hmat(backend, rel @ R.T)
+    H, _, _ = _hmat(backend, rel)
+    H_rot, _, _ = _hmat(backend, rel @ R.T)
     np.testing.assert_allclose(H_rot, R @ H @ R.T, atol=1e-4 * np.abs(H).max())
 
 
@@ -111,7 +120,7 @@ def test_rotation_equivariance(backend, dim):
 )
 def test_ratio_clamp_on_degenerate_sets(backend, dim, points, expected):
     """Collinear/coplanar neighbors: short axes are clamped to h_max / ratio_max."""
-    H, axes, _, _ = _hmat(backend, np.array(points, dtype=np.float32), ratio_max=10.0)
+    H, axes, _ = _hmat(backend, np.array(points, dtype=np.float32), ratio_max=10.0)
     np.testing.assert_allclose(axes[0], expected, rtol=1e-5)
     assert np.all(np.isfinite(H))
     assert abs(np.linalg.det(H[0])) > 0
@@ -120,11 +129,11 @@ def test_ratio_clamp_on_degenerate_sets(backend, dim, points, expected):
 def test_min_axis_floor(backend):
     """min_axis raises short axes and leaves longer ones untouched."""
     points = np.array([[1, 0], [-1, 0], [0.5, 0]], dtype=np.float32)
-    _, axes, _, _ = _hmat(backend, points, min_axis=0.3)
+    _, axes, _ = _hmat(backend, points, min_axis=0.3)
     np.testing.assert_allclose(axes[0], [1.0, 0.3], rtol=1e-5)
     # a floor below every axis changes nothing
-    _, axes_ref, _, _ = _hmat(backend, points)
-    _, axes_low, _, _ = _hmat(backend, points, min_axis=1e-3)
+    _, axes_ref, _ = _hmat(backend, points)
+    _, axes_low, _ = _hmat(backend, points, min_axis=1e-3)
     np.testing.assert_array_equal(axes_low, axes_ref)
 
 
@@ -133,11 +142,11 @@ def test_volume_preserving(backend, dim):
     """volume_preserving: det H = hsml^D with the hull tensor's shape."""
     rel = _random_offsets(dim, scales=[1.0, 0.3, 0.1])
     hsml = np.linspace(0.5, 2.0, rel.shape[0]).astype(np.float32)
-    H, axes, _, _ = _hmat(backend, rel, volume_preserving=True, hsml=hsml)
+    H, axes, _ = _hmat(backend, rel, volume_preserving=True, hsml=hsml)
     np.testing.assert_allclose(np.linalg.det(H), hsml**dim, rtol=1e-4)
     np.testing.assert_allclose(np.prod(axes, axis=1), hsml**dim, rtol=1e-4)
     # shape unchanged: same axis ratios as the hull-scaled tensor
-    _, axes_hull, _, _ = _hmat(backend, rel)
+    _, axes_hull, _ = _hmat(backend, rel)
     np.testing.assert_allclose(
         axes / axes[:, :1], axes_hull / axes_hull[:, :1], rtol=1e-4
     )
@@ -164,19 +173,20 @@ def test_periodic_wrapping(backend):
     )
     wrapped = np.mod(query[:, np.newaxis, :] + rel, 1.0)
     weights = np.ones(rel.shape[:2], dtype=np.float32)
-    H_pbc, _, _, rel_pbc = backend.compute_hmat(query, wrapped, weights, boxsize)
-    H_ref, _, _, _ = _hmat(backend, rel, query=query)
-    np.testing.assert_allclose(rel_pbc, rel, atol=1e-6)
+    H_pbc, _, _ = backend.compute_hmat(
+        **_flat_neighbors(query, wrapped, weights), boxsize=boxsize
+    )
+    H_ref, _, _ = _hmat(backend, rel, query=query)
     np.testing.assert_allclose(H_pbc, H_ref, atol=1e-5)
 
 
 def test_all_neighbors_at_query(backend):
     """Sigma = 0: H = 0 (no NaNs), and min_axis restores an invertible tensor."""
     rel = np.zeros((4, 3), dtype=np.float32)
-    H, axes, _, _ = _hmat(backend, rel)
+    H, axes, _ = _hmat(backend, rel)
     np.testing.assert_array_equal(H, 0.0)
     np.testing.assert_array_equal(axes, 0.0)
-    H, _, _, _ = _hmat(backend, rel, min_axis=0.1)
+    H, _, _ = _hmat(backend, rel, min_axis=0.1)
     np.testing.assert_allclose(H[0], 0.1 * np.eye(3), atol=1e-7)
 
 
@@ -192,7 +202,7 @@ def test_all_neighbors_at_query(backend):
 def test_hull_property(backend, dim, scales):
     """Every neighbor lies inside the support ellipsoid, the farthest on it."""
     rel = _random_offsets(dim, scales=scales)
-    H, _, _, _ = _hmat(backend, rel)
+    H, _, _ = _hmat(backend, rel)
     xi = _mahalanobis(H, rel)
     assert xi.max() <= 1.0 + 1e-4
     np.testing.assert_allclose(xi.max(axis=1), 1.0, rtol=1e-4)
@@ -203,7 +213,7 @@ def test_eigendecomposition_invariants(backend, dim):
     """H = V diag(axes) V^T with orthonormal, sign-normalized V and sorted axes."""
     rel = _random_offsets(dim, scales=[1.0, 0.5, 0.2])
     weights = np.random.default_rng(2).uniform(0.5, 2.0, rel.shape[:2])
-    H, axes, V, _ = _hmat(backend, rel, weights=weights.astype(np.float32))
+    H, axes, V = _hmat(backend, rel, weights=weights.astype(np.float32))
     eye = np.broadcast_to(np.eye(dim), V.shape)
     np.testing.assert_allclose(np.swapaxes(V, 1, 2) @ V, eye, atol=1e-5)
     np.testing.assert_allclose(
@@ -215,7 +225,7 @@ def test_eigendecomposition_invariants(backend, dim):
     idx = np.argmax(np.abs(V), axis=1)
     assert np.all(np.take_along_axis(V, idx[:, np.newaxis, :], axis=1) > 0)
     # H only depends on the shape of the weights, not their overall scale
-    H_scaled, _, _, _ = _hmat(backend, rel, weights=(7.3 * weights).astype(np.float32))
+    H_scaled, _, _ = _hmat(backend, rel, weights=(7.3 * weights).astype(np.float32))
     np.testing.assert_allclose(H_scaled, H, rtol=1e-5, atol=1e-6 * axes.max())
 
 
@@ -245,7 +255,7 @@ def _knn_cloud(dim, thickness, periodic, n=3000, k=16):
     boxsize = np.ones(dim, dtype=np.float32) if periodic else None
     dists, idx = cKDTree(x, boxsize=boxsize).query(x, k)
     w = np.random.default_rng(0).uniform(0.5, 1.5, n).astype(np.float32)
-    return x, x[idx], w[idx], boxsize, dists[:, -1].astype(np.float32)
+    return x, idx, w, boxsize, dists[:, -1].astype(np.float32)
 
 
 @pytest.mark.parametrize("dim", [1, 2, 3])
@@ -256,19 +266,19 @@ def _knn_cloud(dim, thickness, periodic, n=3000, k=16):
 @pytest.mark.parametrize("volume_preserving", [False, True])
 def test_backends_agree(dim, thickness, periodic, volume_preserving):
     """Numpy and Taichi agree on H, its axes and (separated) eigenvectors."""
-    x, nb_pos, nb_w, boxsize, hsml = _knn_cloud(dim, thickness, periodic)
+    x, idx, w, boxsize, hsml = _knn_cloud(dim, thickness, periodic)
     kwargs = dict(
         query_positions=x,
-        neighbor_positions=nb_pos,
-        neighbor_weights=nb_w,
+        positions=x,
+        weights=w,
+        nn_inds=idx,
         boxsize=boxsize,
         volume_preserving=volume_preserving,
         hsml=hsml if volume_preserving else None,
     )
-    H_np, ax_np, V_np, rel_np = np_smoothing.compute_hmat(**kwargs)
-    H_ti, ax_ti, V_ti, rel_ti = ti_smoothing.compute_hmat(**kwargs)
+    H_np, ax_np, V_np = np_smoothing.compute_hmat(**kwargs)
+    H_ti, ax_ti, V_ti = ti_smoothing.compute_hmat(**kwargs)
 
-    np.testing.assert_allclose(rel_ti, rel_np, atol=1e-6)
     # rtol 5e-4: float32 relative coordinates can differ by an ulp between the
     # backends' PBC arithmetic, which the clamped metric amplifies to ~1e-4
     np.testing.assert_allclose(ax_ti, ax_np, rtol=5e-4)

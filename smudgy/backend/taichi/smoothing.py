@@ -42,6 +42,25 @@ def _coordinate_difference_with_pbc(
 
 
 @ti.func
+def _neighbor_offset(
+    query_positions: ti.template(),
+    q,
+    positions: ti.template(),
+    j,
+    boxsize: ti.template(),
+    dim: ti.template(),
+    periodic: ti.template(),
+):
+    """x_j - x_q, wrapped to the minimum image if `periodic`."""
+    d = ti.Vector.zero(ti.f32, dim)
+    for a in ti.static(range(dim)):
+        d[a] = _coordinate_difference_with_pbc(
+            positions[j, a] - query_positions[q, a], boxsize[a], periodic
+        )
+    return d
+
+
+@ti.func
 def _sym_eig_jacobi(A, dim: ti.template(), sweeps: ti.template()):
     """Eigendecomposition of a small symmetric matrix by cyclic Jacobi rotations.
 
@@ -82,13 +101,10 @@ def _sym_eig_jacobi(A, dim: ti.template(), sweeps: ti.template()):
 
 @ti.kernel
 def _compute_hmat_kernel(
-    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    neighbor_positions: ti.types.ndarray(
-        dtype=ti.f32, ndim=3
-    ),  # (N, K, D) -- pre-gathered
-    neighbor_weights: ti.types.ndarray(
-        dtype=ti.f32, ndim=2
-    ),  # (N, K)    -- pre-gathered
+    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, D)
+    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nc, D)
+    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nc,)
+    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),  # (N, K), indexes positions
     boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
     hsml: ti.types.ndarray(dtype=ti.f32, ndim=1),  # only read if volume_preserving
     periodic: ti.template(),
@@ -100,24 +116,16 @@ def _compute_hmat_kernel(
     H_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
     eigvals_out: ti.types.ndarray(dtype=ti.f32, ndim=2),
     eigvecs_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    rel_coords_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
 ):
-    K = neighbor_positions.shape[1]
-    for q in range(query_positions.shape[0]):
+    N, K = nn_inds.shape
+    for q in range(N):
         # --- second-moment tensor about the query (Marinho eq. 37) ------------
         Sigma = ti.Matrix.zero(ti.f32, dim, dim)
         wsum = 0.0
         for k in range(K):
-            w = neighbor_weights[q, k]
-            d = ti.Vector.zero(ti.f32, dim)
-            for a in ti.static(range(dim)):
-                diff = _coordinate_difference_with_pbc(
-                    neighbor_positions[q, k, a] - query_positions[q, a],
-                    boxsize[a],
-                    periodic,
-                )
-                d[a] = diff
-                rel_coords_out[q, k, a] = diff
+            j = nn_inds[q, k]
+            w = weights[j]
+            d = _neighbor_offset(query_positions, q, positions, j, boxsize, dim, periodic)
             Sigma += w * d.outer_product(d)
             wsum += w
         Sigma /= wsum
@@ -174,11 +182,14 @@ def _compute_hmat_kernel(
         # the clamped metric so the hull property holds for the returned tensor.
         maha2_max = 0.0
         for k in range(K):
+            d = _neighbor_offset(
+                query_positions, q, positions, nn_inds[q, k], boxsize, dim, periodic
+            )
             maha2 = 0.0
             for j in ti.static(range(dim)):
                 proj = 0.0
                 for a in ti.static(range(dim)):
-                    proj += rel_coords_out[q, k, a] * eigvecs[a, j]
+                    proj += d[a] * eigvecs[a, j]
                 maha2 += proj * proj / ti.max(sigma[j] * sigma[j], 1e-37)
             maha2_max = ti.max(maha2_max, maha2)
         zeta_max = ti.sqrt(maha2_max)
@@ -215,8 +226,9 @@ def _compute_hmat_kernel(
 
 def compute_hmat(
     query_positions: np.ndarray,
-    neighbor_positions: np.ndarray,
-    neighbor_weights: np.ndarray,
+    positions: np.ndarray,
+    weights: np.ndarray,
+    nn_inds: np.ndarray,
     boxsize: np.ndarray | None = None,
     ratio_max: float = 10.0,
     min_axis: float | None = None,
@@ -233,11 +245,13 @@ def compute_hmat(
     Parameters
     ----------
     query_positions : np.ndarray
-        Array of query positions.
-    neighbor_positions : np.ndarray
-        Array of neighbor positions for each query position.
-    neighbor_weights : np.ndarray
-        Array of neighbor weights for each query position.
+        Array of query positions, shape (N, D).
+    positions : np.ndarray
+        Array of particle positions, shape (Nc, D), indexed by `nn_inds`.
+    weights : np.ndarray
+        Array of particle weights, shape (Nc,), indexed by `nn_inds`.
+    nn_inds : np.ndarray
+        Neighbor indices into `positions`/`weights` for each query, shape (N, K).
     boxsize : np.ndarray, optional
         Array of box sizes for periodic boundary conditions. If None, no periodicity is applied.
     ratio_max : float, optional
@@ -263,8 +277,6 @@ def compute_hmat(
         Eigenvalues of H, i.e. the principal smoothing lengths, descending.
     eigvecs : np.ndarray
         Eigenvectors of H (columns), matching the order of `eigvals`.
-    rel_coords : np.ndarray
-        Array of relative coordinates of neighbors with respect to query positions.
 
     """
     dim = query_positions.shape[-1]
@@ -276,13 +288,18 @@ def compute_hmat(
         raise ValueError(f"[smudgy] ratio_max must be >= 1, got {ratio_max}.")
 
     query_positions = _as_float32(query_positions)
-    neighbor_positions = _as_float32(neighbor_positions)
-    neighbor_weights = _as_float32(neighbor_weights)
+    positions = _as_float32(positions)
+    weights = _as_float32(weights)
+    nn_inds = np.ascontiguousarray(nn_inds, dtype=np.int32)
 
     periodic = boxsize is not None
-    box = _as_float32(boxsize) if periodic else np.zeros(dim, dtype=np.float32)
+    box = (
+        np.ascontiguousarray(np.broadcast_to(boxsize, (dim,)), dtype=np.float32)
+        if periodic
+        else np.zeros(dim, dtype=np.float32)
+    )
 
-    Nq, K = neighbor_weights.shape
+    Nq = nn_inds.shape[0]
     if volume_preserving:
         if hsml is None:
             raise ValueError("[smudgy] volume_preserving=True requires hsml.")
@@ -297,12 +314,12 @@ def compute_hmat(
     H = np.zeros((Nq, dim, dim), dtype=np.float32)
     eigvals = np.zeros((Nq, dim), dtype=np.float32)
     eigvecs = np.zeros((Nq, dim, dim), dtype=np.float32)
-    rel_coords = np.zeros((Nq, K, dim), dtype=np.float32)
 
     _compute_hmat_kernel(
         query_positions,
-        neighbor_positions,
-        neighbor_weights,
+        positions,
+        weights,
+        nn_inds,
         box,
         hsml_arr,
         periodic,
@@ -314,6 +331,5 @@ def compute_hmat(
         H,
         eigvals,
         eigvecs,
-        rel_coords,
     )
-    return H, eigvals, eigvecs, rel_coords
+    return H, eigvals, eigvecs

@@ -34,7 +34,11 @@ def build_kdtree(
             Tree built from ``points``.
 
     """
-    return spatial.cKDTree(points, boxsize=boxsize)
+    # Unbalanced, non-compacted nodes: ~2x faster to build and no slower (here
+    # slightly faster) to query than scipy's median-split defaults.
+    return spatial.cKDTree(
+        points, boxsize=boxsize, balanced_tree=False, compact_nodes=False
+    )
 
 
 def query_kdtree(

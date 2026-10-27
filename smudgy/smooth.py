@@ -19,8 +19,6 @@ class SmoothingInfo:
         `ghost_weights` below for the ghost half of that array.
     nn_dists : np.ndarray
         Distances to nearest neighbors for each particle.
-    nn_dists_vec : np.ndarray
-        Vector distances to nearest neighbors for each particle.
     smoothing_lengths : np.ndarray
         Smoothing lengths for each particle.
     smoothing_tensors : np.ndarray
@@ -56,7 +54,6 @@ class SmoothingInfo:
     num_neighbors: int = None
     nn_inds: np.ndarray = None
     nn_dists: np.ndarray = None
-    nn_dists_vec: np.ndarray = None
 
     smoothing_lengths: np.ndarray = None
     smoothing_tensors: np.ndarray = None

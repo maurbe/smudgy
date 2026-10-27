@@ -34,15 +34,16 @@ def compute_hsml(nn_dists: FloatArray) -> FloatArray:
 
 
 def compute_hmat(
-    query_positions: FloatArray,
-    neighbor_positions: FloatArray,  # (N, K, D) -- pre-gathered
-    neighbor_weights: FloatArray,  # (N, K)    -- pre-gathered
+    query_positions: FloatArray,  # (N, D)
+    positions: FloatArray,  # (Nc, D), indexed by nn_inds
+    weights: FloatArray,  # (Nc,),  indexed by nn_inds
+    nn_inds: IntArray,  # (N, K)
     boxsize: FloatArray | None = None,
     ratio_max: float = 10.0,  # max axis ratio h_max / h_min
     min_axis: float | None = None,  # physical floor (softening / cell size)
     volume_preserving: bool = False,  # det H = hsml^D instead of the hull scaling
     hsml: FloatArray | None = None,  # required if volume_preserving
-) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+) -> tuple[FloatArray, FloatArray, FloatArray]:
     """Covariance-based smoothing tensor, following Marinho (2021), eqs. 39-44.
 
     H = zeta_max * Sigma^(1/2), with zeta_max the largest Mahalanobis distance
@@ -51,7 +52,7 @@ def compute_hmat(
     limit each axis reduces to the distance to the farthest neighbour, i.e. to
     the usual smoothing length, for any K and any weighting.
 
-    Returns (H, axes, eigvecs, rel_coords), where `axes` and `eigvecs` are the
+    Returns (H, axes, eigvecs), where `axes` and `eigvecs` are the
     eigenvalues and eigenvectors of H itself: H = V diag(axes) V^T. Axes are
     sorted in descending order; eigenvectors follow the sign convention of
     `_fix_eigvec_sign` (largest-magnitude component positive).
@@ -76,8 +77,8 @@ def compute_hmat(
             )
 
     query_positions = _as_float32(query_positions)
-    neighbor_positions = _as_float32(neighbor_positions)
-    neighbor_weights = _as_float32(neighbor_weights)
+    neighbor_positions = _as_float32(positions)[nn_inds]
+    neighbor_weights = _as_float32(weights)[nn_inds]
     boxsize = _as_float32(boxsize) if boxsize is not None else None
 
     rel_coords = coordinate_difference_with_pbc(
@@ -129,5 +130,4 @@ def compute_hmat(
         H.astype(np.float32),
         axes.astype(np.float32),  # eigenvalues of H, descending
         eigvecs.astype(np.float32),  # eigenvectors of H (columns)
-        rel_coords.astype(np.float32),
     )

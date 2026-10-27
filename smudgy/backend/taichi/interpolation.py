@@ -6,394 +6,339 @@ from .kernels import (
     prepare_covariant_inputs,
     prepare_isotropic_inputs,
 )
+from .smoothing import _coordinate_difference_with_pbc
 
 _EPS = 1e-7
+
+
+# =============================================================================
+# Shared helpers
+# =============================================================================
+# The kernels below gather neighbor data through `nn_inds` inside the parallel
+# loop and compute the (periodic) relative coordinates on the fly, instead of
+# receiving pre-gathered (N, K, ...) arrays. Each relative coordinate is used
+# exactly once, so precomputing it would do the same work plus a full write
+# and re-read of an (N, K, D) array (and a host<->device copy on GPU).
+@ti.func
+def _relative_position(
+    query_positions: ti.template(),
+    n,
+    positions: ti.template(),
+    j,
+    boxsize: ti.template(),
+    dim: ti.template(),
+    periodic: ti.template(),
+):
+    """r = x_n - x_j, wrapped to the minimum image if `periodic`."""
+    r = ti.Vector.zero(ti.f32, dim)
+    for a in ti.static(range(dim)):
+        r[a] = _coordinate_difference_with_pbc(
+            query_positions[n, a] - positions[j, a], boxsize[a], periodic
+        )
+    return r
+
+
+@ti.func
+def _kernel_inputs(
+    r_vec,
+    h: ti.template(),
+    i,
+    dim: ti.template(),
+    covariant: ti.template(),
+    sigma_val: ti.f32,
+    eps: ti.f32,
+):
+    """Kernel coordinates for r_vec, smoothed with h[i] (scalar or D x D tensor)."""
+    q = 0.0
+    grad_q = ti.Vector.zero(ti.f32, dim)
+    scale = 0.0
+    if ti.static(covariant):
+        H = ti.Matrix(
+            [[h[i, a, b] for b in ti.static(range(dim))] for a in ti.static(range(dim))]
+        )
+        q, grad_q, scale = prepare_covariant_inputs(r_vec, H, dim, sigma_val, eps)
+    else:
+        q, grad_q, scale = prepare_isotropic_inputs(r_vec, h[i], dim, sigma_val, eps)
+    return q, grad_q, scale
+
+
+def _as_float32(array):
+    return np.ascontiguousarray(array, dtype=np.float32)
+
+
+def _common_inputs(query_positions, positions, weights, nn_inds, h, boxsize, dim):
+    """Contiguous float32/int32 copies (no-ops if already so) + boxsize/periodic."""
+    periodic = boxsize is not None
+    box = (
+        np.ascontiguousarray(np.broadcast_to(boxsize, (dim,)), dtype=np.float32)
+        if periodic
+        else np.zeros(dim, dtype=np.float32)
+    )
+    return (
+        _as_float32(query_positions),
+        _as_float32(positions),
+        _as_float32(weights),
+        np.ascontiguousarray(nn_inds, dtype=np.int32),
+        _as_float32(h),
+        box,
+        periodic,
+    )
 
 
 # =============================================================================
 # Density
 # =============================================================================
 @ti.kernel
-def _density_scalar_kernel(
+def _density_kernel(
     evaluate_fn: ti.template(),
-    prepare_fn: ti.template(),
-    dim: ti.template(),
     sigma_func: ti.template(),
+    dim: ti.template(),
+    covariant: ti.template(),
+    periodic: ti.template(),
     eps: ti.f32,
-    neighbor_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, D)
+    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nc, D)
+    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nc,)
+    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),  # (N, K)
+    boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    h: ti.types.ndarray(dtype=ti.f32),  # (N,) or (N, D, D): the query's own h
     density_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
 ):
-    N, K = neighbor_weights.shape
+    N, K = nn_inds.shape
     sigma_val = sigma_func(dim)
     for n in range(N):
         acc = 0.0
         for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            q, _, scale = prepare_fn(r_vec, h[n], dim, sigma_val, eps)
-            acc += neighbor_weights[n, k] * evaluate_fn(q, dim) * scale
+            j = nn_inds[n, k]
+            r_vec = _relative_position(
+                query_positions, n, positions, j, boxsize, dim, periodic
+            )
+            q, _, scale = _kernel_inputs(r_vec, h, n, dim, covariant, sigma_val, eps)
+            acc += weights[j] * evaluate_fn(q, dim) * scale
         density_out[n] = acc
 
 
-@ti.kernel
-def _density_covariant_kernel(
-    evaluate_fn: ti.template(),
-    prepare_fn: ti.template(),
-    dim: ti.template(),
-    sigma_func: ti.template(),
-    eps: ti.f32,
-    neighbor_weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    density_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+def density(
+    *, kernel_name, dim, query_positions, positions, weights, nn_inds, h, boxsize, structure
 ):
-    N, K = neighbor_weights.shape
-    sigma_val = sigma_func(dim)
-    for n in range(N):
-        H = ti.Matrix(
-            [[h[n, a, b] for b in ti.static(range(dim))] for a in ti.static(range(dim))]
-        )
-        acc = 0.0
-        for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            q, _, scale = prepare_fn(r_vec, H, dim, sigma_val, eps)
-            acc += neighbor_weights[n, k] * evaluate_fn(q, dim) * scale
-        density_out[n] = acc
+    """Compute SPH density using the Taichi backend.
 
-
-def density(*, kernel_name, dim, neighbor_weights, r_ij, h, structure):
-    """Compute SPH density using the Taichi backend."""
+    `positions`/`weights` are per-particle arrays of shape (Nc, D)/(Nc,) that
+    `nn_inds` (N, K) indexes into; `h` is the smoothing length (N,) or tensor
+    (N, D, D) of each query. Relative coordinates are computed in-kernel.
+    """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
 
     kernel = create_spherical_kernel(kernel_name)
+    query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
+        query_positions, positions, weights, nn_inds, h, boxsize, dim
+    )
 
-    neighbor_weights = np.ascontiguousarray(neighbor_weights, dtype=np.float32)
-    r_ij = np.ascontiguousarray(r_ij, dtype=np.float32)
-    h = np.ascontiguousarray(h, dtype=np.float32)
-
-    N = h.shape[0]
-    density_out = np.zeros(N, dtype=np.float32)
-    eps = np.finfo(np.float32).eps
-
-    sigma_func = kernel.sigma
-
-    if structure == "covariant":
-        _density_covariant_kernel(
-            kernel.evaluate,
-            prepare_covariant_inputs,
-            dim,
-            sigma_func,
-            float(_EPS),
-            neighbor_weights,
-            r_ij,
-            h,
-            density_out,
-        )
-    else:
-        _density_scalar_kernel(
-            kernel.evaluate,
-            prepare_isotropic_inputs,
-            dim,
-            sigma_func,
-            float(_EPS),
-            neighbor_weights,
-            r_ij,
-            h,
-            density_out,
-        )
+    density_out = np.zeros(nn_inds.shape[0], dtype=np.float32)
+    _density_kernel(
+        kernel.evaluate,
+        kernel.sigma,
+        dim,
+        structure == "covariant",
+        periodic,
+        float(_EPS),
+        query_positions,
+        positions,
+        weights,
+        nn_inds,
+        box,
+        h,
+        density_out,
+    )
     return density_out
 
 
 # =============================================================================
 # Interpolate
 # =============================================================================
+# Shared signature: `weights` are the per-particle m_j / rho_j, `h` the
+# per-particle smoothing length (Nc,) or tensor (Nc, D, D) of each neighbor
+# (gathered in-kernel via nn_inds), `fields` (Nc, F) or (Nc, F, D).
 @ti.kernel
-def _field_isotropic(
+def _field_kernel(
     evaluate_fn: ti.template(),
-    prepare_fn: ti.template(),
     sigma_fn: ti.template(),
     dim: ti.template(),
+    covariant: ti.template(),
+    periodic: ti.template(),
     F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, K, F)
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, K)
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, K, D)
-    h: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, K)
     eps: ti.f32,
+    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),
+    boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    h: ti.types.ndarray(dtype=ti.f32),
+    fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nc, F)
     out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
 ):
-    N, K = fields.shape[0], fields.shape[1]
+    N, K = nn_inds.shape
     sigma_val = sigma_fn(dim)
     for n in range(N):
-        for f in ti.static(range(F)):
-            out[n, f] = 0.0
+        acc = ti.Vector.zero(ti.f32, F)
         for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            q, _, scale = prepare_fn(r_vec, h[n, k], dim, sigma_val, eps)
-            w = evaluate_fn(q, dim) * scale * weights[n, k]
+            j = nn_inds[n, k]
+            r_vec = _relative_position(
+                query_positions, n, positions, j, boxsize, dim, periodic
+            )
+            q, _, scale = _kernel_inputs(r_vec, h, j, dim, covariant, sigma_val, eps)
+            w = evaluate_fn(q, dim) * scale * weights[j]
             for f in ti.static(range(F)):
-                out[n, f] += fields[n, k, f] * w
+                acc[f] += fields[j, f] * w
+        for f in ti.static(range(F)):
+            out[n, f] = acc[f]
 
 
 @ti.kernel
-def _field_covariant(
-    evaluate_fn: ti.template(),
-    prepare_fn: ti.template(),
+def _gradient_kernel(
+    gradient_fn: ti.template(),
     sigma_fn: ti.template(),
     dim: ti.template(),
+    covariant: ti.template(),
+    periodic: ti.template(),
     F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, K, F)
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, K)
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, K, D)
-    h: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (N, K, D, D)
     eps: ti.f32,
+    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),
+    boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    h: ti.types.ndarray(dtype=ti.f32),
+    fields: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nc, F)
+    out: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, F, D)
+):
+    N, K = nn_inds.shape
+    sigma_val = sigma_fn(dim)
+    for n in range(N):
+        acc = ti.Matrix.zero(ti.f32, F, dim)
+        for k in range(K):
+            j = nn_inds[n, k]
+            r_vec = _relative_position(
+                query_positions, n, positions, j, boxsize, dim, periodic
+            )
+            q, grad_q, scale = _kernel_inputs(
+                r_vec, h, j, dim, covariant, sigma_val, eps
+            )
+            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
+            for f in ti.static(range(F)):
+                for a in ti.static(range(dim)):
+                    acc[f, a] += fields[j, f] * grad_w[a]
+        for f in ti.static(range(F)):
+            for a in ti.static(range(dim)):
+                out[n, f, a] = acc[f, a]
+
+
+@ti.kernel
+def _divergence_kernel(
+    gradient_fn: ti.template(),
+    sigma_fn: ti.template(),
+    dim: ti.template(),
+    covariant: ti.template(),
+    periodic: ti.template(),
+    F: ti.template(),
+    eps: ti.f32,
+    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),
+    boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    h: ti.types.ndarray(dtype=ti.f32),
+    fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nc, F, D)
     out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, F)
 ):
-    N, K = fields.shape[0], fields.shape[1]
+    N, K = nn_inds.shape
     sigma_val = sigma_fn(dim)
     for n in range(N):
-        for f in ti.static(range(F)):
-            out[n, f] = 0.0
+        acc = ti.Vector.zero(ti.f32, F)
         for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            H = ti.Matrix(
-                [
-                    [h[n, k, a, b] for b in ti.static(range(dim))]
-                    for a in ti.static(range(dim))
-                ]
+            j = nn_inds[n, k]
+            r_vec = _relative_position(
+                query_positions, n, positions, j, boxsize, dim, periodic
             )
-            q, _, scale = prepare_fn(r_vec, H, dim, sigma_val, eps)
-            w = evaluate_fn(q, dim) * scale * weights[n, k]
-            for f in ti.static(range(F)):
-                out[n, f] += fields[n, k, f] * w
-
-
-@ti.kernel
-def _gradient_isotropic(
-    gradient_fn: ti.template(),
-    prepare_fn: ti.template(),
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, K, F)
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    eps: ti.f32,
-    out: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, F, D)
-):
-    N, K = fields.shape[0], fields.shape[1]
-    sigma_val = sigma_fn(dim)
-    for n in range(N):
-        for f in ti.static(range(F)):
-            for a in ti.static(range(dim)):
-                out[n, f, a] = 0.0
-        for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            q, grad_q, scale = prepare_fn(r_vec, h[n, k], dim, sigma_val, eps)
-            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[n, k]
-            for f in ti.static(range(F)):
-                for a in ti.static(range(dim)):
-                    out[n, f, a] += fields[n, k, f] * grad_w[a]
-
-
-@ti.kernel
-def _gradient_covariant(
-    gradient_fn: ti.template(),
-    prepare_fn: ti.template(),
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (N, K, D, D)
-    eps: ti.f32,
-    out: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, F, D)
-):
-    N, K = fields.shape[0], fields.shape[1]
-    sigma_val = sigma_fn(dim)
-
-    for n in range(N):
-        for f in ti.static(range(F)):
-            for a in ti.static(range(dim)):
-                out[n, f, a] = 0.0
-        for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            H = ti.Matrix(
-                [
-                    [h[n, k, a, b] for b in ti.static(range(dim))]
-                    for a in ti.static(range(dim))
-                ]
+            q, grad_q, scale = _kernel_inputs(
+                r_vec, h, j, dim, covariant, sigma_val, eps
             )
-            q, grad_q, scale = prepare_fn(r_vec, H, dim, sigma_val, eps)
-            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[n, k]
-            for f in ti.static(range(F)):
-                for a in ti.static(range(dim)):
-                    out[n, f, a] += fields[n, k, f] * grad_w[a]
-
-
-@ti.kernel
-def _divergence_isotropic(
-    gradient_fn: ti.template(),
-    prepare_fn: ti.template(),
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (N, K, F, D)
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    eps: ti.f32,
-    out: ti.types.ndarray(dtype=ti.f32, ndim=2),
-):
-    N, K = fields.shape[0], fields.shape[1]
-    sigma_val = sigma_fn(dim)
-    for n in range(N):
-        for f in ti.static(range(F)):
-            out[n, f] = 0.0
-        for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            q, grad_q, scale = prepare_fn(r_vec, h[n, k], dim, sigma_val, eps)
-            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[n, k]
+            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
             for f in ti.static(range(F)):
                 s = 0.0
                 for a in ti.static(range(dim)):
-                    s += fields[n, k, f, a] * grad_w[a]
-                out[n, f] += s
-
-
-@ti.kernel
-def _divergence_covariant(
-    gradient_fn: ti.template(),
-    prepare_fn: ti.template(),
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=4),
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=4),
-    eps: ti.f32,
-    out: ti.types.ndarray(dtype=ti.f32, ndim=2),
-):
-    N, K = fields.shape[0], fields.shape[1]
-    sigma_val = sigma_fn(dim)
-    for n in range(N):
+                    s += fields[j, f, a] * grad_w[a]
+                acc[f] += s
         for f in ti.static(range(F)):
-            out[n, f] = 0.0
-        for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            H = ti.Matrix(
-                [
-                    [h[n, k, a, b] for b in ti.static(range(dim))]
-                    for a in ti.static(range(dim))
-                ]
-            )
-            q, grad_q, scale = prepare_fn(r_vec, H, dim, sigma_val, eps)
-            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[n, k]
-            for f in ti.static(range(F)):
-                s = 0.0
-                for a in ti.static(range(dim)):
-                    s += fields[n, k, f, a] * grad_w[a]
-                out[n, f] += s
+            out[n, f] = acc[f]
 
 
 @ti.kernel
-def _curl_isotropic(
+def _curl_kernel(
     gradient_fn: ti.template(),
-    prepare_fn: ti.template(),
     sigma_fn: ti.template(),
     dim: ti.template(),
+    covariant: ti.template(),
+    periodic: ti.template(),
     F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=4),  # (N, K, F, D)
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=2),
     eps: ti.f32,
+    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),
+    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),
+    boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    h: ti.types.ndarray(dtype=ti.f32),
+    fields: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (Nc, F, D)
     out: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, F, 1 or D)
 ):
-    N, K = fields.shape[0], fields.shape[1]
+    N, K = nn_inds.shape
     sigma_val = sigma_fn(dim)
     C = ti.static(1 if dim == 2 else dim)
-
     for n in range(N):
-        for f in ti.static(range(F)):
-            for a in ti.static(range(C)):
-                out[n, f, a] = 0.0
+        acc = ti.Matrix.zero(ti.f32, F, C)
         for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            q, grad_q, scale = prepare_fn(r_vec, h[n, k], dim, sigma_val, eps)
-            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[n, k]
-            for f in ti.static(range(F)):
-                if ti.static(dim == 2):
-                    out[n, f, 0] += (
-                        fields[n, k, f, 0] * grad_w[1] - fields[n, k, f, 1] * grad_w[0]
-                    )
-                else:
-                    fv = ti.Vector([fields[n, k, f, a] for a in ti.static(range(3))])
-                    c = fv.cross(grad_w)
-                    for a in ti.static(range(3)):
-                        out[n, f, a] += c[a]
-
-
-@ti.kernel
-def _curl_covariant(
-    gradient_fn: ti.template(),
-    prepare_fn: ti.template(),
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    F: ti.template(),
-    fields: ti.types.ndarray(dtype=ti.f32, ndim=4),
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    r_ij: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    h: ti.types.ndarray(dtype=ti.f32, ndim=4),
-    eps: ti.f32,
-    out: ti.types.ndarray(dtype=ti.f32, ndim=3),
-):
-    N, K = fields.shape[0], fields.shape[1]
-    sigma_val = sigma_fn(dim)
-    C = ti.static(1 if dim == 2 else dim)
-
-    for n in range(N):
-        for f in ti.static(range(F)):
-            for a in ti.static(range(C)):
-                out[n, f, a] = 0.0
-        for k in range(K):
-            r_vec = ti.Vector([r_ij[n, k, a] for a in ti.static(range(dim))])
-            H = ti.Matrix(
-                [
-                    [h[n, k, a, b] for b in ti.static(range(dim))]
-                    for a in ti.static(range(dim))
-                ]
+            j = nn_inds[n, k]
+            r_vec = _relative_position(
+                query_positions, n, positions, j, boxsize, dim, periodic
             )
-            q, grad_q, scale = prepare_fn(r_vec, H, dim, sigma_val, eps)
-            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[n, k]
+            q, grad_q, scale = _kernel_inputs(
+                r_vec, h, j, dim, covariant, sigma_val, eps
+            )
+            grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
             for f in ti.static(range(F)):
                 if ti.static(dim == 2):
-                    out[n, f, 0] += (
-                        fields[n, k, f, 0] * grad_w[1] - fields[n, k, f, 1] * grad_w[0]
-                    )
+                    acc[f, 0] += fields[j, f, 0] * grad_w[1] - fields[j, f, 1] * grad_w[0]
                 else:
-                    fv = ti.Vector([fields[n, k, f, a] for a in ti.static(range(3))])
+                    fv = ti.Vector([fields[j, f, a] for a in ti.static(range(3))])
                     c = fv.cross(grad_w)
                     for a in ti.static(range(3)):
-                        out[n, f, a] += c[a]
+                        acc[f, a] += c[a]
+        for f in ti.static(range(F)):
+            for a in ti.static(range(C)):
+                out[n, f, a] = acc[f, a]
 
 
 def interpolate(
     *,
     kernel_name,
     dim,
-    fields,
+    query_positions,
+    positions,
     weights,
-    r_ij,
+    nn_inds,
+    fields,
     h,
+    boxsize,
     mode,
     structure,
 ):
-    """Interpolate fields at query positions using the Taichi backend."""
+    """Interpolate fields at query positions using the Taichi backend.
+
+    `positions` (Nc, D), `weights` (Nc,) = m_j / rho_j, `fields` (Nc, F) --
+    or (Nc, F, D) for divergence/curl -- and `h` (Nc,) / (Nc, D, D) are
+    per-particle arrays that `nn_inds` (N, K) indexes into.
+    """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
 
@@ -401,90 +346,48 @@ def interpolate(
         raise NotImplementedError
 
     kernel = create_spherical_kernel(kernel_name)
+    query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
+        query_positions, positions, weights, nn_inds, h, boxsize, dim
+    )
+    fields = _as_float32(fields)
 
-    fields = np.ascontiguousarray(fields, dtype=np.float32)
-    weights = np.ascontiguousarray(weights, dtype=np.float32)
-    r_ij = np.ascontiguousarray(r_ij, dtype=np.float32)
-    h = np.ascontiguousarray(h, dtype=np.float32)
-
-    N = fields.shape[0]
-    F = fields.shape[2]
+    N = nn_inds.shape[0]
+    F = fields.shape[1]
     covariant = structure == "covariant"
-    prepare_fn = prepare_covariant_inputs if covariant else prepare_isotropic_inputs
 
     if mode == "field":
-        out = np.zeros((N, F), dtype=np.float32)
-        fn = _field_covariant if covariant else _field_isotropic
-        fn(
-            kernel.evaluate,
-            prepare_fn,
-            kernel.sigma,
-            dim,
-            F,
-            fields,
-            weights,
-            r_ij,
-            h,
-            _EPS,
-            out,
-        )
-        return out
-
-    if mode == "gradient":
+        fn, kernel_fn, out = _field_kernel, kernel.evaluate, np.zeros((N, F), np.float32)
+    elif mode == "gradient":
+        fn, kernel_fn = _gradient_kernel, kernel.gradient
         out = np.zeros((N, F, dim), dtype=np.float32)
-        fn = _gradient_covariant if covariant else _gradient_isotropic
-        fn(
-            kernel.gradient,
-            prepare_fn,
-            kernel.sigma,
-            dim,
-            F,
-            fields,
-            weights,
-            r_ij,
-            h,
-            _EPS,
-            out,
-        )
-        return out
-
-    if mode == "divergence":
-        out = np.zeros((N, F), dtype=np.float32)
-        fn = _divergence_covariant if covariant else _divergence_isotropic
-        fn(
-            kernel.gradient,
-            prepare_fn,
-            kernel.sigma,
-            dim,
-            F,
-            fields,
-            weights,
-            r_ij,
-            h,
-            _EPS,
-            out,
-        )
-        return out
-
-    if mode == "curl":
+    elif mode == "divergence":
+        fn, kernel_fn, out = _divergence_kernel, kernel.gradient, np.zeros((N, F), np.float32)
+    elif mode == "curl":
         C = 1 if dim == 2 else dim
+        fn, kernel_fn = _curl_kernel, kernel.gradient
         out = np.zeros((N, F, C), dtype=np.float32)
-        fn = _curl_covariant if covariant else _curl_isotropic
-        fn(
-            kernel.gradient,
-            prepare_fn,
-            kernel.sigma,
-            dim,
-            F,
-            fields,
-            weights,
-            r_ij,
-            h,
-            _EPS,
-            out,
+    else:
+        raise ValueError(
+            f"Unsupported interpolation mode '{mode}'. Expected one of 'field', 'gradient', 'divergence', 'curl'."
         )
-        return out[..., 0] if dim == 2 else out
 
-    raise ValueError(
-        f"Unsupported interpolation mode '{mode}'. Expected one of 'field', 'gradient', 'divergence', 'curl'."
+    fn(
+        kernel_fn,
+        kernel.sigma,
+        dim,
+        covariant,
+        periodic,
+        F,
+        _EPS,
+        query_positions,
+        positions,
+        weights,
+        nn_inds,
+        box,
+        h,
+        fields,
+        out,
     )
+    if mode == "curl" and dim == 2:
+        return out[..., 0]
+    return out

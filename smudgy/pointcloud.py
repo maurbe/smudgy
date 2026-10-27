@@ -9,7 +9,6 @@ import numpy.typing as npt
 from mpi4py import MPI
 
 from . import execution
-from .backend.neighbors import coordinate_difference_with_pbc
 from .backend.taichi import init as taichi_init
 from .decomposition import (
     QueryRouting,
@@ -820,13 +819,13 @@ class PointCloud:
                 smoothing_tensors,
                 smoothing_tensors_eigvals,
                 smoothing_tensors_eigvecs,
-                nn_dists_vec,
             ) = execution._dispatch(
                 "compute_hmat",
                 backend=self.backend,
                 query_positions=query_positions_local,
-                neighbor_positions=combined_positions[nn_inds_local],
-                neighbor_weights=combined_weights[nn_inds_local],
+                positions=combined_positions,
+                weights=combined_weights,
+                nn_inds=nn_inds_local,
                 boxsize=self.boxsize,
                 hsml=(
                     nn_dists_local[:, -1]
@@ -839,7 +838,6 @@ class PointCloud:
             self.smoothing.smoothing_tensors = smoothing_tensors
             self.smoothing.smoothing_tensors_eigvals = smoothing_tensors_eigvals
             self.smoothing.smoothing_tensors_eigvecs = smoothing_tensors_eigvecs
-            self.smoothing.nn_dists_vec = nn_dists_vec
             self.smoothing.tensor_options = dict(tensor_options)
 
         self.smoothing.nn_inds, self.smoothing.nn_dists = (
@@ -1035,16 +1033,16 @@ class PointCloud:
             backend=self.backend,
             kernel_name=kn,
             dim=self.dim,
-            neighbor_weights=combined_weights[nn_inds_local],
-            r_ij=self._get_rel_coords(
-                self.decomposition.local_positions,
-                combined_positions[nn_inds_local],
-            ),
+            query_positions=self.decomposition.local_positions,
+            positions=combined_positions,
+            weights=combined_weights,
+            nn_inds=nn_inds_local,
             h=(
                 self.smoothing.smoothing_tensors
                 if st == "covariant"
                 else self.smoothing.smoothing_lengths
             ),
+            boxsize=self.boxsize,
             structure=st,
             reduce=False,
         )
@@ -1216,20 +1214,6 @@ class PointCloud:
                 smoothing_tensors_eigvecs, dtype=np.float32
             )
 
-    def _get_rel_coords(
-        self,
-        query_positions: npt.NDArray[np.floating],
-        positions: npt.NDArray[np.floating],
-    ) -> npt.NDArray[np.floating]:
-        """Compute relative coordinates between particles and query positions, respecting PBC."""
-        if self.periodic:
-            return coordinate_difference_with_pbc(
-                query_positions[:, np.newaxis, :],
-                positions,
-                self.boxsize,
-            )
-        return query_positions[:, np.newaxis, :] - positions
-
     def _detect_field_types(self, field_sizes: list[int]) -> npt.NDArray[np.bool_]:
         """Detect whether each field is scalar (1 component) or vector (≥2 components).
 
@@ -1325,21 +1309,16 @@ class PointCloud:
             self.decomposition.local_weights, ghost_info.ghost_weights
         )
 
-        r_ij = self._get_rel_coords(
-            query_positions_local, combined_positions[nn_inds_local]
-        )
-
         # fields is already this rank's local slice (add_fields() now
         # decomposes fields the same way positions/weights are, so no
         # local_global_indices slicing is needed here anymore).
         ghost_fields = push_to_ghosts(self.comm, ghost_info, fields)
         combined_fields = self._combined_local_and_ghost(fields, ghost_fields)
-        fields_temp = combined_fields[nn_inds_local]
 
         if mode in ("divergence", "curl"):
             num_fields = len(fields_sizes)
-            fields_temp = fields_temp.reshape(
-                fields_temp.shape[0], fields_temp.shape[1], num_fields, self.dim
+            combined_fields = combined_fields.reshape(
+                combined_fields.shape[0], num_fields, self.dim
             )
 
         density_local = (
@@ -1349,9 +1328,10 @@ class PointCloud:
         )
         ghost_density = push_to_ghosts(self.comm, ghost_info, density_local)
         combined_density = self._combined_local_and_ghost(density_local, ghost_density)
-        density_temp = combined_density[nn_inds_local]
 
-        weights_temp = combined_weights[nn_inds_local] / (density_temp + 1e-8)
+        # per-particle m_j / rho_j; the backends gather it (and the other
+        # per-particle arrays below) through nn_inds themselves
+        weights_over_density = combined_weights / (combined_density + 1e-8)
 
         h_local = (
             self.smoothing.smoothing_tensors
@@ -1360,17 +1340,19 @@ class PointCloud:
         )
         ghost_h = push_to_ghosts(self.comm, ghost_info, h_local)
         combined_h = self._combined_local_and_ghost(h_local, ghost_h)
-        h_temp = combined_h[nn_inds_local]
 
         return execution._dispatch(
             "interpolate",
             backend=self.backend,
             kernel_name=self.smoothing.kernel_name,
             dim=self.dim,
-            fields=fields_temp,
-            weights=weights_temp,
-            r_ij=r_ij,
-            h=h_temp,
+            query_positions=query_positions_local,
+            positions=combined_positions,
+            weights=weights_over_density,
+            nn_inds=nn_inds_local,
+            fields=combined_fields,
+            h=combined_h,
+            boxsize=self.boxsize,
             mode=mode,
             structure=structure_temp,
             reduce=False,
