@@ -1003,6 +1003,16 @@ class PointCloud:
         -----
         Results are stored in the `smoothing` attribute.
 
+        Only the `num_neighbors` nearest neighbors are summed, so kernels
+        whose compact support exceeds 1 (in units of h) are scaled such that
+        it ends at the smoothing length (the distance to the farthest
+        neighbor) or, for covariant smoothing, on the smoothing-tensor
+        ellipsoid (h -> h / support, H -> H / support). Deposition instead
+        uses a footprint of support * h, so these kernels (e.g. 'gaussian',
+        'quintic_spline', 'tsc', the Wendland kernels) have different
+        physical widths in the two modes. `min_axis` applies to H before
+        this rescaling.
+
         """
         st = self._resolve_structure(structure)
         kn = self._resolve_kernel(kernel_name)
@@ -1425,6 +1435,12 @@ class PointCloud:
         **Curl (2D)** (scalar):
 
         $$(\\nabla \\times \\mathbf{f})_z = \\sum_j \\frac{m_j}{\\rho_j} \\left( f_{x,j}\\frac{\\partial W}{\\partial y} - f_{y,j}\\frac{\\partial W}{\\partial x} \\right)$$
+
+        As in `compute_density`, only the nearest neighbors are summed, and
+        kernels with support > 1 are scaled so their compact support ends at
+        each particle's smoothing length / tensor ellipsoid
+        (h -> h / support), unlike deposition, which uses a footprint of
+        support * h.
 
         Examples
         --------

@@ -66,6 +66,21 @@ def _as_float32(array):
     return np.ascontiguousarray(array, dtype=np.float32)
 
 
+def _support_scaled(h, kernel):
+    """Rescale h so the kernel's compact support does not extend past q = 1.
+
+    In particle mode `h` is the distance to the K-th neighbour (isotropic) or
+    the tensor whose ellipsoid passes through the farthest neighbour
+    (covariant), and only those K neighbours are summed. A kernel whose
+    support is `s` > 1 times h would be truncated there, so h -> h / s.
+    Kernels with s <= 1 are left as they are. Returns a new array; `h`
+    itself is never modified.
+    """
+    if kernel.support <= 1.0:
+        return h
+    return np.asarray(h, dtype=np.float32) / np.float32(kernel.support)
+
+
 def _common_inputs(query_positions, positions, weights, nn_inds, h, boxsize, dim):
     """Contiguous float32/int32 copies (no-ops if already so) + boxsize/periodic."""
     periodic = boxsize is not None
@@ -126,11 +141,13 @@ def density(
     `positions`/`weights` are per-particle arrays of shape (Nc, D)/(Nc,) that
     `nn_inds` (N, K) indexes into; `h` is the smoothing length (N,) or tensor
     (N, D, D) of each query. Relative coordinates are computed in-kernel.
+    The kernel is scaled so its support does not exceed `h` (see `_support_scaled`).
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
 
     kernel = create_spherical_kernel(kernel_name)
+    h = _support_scaled(h, kernel)
     query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
         query_positions, positions, weights, nn_inds, h, boxsize, dim
     )
@@ -337,7 +354,8 @@ def interpolate(
 
     `positions` (Nc, D), `weights` (Nc,) = m_j / rho_j, `fields` (Nc, F) --
     or (Nc, F, D) for divergence/curl -- and `h` (Nc,) / (Nc, D, D) are
-    per-particle arrays that `nn_inds` (N, K) indexes into.
+    per-particle arrays that `nn_inds` (N, K) indexes into. The kernel is
+    scaled so its support does not exceed `h` (see `_support_scaled`).
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
@@ -346,6 +364,7 @@ def interpolate(
         raise NotImplementedError
 
     kernel = create_spherical_kernel(kernel_name)
+    h = _support_scaled(h, kernel)
     query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
         query_positions, positions, weights, nn_inds, h, boxsize, dim
     )

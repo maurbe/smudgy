@@ -4,6 +4,21 @@ from ..neighbors import coordinate_difference_with_pbc
 from .kernels import get_kernel, prepare_kernel_inputs
 
 
+def _support_scaled(h, kernel):
+    """Rescale h so the kernel's compact support does not extend past q = 1.
+
+    In particle mode `h` is the distance to the K-th neighbour (isotropic) or
+    the tensor whose ellipsoid passes through the farthest neighbour
+    (covariant), and only those K neighbours are summed. A kernel whose
+    support is `s` > 1 times h would be truncated there, so h -> h / s.
+    Kernels with s <= 1 are left as they are. Returns a new array; `h`
+    itself is never modified.
+    """
+    if kernel.support <= 1.0:
+        return h
+    return np.asarray(h) / np.float32(kernel.support)
+
+
 def _gather_rel_coords(query_positions, positions, nn_inds, boxsize):
     """r_ij = x_i - x_j for every (query, neighbor) pair, shape (N, K, D)."""
     return coordinate_difference_with_pbc(
@@ -31,7 +46,8 @@ def density(
     """Compute SPH density using isotropic or covariant smoothing.
 
     `positions`/`weights` are per-particle arrays that `nn_inds` (N, K)
-    indexes into; `h` is the smoothing length/tensor of each query.
+    indexes into; `h` is the smoothing length/tensor of each query. The
+    kernel is scaled so its support does not exceed `h` (see `_support_scaled`).
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
@@ -40,6 +56,7 @@ def density(
         kernel_name,
         dim=dim,
     )
+    h = _support_scaled(h, kernel)
     r_ij = _gather_rel_coords(query_positions, positions, nn_inds, boxsize)
     neighbor_weights = np.asarray(weights)[nn_inds]
 
@@ -78,7 +95,8 @@ def interpolate(
     """Interpolate fields using isotropic or covariant smoothing.
 
     `positions`, `weights` (m_j / rho_j), `fields` and `h` are per-particle
-    arrays that `nn_inds` (N, K) indexes into.
+    arrays that `nn_inds` (N, K) indexes into. The kernel is scaled so its
+    support does not exceed `h` (see `_support_scaled`).
     """
     if structure == "separable":
         raise ValueError(
@@ -86,6 +104,7 @@ def interpolate(
         )
 
     kernel = get_kernel(kernel_name, dim=dim)
+    h = _support_scaled(h, kernel)
     r_ij = _gather_rel_coords(query_positions, positions, nn_inds, boxsize)
     fields = np.asarray(fields)[nn_inds]
     weights = np.asarray(weights)[nn_inds]
