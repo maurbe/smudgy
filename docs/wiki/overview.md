@@ -68,7 +68,7 @@ With the kd-tree instance, we can now compute the relevant smoothing information
     The kernel support is therefore the smallest ellipsoid of the shape of $\Sigma$ that still contains every neighbor. For an isotropic neighborhood, each axis reduces to the distance to the farthest neighbor, i.e. to the isotropic smoothing length $h$. The eigenvalues $h_i$ (sorted in descending order) and eigenvectors $e_i$ of $H$ are the smoothing lengths and principal axes of the kernel.
 
     Three options of {py:meth}`~smudgy.pointcloud.PointCloud.compute_smoothing` control $H$:
-    + `ratio_max` (default `10`) caps the axis ratio $h_{\max}/h_{\min}$, which guards against coplanar or collinear neighbor sets.
+    + `ratio_max` (default `100`) caps the axis ratio $h_{\max}/h_{\min}$, which guards against coplanar or collinear neighbor sets.
     + `min_axis` sets a lower bound on every axis, e.g. a softening length.
     + `volume_preserving=True` rescales $H$ so that $\det H = h^{\rm dim}$, keeping only the anisotropic shape. Note that this can shrink the longest axis, so the support may no longer contain every neighbor.
 

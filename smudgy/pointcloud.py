@@ -860,7 +860,7 @@ class PointCloud:
         num_neighbors: int | None = None,
         structure: Structure | None = None,
         # backend: str = None,
-        ratio_max: float = 10.0,
+        ratio_max: float = 100.0,
         min_axis: float | None = None,
         volume_preserving: bool = False,
     ) -> None:
@@ -876,7 +876,7 @@ class PointCloud:
             Smoothing structure for computation.
         backend : {"numpy", "taichi"}, default "numpy"
             Backend used for the smoothing computation.
-        ratio_max : float, default 10.0
+        ratio_max : float, default 100.0
             ``covariant`` only. Maximum axis ratio h_max / h_min of the
             smoothing tensors (>= 1); guards against degenerate (coplanar or
             collinear) neighbor sets.

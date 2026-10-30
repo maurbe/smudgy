@@ -230,7 +230,7 @@ def compute_hmat(
     weights: np.ndarray,
     nn_inds: np.ndarray,
     boxsize: np.ndarray | None = None,
-    ratio_max: float = 10.0,
+    ratio_max: float = 100.0,
     min_axis: float | None = None,
     volume_preserving: bool = False,
     hsml: np.ndarray | None = None,

@@ -39,7 +39,7 @@ def compute_hmat(
     weights: FloatArray,  # (Nc,),  indexed by nn_inds
     nn_inds: IntArray,  # (N, K)
     boxsize: FloatArray | None = None,
-    ratio_max: float = 10.0,  # max axis ratio h_max / h_min
+    ratio_max: float = 100.0,  # max axis ratio h_max / h_min
     min_axis: float | None = None,  # physical floor (softening / cell size)
     volume_preserving: bool = False,  # det H = hsml^D instead of the hull scaling
     hsml: FloatArray | None = None,  # required if volume_preserving
