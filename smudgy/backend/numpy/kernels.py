@@ -60,7 +60,7 @@ def _prepare_covariant_inputs(kernel, r_ij, H, eps):
 
 
 def prepare_kernel_inputs(kernel, structure, r_ij, h, dim, eps=1e-7):
-
+    """Normalize separations for kernel evaluation with smoothing lengths or tensors."""
     if dim not in (1, 2, 3):
         raise ValueError(f"Invalid dim '{dim}'. Must be 1, 2, or 3.")
 

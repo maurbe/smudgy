@@ -100,9 +100,8 @@ def _run_negative_tests_under_mpi(out_path):
     """gather_queries before any query-position interpolate() call, and a
     shape-mismatched local_array passed to gather_particles -- each must
     raise a clear error, synchronized so no rank hangs waiting on a peer
-    that already raised. (There is no "before decompose()" case anymore --
-    decomposition always exists by the time gather_particles could be
-    called at all.)"""
+    that already raised. (Decomposition happens in PointCloud.__init__, so
+    it always exists by the time gather_particles could be called at all.)"""
     from mpi4py import MPI
 
     from smudgy import PointCloud

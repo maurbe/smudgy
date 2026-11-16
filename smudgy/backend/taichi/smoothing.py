@@ -235,49 +235,40 @@ def compute_hmat(
     volume_preserving: bool = False,
     hsml: np.ndarray | None = None,
 ):
-    """Compute anisotropic smoothing tensors from neighbor positions and weights.
+    """Compute covariant smoothing tensors (Marinho 2021).
 
-    H = zeta_max * Sigma^(1/2), following Marinho (2021), eqs. 39-44: the support
-    ellipsoid is the smallest one of the covariance's shape that still contains
-    every neighbour. In the isotropic limit each axis reduces to the distance to
-    the farthest neighbour, i.e. to the usual smoothing length, for any K.
+    ``H = zeta_max * Sigma^(1/2)``, the smallest ellipsoid of the neighbours'
+    covariance shape that encloses all neighbours.
 
     Parameters
     ----------
     query_positions : np.ndarray
-        Array of query positions, shape (N, D).
+        Query positions, shape (N, D).
     positions : np.ndarray
-        Array of particle positions, shape (Nc, D), indexed by `nn_inds`.
+        Particle positions, shape (Nc, D), indexed by `nn_inds`.
     weights : np.ndarray
-        Array of particle weights, shape (Nc,), indexed by `nn_inds`.
+        Particle weights, shape (Nc,), indexed by `nn_inds`.
     nn_inds : np.ndarray
-        Neighbor indices into `positions`/`weights` for each query, shape (N, K).
+        Neighbour indices of each query, shape (N, K).
     boxsize : np.ndarray, optional
-        Array of box sizes for periodic boundary conditions. If None, no periodicity is applied.
-    ratio_max : float, optional
-        Maximum axis ratio h_max / h_min (>= 1). Guards against degenerate
-        (coplanar or collinear) neighbor sets.
+        Box sizes for periodic boundary conditions.
+    ratio_max : float, default 100.0
+        Maximum axis ratio h_max / h_min (>= 1).
     min_axis : float, optional
-        Physical floor on the shortest axis, e.g. the softening length or cell
-        size. Only ever enlarges axes, so the hull property is preserved. Also
-        keeps H invertible if every neighbor coincides with the query (H = 0
-        otherwise).
-    volume_preserving : bool, optional
-        If True, rescale the axes so that det H = hsml^dim, i.e. anisotropy in
-        shape only. Requires `hsml`. Note that this can shrink the longest axis
-        and so may break the enclosing-hull property.
+        Lower bound on every axis.
+    volume_preserving : bool, default False
+        Rescale the axes so that det H = hsml^D. Requires `hsml`.
     hsml : np.ndarray, optional
-        Isotropic smoothing lengths, required if `volume_preserving` is True.
+        Isotropic smoothing lengths, shape (N,).
 
     Returns
     -------
     H : np.ndarray
-        Array of smoothing tensors for each query position.
+        Smoothing tensors, shape (N, D, D).
     eigvals : np.ndarray
-        Eigenvalues of H, i.e. the principal smoothing lengths, descending.
+        Principal smoothing lengths in descending order, shape (N, D).
     eigvecs : np.ndarray
-        Eigenvectors of H (columns), matching the order of `eigvals`.
-
+        Principal axes (columns), shape (N, D, D).
     """
     dim = query_positions.shape[-1]
     if dim not in (1, 2, 3):

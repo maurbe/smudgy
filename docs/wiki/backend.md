@@ -8,8 +8,10 @@
 
 | Backend | Description |
 |---------|-------------|
-| `"taichi"` (default) | High-performance backend supporting multi-core CPUs and GPUs. Recommended for all workloads. |
-| `"numpy"` | Reference implementation based on NumPy. Useful for debugging, validation and environments where Taichi is unavailable. |
+| `"taichi"` (default) | High-performance backend supporting multi-core CPUs and GPUs. Supports all operations and is recommended for all workloads. |
+| `"numpy"` | Vectorized reference implementation based on NumPy, used for testing and cross-validation. Supports interpolation and fixed-grid deposition (`adaptive=False`) only. |
+
+Taichi is a required dependency of `smudgy` in either case.
 
 The backend can be selected when constructing a {py:class}`~smudgy.pointcloud.PointCloud`:
 
@@ -32,7 +34,11 @@ The default backend is implemented using the
 [Taichi programming language](https://www.taichi-lang.org/),
 allowing `smudgy` to automatically exploit parallel hardware while exposing a simple NumPy-like interface. Unlike explicit parallel programming, no threading or GPU kernels have to be written by the user -- the Taichi backend takes care of this automatically.
 
-When using the `"taichi"` backend, an execution target (accelerator) can also be selected.
+When using the `"taichi"` backend, an execution target (accelerator) can also be selected via the `arch` keyword: `"cpu"`, `"gpu"`, `"cuda"`, `"vulkan"` or `"metal"`. If no `arch` is given, `smudgy` keeps the already active Taichi runtime, or initializes it with `"gpu"` on first use (Taichi falls back to the CPU if no supported GPU is found). Any other keyword argument is forwarded to `ti.init`.
+
+:::{caution}
+The Taichi runtime is shared by all {py:class}`~smudgy.pointcloud.PointCloud` instances of a Python process. Switching the architecture of a running runtime (e.g. `"gpu"` → `"cpu"`) requires `force=True` and recompiles all kernels, so it is best to choose `arch` once, at the start of a script.
+:::
 
 ### CPU (multi-threaded)
 
@@ -43,7 +49,7 @@ pc = sm.PointCloud(
     arch="cpu",
 ) 
 # or
-pc.set_backend("taichi", arch="cpu")
+pc.set_backend("taichi", arch="cpu", force=True)
 ```
 
 Taichi automatically distributes work across all available CPU cores using a shared-memory parallel execution model. If desired, the number of threads can be limited:
@@ -109,47 +115,51 @@ This data-parallel execution model is particularly well suited for interpolation
 
 ## Distributed parallelization with MPI
 
-While Taichi efficiently utilizes the resources of a *single* machine, many scientific datasets are simply too large to fit into the memory of a single computer or to be processed efficiently on one machine alone. For these cases, `smudgy` provides MPI wrappers based on
-[`mpi4py`](https://mpi4py.github.io/),
-allowing computations to be distributed across many independent MPI processes (often called *ranks*).
+While Taichi efficiently utilizes the resources of a *single* machine, many scientific datasets are simply too large to fit into the memory of a single computer or to be processed efficiently on one machine alone. For these cases, `smudgy` distributes the computations across many independent MPI processes (*ranks*) using
+[`mpi4py`](https://mpi4py.github.io/).
+These ranks may reside on different CPU sockets, on multiple machines, or on different nodes of an HPC cluster.
 
-These ranks may reside
+No changes to the analysis script are required: if `smudgy` detects more than one MPI rank when a {py:class}`~smudgy.pointcloud.PointCloud` is constructed, it decomposes the point cloud and each rank subsequently works on its own share. The same script thus runs unmodified on a laptop, a multi-GPU workstation, or across many nodes of a cluster. A distributed run proceeds in four stages.
 
-- on different CPU sockets,
-- on multiple machines,
-- on different nodes of an HPC cluster.
+### 1. Domain decomposition
 
-Each rank executes the same Python program but operates only on a subset of the data. Conceptually, a dataset containing one hundred million particles might be divided as
+The point cloud is partitioned once, at construction. Only rank 0 reads the input arrays (`positions`, `weights`); the arguments are ignored on all other ranks. The particles are ordered along a [Hilbert curve](https://en.wikipedia.org/wiki/Hilbert_curve), which maps spatially close points to nearby indices, and the curve is cut into contiguous, count-balanced intervals, one per rank. Rank 0 sends each rank only its own chunk, so the full dataset is never broadcast:
 
 ```text
-Rank 0   particles          0 – 12,499,999
-Rank 1   particles 12,500,000 – 24,999,999
-Rank 2   ...
-...
-Rank 7   particles 87,500,000 – 99,999,999
-```
-
-Each rank then performs the requested operations, where the sub-problems are further parallelized using the Taichi backend as described above. Most distributed operations follow three stages:
-
-1. **Scatter** -- the particle data is divided among all MPI ranks (here R0 to R3), and each process receives only its local subset of particles:
-
-```text
-Global particle set
-            │
+Global particle set (rank 0)
+            │  Hilbert sort + split into equal-count chunks
             ▼
-    R0 | R1 | R2 | R3  
+    R0 | R1 | R2 | R3      (spatially compact regions)
 ```
 
-2. **Local computation** -- each rank independently performs the requested operation. Since the ranks do not interact during this stage, all computations proceed simultaneously. For instance, when depositing particles onto a grid, every rank creates a **local grid** and deposits its own chunk of particles:
+Afterwards, `pc.positions` and `pc.weights` hold only the rank's own particles (in Hilbert order), and `pc.decomposition` ({py:class}`~smudgy.decomposition.DecompositionInfo`) records where they came from. Per-particle fields must be added via {py:meth}`~smudgy.pointcloud.PointCloud.add_fields`, which (again reading the full array on rank 0) splits them in the same way. A plain attribute assignment such as `pc.temperature = temperature` is *not* split, and `smudgy` warns when it detects one. The decomposition is not updated after construction, i.e. it is not possible to move particles and rebalance an existing point cloud.
 
-```text
-Rank 0  → local grid
-Rank 1  → local grid
-Rank 2  → local grid
-Rank 3  → local grid
+### 2. Ghost particles and neighbour search
+
+Since a particle's nearest neighbours may reside on another rank, each rank also imports the required boundary particles from other ranks as *ghost particles*. Starting from a search radius set by the local particle density, it requests all particles in that region and enlarges the radius until each of its particles has found its $N_{\rm ngb}$ neighbours. The neighbour search is therefore exact and identical to a single-rank run. All subsequent neighbour queries use a local $k$-d tree built over the rank's own and ghost particles.
+
+This step runs automatically the first time neighbours are needed, or explicitly via {py:meth}`~smudgy.pointcloud.PointCloud.find_neighbors`. Its `max_iterations` argument limits the number of radius-growing iterations, and `on_max_iterations` decides whether an unconverged search raises an error (`"raise"`, default) or only warns. Since the radius cannot grow beyond half the box size in periodic boxes, `num_neighbors` must be small enough compared to the number of particles per rank.
+
+Query positions passed to {py:meth}`~smudgy.pointcloud.PointCloud.interpolate` or {py:meth}`~smudgy.pointcloud.PointCloud.compute_smoothing` (again only read on rank 0) are routed through the same Hilbert intervals to the rank containing the surrounding region.
+
+### 3. Local computation
+
+Each rank then independently performs the requested operation on its own particles (plus ghosts), parallelized within the rank by the Taichi backend. For instance, when depositing particles onto a grid, every rank deposits its own particles onto a **local grid**.
+
+### 4. Collecting the results
+
+Per-particle results (smoothing lengths and tensors, densities, interpolated values) **remain distributed**: each rank holds the values of its own particles or query points. They are collected in the original input order on a single rank on demand:
+
+```python
+rho = pc.get("density_isotropic")             # looks up pc.smoothing / pc attributes
+h   = pc.get("smoothing_lengths")
+f_p = pc.gather_particles(pc.interpolate("f"))                          # at the particles
+f_q = pc.gather_queries(pc.interpolate("f", query_positions=queries))   # at query positions
 ```
 
-3. **Reduction** -- the local results are combined into the final output. Most operations compute per-point quantities, e.g. smoothing lengths, interpolated values, etc., and thus the local results only need to be appended to one another to form the final output. These operations gather arrays back to a single rank using collective communication such as `MPI.Gather` or `MPI.Gatherv`, depending on the operation and data layout. For additive quantities such as grid deposition, the reduction is performed using one of the MPI operations (e.g. `MPI.Allreduce` or `MPI.Reduce`), which sum the contributions from all local grids from every rank.
+All three return the full array on the root rank (rank 0 by default) and `None` on all other ranks.
+
+Deposited grids, in contrast, are summed across ranks automatically. By default, the summed grid is returned on every rank (`MPI.Allreduce`); with `gather_to_root=True`, it is only delivered to the `root` rank (`MPI.Reduce`), which saves memory and communication when only one rank needs it:
 
 ```text
 Local grid 0
@@ -161,8 +171,12 @@ Local grid 2
 Local grid 3
         │
         ▼
-Final deposition grid
+Final deposition grid (every rank, or `root` only)
 ```
+
+:::{tip}
+On a single rank, the decomposition, ghost exchange and gathers are skipped (the particle order is left unchanged), and `get`, `gather_particles` and `gather_queries` simply return the full arrays. Scripts that use them therefore run unmodified with any number of ranks.
+:::
 
 ---
 

@@ -1676,6 +1676,52 @@ def _covariant_2d(
         )
         use_samples = eta < eta_crit or degenerate
 
+        # cell ceil(x + s) lies entirely outside the (compact) support
+        i_min = i0
+        i_max = ti.ceil(x_cell + support_x_cell, int) - 1
+        j_min = j0
+        j_max = ti.ceil(y_cell + support_y_cell, int) - 1
+        if ti.static(not periodic):
+            i_min = ti.max(i_min, 0)
+            i_max = ti.min(i_max, Nx - 1)
+            j_min = ti.max(j_min, 0)
+            j_max = ti.min(j_max, Ny - 1)
+
+        # Quadrature pass 1 (total kernel weight over the affected cells) is
+        # evaluated before the branch decision: a strongly elongated
+        # ellipse can span several cells along the grid axes (eta >=
+        # eta_crit) while being thinner than a cell across its minor axis,
+        # so that no quadrature node falls inside its support. Its total is
+        # then 0 and, instead of silently dropping the particle's mass, it
+        # is deposited via the (normalized) sample table.
+        kernel_prefactor = 0.0
+        total_integral = 0.0
+        if not use_samples:
+            detH = eval0 * eval1
+            kernel_prefactor = sig / detH
+            for a in range(i_min, i_max + 1):
+                for b in range(j_min, j_max + 1):
+                    total_integral += _covariant_cell_integral_2d(
+                        evaluate_fn,
+                        quad_points,
+                        dim,
+                        a,
+                        b,
+                        x_cell,
+                        y_cell,
+                        e0x,
+                        e0y,
+                        e1x,
+                        e1y,
+                        eval0,
+                        eval1,
+                        kernel_prefactor,
+                        cellSize_x,
+                        cellSize_y,
+                    )
+            if total_integral <= 0.0:
+                use_samples = True
+
         if use_samples and fits:
             # sample deposition summed per cell in a local buffer first (one
             # atomic per touched cell instead of one per sample)
@@ -1734,49 +1780,8 @@ def _covariant_2d(
                             )
 
         else:
-
-            detH = eval0 * eval1
-            kernel_prefactor = sig / detH
-
-            # cell ceil(x + s) lies entirely outside the (compact) support
-            i_min = i0
-            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
-
-            j_min = j0
-            j_max = ti.ceil(y_cell + support_y_cell, int) - 1
-
-            if ti.static(not periodic):
-                i_min = ti.max(i_min, 0)
-                i_max = ti.min(i_max, Nx - 1)
-                j_min = ti.max(j_min, 0)
-                j_max = ti.min(j_max, Ny - 1)
-
-            total_integral = 0.0
-
-            for a in range(i_min, i_max + 1):
-                for b in range(j_min, j_max + 1):
-
-                    integral = _covariant_cell_integral_2d(
-                        evaluate_fn,
-                        quad_points,
-                        dim,
-                        a,
-                        b,
-                        x_cell,
-                        y_cell,
-                        e0x,
-                        e0y,
-                        e1x,
-                        e1y,
-                        eval0,
-                        eval1,
-                        kernel_prefactor,
-                        cellSize_x,
-                        cellSize_y,
-                    )
-
-                    total_integral += integral
-
+            # cell-quadrature branch, mass-conserving via two-pass
+            # renormalization (pass 1 computed above)
             if total_integral > 0.0:
 
                 correction = 1.0 / total_integral
@@ -1929,6 +1934,67 @@ def _covariant_3d(
         )
         use_samples = eta < eta_crit or degenerate
 
+        # cell ceil(x + s) lies entirely outside the (compact) support, so
+        # the stencil stops one cell before it
+        i_min = i0
+        i_max = ti.ceil(x_cell + support_x_cell, int) - 1
+        j_min = j0
+        j_max = ti.ceil(y_cell + support_y_cell, int) - 1
+        k_min = k0
+        k_max = ti.ceil(z_cell + support_z_cell, int) - 1
+        if ti.static(not periodic):
+            i_min = ti.max(i_min, 0)
+            i_max = ti.min(i_max, Nx - 1)
+            j_min = ti.max(j_min, 0)
+            j_max = ti.min(j_max, Ny - 1)
+            k_min = ti.max(k_min, 0)
+            k_max = ti.min(k_max, Nz - 1)
+
+        # Quadrature pass 1 (total kernel weight over the affected cells) is
+        # evaluated before the branch decision: a strongly elongated
+        # ellipsoid can span several cells along every grid axis (eta >=
+        # eta_crit) while being thinner than a cell across its minor axis,
+        # so that no quadrature node falls inside its support. Its total is
+        # then 0 and, instead of silently dropping the particle's mass, it
+        # is deposited via the (normalized) sample table.
+        kernel_prefactor = 0.0
+        total_integral = 0.0
+        if not use_samples:
+            detH = eval0 * eval1 * eval2
+            kernel_prefactor = sig / detH
+            for a in range(i_min, i_max + 1):
+                for b in range(j_min, j_max + 1):
+                    for c in range(k_min, k_max + 1):
+                        total_integral += _covariant_cell_integral_3d(
+                            evaluate_fn,
+                            quad_points,
+                            dim,
+                            a,
+                            b,
+                            c,
+                            x_cell,
+                            y_cell,
+                            z_cell,
+                            e0x,
+                            e0y,
+                            e0z,
+                            e1x,
+                            e1y,
+                            e1z,
+                            e2x,
+                            e2y,
+                            e2z,
+                            eval0,
+                            eval1,
+                            eval2,
+                            kernel_prefactor,
+                            cellSize_x,
+                            cellSize_y,
+                            cellSize_z,
+                        )
+            if total_integral <= 0.0:
+                use_samples = True
+
         if use_samples and fits:
             # --- anti-aliasing branch: deposit via precomputed kernel samples,
             # summed per cell in a local buffer first (one atomic per touched
@@ -2030,61 +2096,8 @@ def _covariant_3d(
                             ti.atomic_add(fields[ix, iy, iz, f], quantities[n, f] * w)
 
         else:
-            # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            detH = eval0 * eval1 * eval2
-            kernel_prefactor = sig / detH
-
-            # cell ceil(x + s) lies entirely outside the (compact) support,
-            # so the stencil stops one cell before it
-            i_min = i0
-            i_max = ti.ceil(x_cell + support_x_cell, int) - 1
-            j_min = j0
-            j_max = ti.ceil(y_cell + support_y_cell, int) - 1
-            k_min = k0
-            k_max = ti.ceil(z_cell + support_z_cell, int) - 1
-
-            if ti.static(not periodic):
-                i_min = ti.max(i_min, 0)
-                i_max = ti.min(i_max, Nx - 1)
-                j_min = ti.max(j_min, 0)
-                j_max = ti.min(j_max, Ny - 1)
-                k_min = ti.max(k_min, 0)
-                k_max = ti.min(k_max, Nz - 1)
-
-            # pass 1: total mass over the affected cells (no per-cell storage)
-            total_integral = 0.0
-            for a in range(i_min, i_max + 1):
-                for b in range(j_min, j_max + 1):
-                    for c in range(k_min, k_max + 1):
-                        integral = _covariant_cell_integral_3d(
-                            evaluate_fn,
-                            quad_points,
-                            dim,
-                            a,
-                            b,
-                            c,
-                            x_cell,
-                            y_cell,
-                            z_cell,
-                            e0x,
-                            e0y,
-                            e0z,
-                            e1x,
-                            e1y,
-                            e1z,
-                            e2x,
-                            e2y,
-                            e2z,
-                            eval0,
-                            eval1,
-                            eval2,
-                            kernel_prefactor,
-                            cellSize_x,
-                            cellSize_y,
-                            cellSize_z,
-                        )
-                        total_integral += integral
-
+            # --- cell-quadrature branch, mass-conserving via two-pass
+            # renormalization (pass 1 computed above) ---
             if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
                 correction = 1.0 / total_integral
 
@@ -2503,21 +2516,23 @@ def deposit(
         A fixed-grid stencil when ``adaptive=False``; otherwise a kernel from
         the selected adaptive structure's family.
     structure : {"separable", "isotropic", "covariant"}, optional
-        Required when ``adaptive=True``. Separable kernels use names such as
-        ``"tsc_rect"``; isotropic and covariant kernels are spherical.
-        - fixed-grid: `kernel_name` is one of
-          "ngp"/"cic"/"tsc"/"bspline4"/"bspline5"/"bspline6".
-        - separable: needs `particle_hsml` (N, D). Integrated exactly;
-          `integration_method` is ignored.
-        - isotropic: needs `particle_hsml` (N,), a spherical kernel such as
-          "cubic_spline", `integration_method`, `eta_crit`.
+        Required when ``adaptive=True``:
+
+        - fixed-grid (``adaptive=False``): `kernel_name` is one of
+          ``"ngp"``, ``"cic"``, ``"tsc"``, ``"bspline4"``, ``"bspline5"``,
+          ``"bspline6"``.
+        - separable: needs `particle_hsml` (N, D) and one of the separable
+          kernels ``"tophat"``, ``"tsc"``, ``"gaussian"``. Integrated
+          exactly; `integration_method` is ignored.
+        - isotropic: needs `particle_hsml` (N,), a radial kernel such as
+          ``"cubic_spline"``, `integration_method`, `eta_crit`.
         - covariant: needs `particle_hmat_eigvecs` (N, D, D),
           `particle_hmat_eigvals` (N, D), plus the same kernel/quadrature
-          options as "isotropic".
+          options as ``"isotropic"``.
 
     Returns
     -------
-    grid_fields : ndarray, shape (*gridnums, F)
+    grid_fields : ndarray, shape (F, *gridnums)
     grid_weights : ndarray, shape (*gridnums,)
 
     """
@@ -2615,7 +2630,7 @@ if __name__ == "__main__":
     N = int(1e6)
     F = 4
     structure = "separable"
-    kernel_name = "tsc_rect"
+    kernel_name = "tsc"
 
     particle_positions = np.random.uniform(0, 1, (N, dim))
     particle_fields = np.ones((N, F))

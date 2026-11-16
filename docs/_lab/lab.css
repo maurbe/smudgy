@@ -1,0 +1,26 @@
+/* Theme lab (SMUDGY_THEME_LAB=1), not part of normal builds. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,500;0,700;1,400&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,500;0,700;1,400&family=Source+Serif+4:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Code+Pro:wght@400;500;700&family=Atkinson+Hyperlegible+Mono:wght@400;500;700&display=swap');
+
+/* Reset token styles of the base Pygments CSS so only the lab pair applies. */
+html[data-lab-code] body[data-theme] .highlight span {
+    color: inherit;
+    font-weight: normal;
+    font-style: normal;
+    background-color: transparent;
+}
+
+#lab-panel {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 1000;
+    font: 13px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #1f2330; background: #ffffffee; border: 1px solid #c9cdd8;
+    border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,.25);
+    padding: .6rem .7rem; width: 16.5rem;
+}
+#lab-panel.collapsed { width: auto; padding: .3rem .6rem; }
+#lab-panel.collapsed .lab-body { display: none; }
+#lab-panel .lab-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 700; }
+#lab-panel label { display: grid; grid-template-columns: 6.2rem 1fr; align-items: center; gap: .3rem; margin: .25rem 0; }
+#lab-panel select { width: 100%; min-width: 0; font: inherit; padding: 1px 2px; color: #1f2330; background: #fff; border: 1px solid #c9cdd8; border-radius: 4px; }
+#lab-panel .lab-btns { display: flex; gap: .4rem; margin-top: .5rem; }
+#lab-panel button { font: inherit; flex: 1; padding: .2rem; border: 1px solid #c9cdd8; border-radius: 4px; background: #f3f4f8; color: #1f2330; cursor: pointer; }
+#lab-panel textarea { width: 100%; height: 7.5rem; margin-top: .4rem; font: 11px/1.3 ui-monospace, Menlo, monospace; display: none; }

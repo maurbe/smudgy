@@ -1,32 +1,8 @@
-"""Taichi port of kernels.h / kernels.cpp.
+"""Taichi implementations of the separable and spherical smoothing kernels.
 
-Design notes
-------------
-C++ used runtime polymorphism (SeparableKernel / SphericalKernel base classes,
-std::shared_ptr, virtual calls) to pick a kernel at runtime and dispatch on
-`dim_` inside each method.
-
-Taichi has no vtables, so both axes of that dispatch are moved to Python /
-compile time instead:
-
-  * "which kernel" -> resolved once in Python via the KERNELS_* registries
-    below, then the chosen ti.func objects are passed into call sites as
-    ti.template() arguments. Taichi fully inlines them -- zero indirection,
-    strictly cheaper than the C++ virtual-call version.
-
-  * "which dim" -> `dim` is also passed as ti.template() (a compile-time
-    Python int, not a runtime field), so the `if (dim_ == 1) ...` chains
-    become `ti.static(dim == 1)` and are constant-folded away entirely.
-    Each (kernel, dim) combination gets its own specialized, branch-free
-    compiled kernel.
-
-Per-kernel constants (SUPPORT, NODE_1, NODE_2, EPS) are plain Python module
-level floats, closed over by the ti.funcs -- Taichi inlines them as literals,
-same mechanism as LUCY_SUPPORT in the earlier port.
-
-Piecewise branches *on q* (the running coordinate, not on dim) are genuine
-runtime data-dependent ifs, exactly as in the C++ -- there is nothing to fold
-away there, so they're left as ordinary `if`/`elif`/`else` inside the funcs.
+Kernels are looked up by name in the ``SEPARABLE_KERNELS`` and
+``SPHERICAL_KERNELS`` registries; the dimension is a compile-time parameter,
+so every (kernel, dimension) pair is compiled into its own specialized code.
 """
 
 from collections.abc import Callable
@@ -1439,43 +1415,30 @@ def build_kernel_sample_grid(
     eta_crit: float,
     nyquist_factor: float = 2.0,
 ):
-    """Build a Nyquist-safe, spherically-uniform kernel sample table.
+    """Build the pre-computed kernel sample table used for unresolved kernels.
 
-    The table geometry (n_q, per-shell point counts, directions) is sized
-    purely from `eta_crit` -- independent of any specific particle's h, the
-    grid's cell size, or the kernel's own support multiple -- so the
-    returned table is safe (by construction) for every particle whose
-    actual eta < eta_crit.
+    The table is Nyquist-safe for every particle with ``eta < eta_crit``.
 
     Parameters
     ----------
     kernel_name : str
-        Name of the kernel to sample (looked up via create_spherical_kernel).
+        Name of the (spherical) kernel to sample.
     dim : int
         Dimension of the kernel (1, 2, or 3).
     eta_crit : float
-        Critical eta (diameter convention: eta = 2 * support * h / cell_size)
-        at which the deposition loop switches from tabulated samples to
-        numerical quadrature.
-    nyquist_factor : float
-        Samples-per-cell-width safety margin. 2.0 is the Nyquist minimum;
-        values > 2.0 add extra safety margin at the cost of more points.
+        Critical kernel diameter in units of the cell size, below which the
+        sample table is used instead of numerical quadrature.
+    nyquist_factor : float, default 2.0
+        Samples per cell width; 2.0 is the Nyquist minimum.
 
     Returns
     -------
     dict
-        - "dim": int
-        - "count": int, total number of samples
-        - "n_q": int, number of positive-radial shells (diagnostic)
-        - "coords": np.ndarray (count, dim), sample coordinates in units of
-          q = r/h (i.e. NOT yet scaled by any particle's physical h)
-        - "q": np.ndarray (count,), radial distance in units of q = r/h
-        - "integrals": np.ndarray (count,), normalized kernel mass
-          contribution of each sample (sums to ~1.0 over the full table)
-
-        The arrays are cached across calls (the table depends only on the
-        arguments) and therefore read-only.
-
+        Read-only, cached table with keys ``"dim"``, ``"count"`` (number of
+        samples), ``"n_q"`` (number of radial shells), ``"coords"`` (sample
+        coordinates in units of ``h``, shape (count, dim)), ``"q"`` (radial
+        distances, shape (count,)) and ``"integrals"`` (integral weight of each
+        sample, summing to unity).
     """
     return dict(
         _build_kernel_sample_grid_cached(
@@ -1599,20 +1562,19 @@ def _build_kernel_sample_grid_cached(
 # Utility functions (debugging / testing parity with the C++ helpers)
 # =============================================================================
 def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
-    """Sigma * evaluate_integral(bounds) over the box [-support, support]^dim.
+    """Integrate a separable kernel over its support (should be unity).
 
     Parameters
     ----------
     kernel_name : str
-        Name of the kernel to integrate.
+        Name of the separable kernel.
     dim : int
         Dimension of the kernel (1, 2, or 3).
 
     Returns
     -------
     float
-        Total integral of the kernel over the box [-support, support]^dim.
-
+        Total integral of the kernel.
     """
     from . import init as _taichi_init
 
@@ -1638,23 +1600,22 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
 def compute_total_integral_spherical(
     kernel_name: str, dim: int, eta_crit: float
 ) -> float:
-    """Sigma * evaluate_integral(bounds) over the box [-support, support]^dim.
+    """Integrate a spherical kernel via its sample table (should be unity).
 
     Parameters
     ----------
     kernel_name : str
-        Name of the kernel to integrate.
+        Name of the spherical kernel.
     dim : int
         Dimension of the kernel (1, 2, or 3).
     eta_crit : float
-        Critical eta (diameter convention) used to size the sample grid --
-        see `build_kernel_sample_grid`.
+        Critical eta used to size the sample table, see
+        :func:`build_kernel_sample_grid`.
 
     Returns
     -------
     float
-        Total integral of the kernel over the box [-support, support]^dim.
-
+        Total integral of the kernel.
     """
     from . import init as _taichi_init
 
@@ -1702,20 +1663,19 @@ def _sample_separable_1d(
 
 
 def get_spherical_kernel_values_1D(kernel_name: str):
-    """Get 1D values of a separable kernel for testing and plotting.
+    """Sample the 1D profile of a spherical (radial) kernel.
 
     Parameters
     ----------
     kernel_name : str
-        Name of the separable kernel to sample.
+        Name of the spherical kernel.
 
     Returns
     -------
     q : np.ndarray
-        1D array of sample points in the range [-support, support].
+        Sample points in units of the smoothing length.
     values : np.ndarray
-        1D array of kernel values corresponding to the sample points.
-
+        Kernel values at the sample points.
     """
     from . import init as _taichi_init
 
@@ -1731,20 +1691,19 @@ def get_spherical_kernel_values_1D(kernel_name: str):
 
 
 def get_separable_kernel_values_1D(kernel_name: str):
-    """Get 1D values of a separable kernel for testing and plotting.
+    """Sample the 1D profile of a separable kernel.
 
     Parameters
     ----------
     kernel_name : str
-        Name of the separable kernel to sample.
+        Name of the separable kernel.
 
     Returns
     -------
     q : np.ndarray
-        1D array of sample points in the range [-support, support].
+        Sample points in units of the smoothing length.
     values : np.ndarray
-        1D array of kernel values corresponding to the sample points.
-
+        Kernel values at the sample points.
     """
     from . import init as _taichi_init
 

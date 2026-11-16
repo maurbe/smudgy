@@ -1,16 +1,6 @@
-"""High-precision erf() for Taichi, ported from Sun/fdlibm's s_erf.c (the same
-rational-approximation algorithm used by glibc, musl, and most libm's).
+"""Double-precision ``erf`` for Taichi (port of the fdlibm algorithm).
 
-Accuracy: within ~1 ulp of double precision for |x| < 6 when evaluated in
-ti.f64 (i.e. effectively machine-precision, vs. ~1.5e-7 for the 5-term
-Abramowitz & Stegun 7.1.26 formula, or ~2.5e-5 for the 3-term 7.1.25 "fast"
-formula many codebases use). |x| >= 6 saturates to +-1, which is correct to
-double precision anyway (erfc(6) ~ 2e-17).
-
-Note: Taichi has no built-in erf (checked the math module docs/source), and
-there's no documented way to call libm's erf() through the FFI from Taichi
-kernel code, so this is a from-scratch rational-approximation port rather
-than a wrapper around something native.
+Accurate to about 1 ulp in ``ti.f64``; Taichi itself provides no ``erf``.
 """
 
 import taichi as ti

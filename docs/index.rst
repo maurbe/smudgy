@@ -18,7 +18,7 @@
 .. toctree::
     :caption: Tutorials
     :maxdepth: 2
-    
+
     tutorials/tutorial_interpolation
     tutorials/tutorial_deposition
     tutorials/tutorial_exploring_kernels
@@ -29,4 +29,15 @@
 
     api/pointcloud
     api/smooth
+    api/kernels
     api/utils
+    api/decomposition
+    api/ghosts
+    api/neighbors
+
+.. toctree::
+    :caption: Backends
+    :maxdepth: 2
+
+    api/backend_taichi
+    api/backend_numpy

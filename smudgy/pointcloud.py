@@ -26,7 +26,7 @@ InterpolationMode = Literal["field", "gradient", "divergence", "curl"]
 
 
 class PointCloud:
-    """Represent a collection of particles for operations."""
+    """Point cloud of particles with positions and weights, the central smudgy object."""
 
     def __init__(
         self,
@@ -37,17 +37,11 @@ class PointCloud:
         backend: str = "taichi",
         **kwargs,
     ) -> None:
-        """Initialize a PointCloud container for particle-based operations.
+        """Initialize a point cloud.
 
-        Every rank ends up holding only its own share of the particles
-        (`self.positions`/`self.weights` are local, count-balanced,
-        Hilbert-sorted slices, never the full dataset) -- construction reads
-        the full arrays on rank 0 only and immediately Hilbert-partitions
-        and scatters them (see `decomposition.hilbert_partition_and_scatter`),
-        rather than broadcasting a full copy to every rank first. See
-        `self.decomposition` (`decomposition.DecompositionInfo`) for
-        provenance (e.g. `local_global_indices`, to reassemble a rank-local
-        result back into original order via `gather_particles`).
+        On several MPI ranks, the input arrays are only read on rank 0 and the
+        particles are distributed across the ranks; ``self.positions`` and
+        ``self.weights`` then hold only the current rank's share.
 
         Parameters
         ----------
@@ -62,10 +56,16 @@ class PointCloud:
         verbose : bool, default True
             Verbosity flag.
         backend : str, default "taichi"
-            String to determine backend.
+            Computational backend, one of ``"taichi"`` or ``"numpy"``. The
+            numpy backend supports interpolation and fixed-grid
+            (``adaptive=False``) deposition only.
         **kwargs : dict
-            Additional keyword arguments for backend initialization.
-
+            Forwarded to the Taichi runtime initialization
+            (:func:`smudgy.backend.taichi.init`), e.g. ``arch`` (one of
+            ``"cpu"``, ``"gpu"``, ``"cuda"``, ``"vulkan"``, ``"metal"``;
+            ``"gpu"`` on first initialization if omitted), ``force=True`` to
+            re-initialize an already running runtime, or any other
+            ``ti.init`` keyword argument (e.g. ``cpu_max_num_threads``).
         """
         # Initialize MPI environment
         self.verbose = verbose
@@ -242,10 +242,21 @@ class PointCloud:
     # Set utilities
     # =============================================================================
     def set_backend(self, backend: str = "taichi", **kwargs) -> None:
-        """Set the backend for computations, one of [numpy, taichi]."""
+        """Set the computational backend.
+
+        Parameters
+        ----------
+        backend : str, default "taichi"
+            One of ``"taichi"`` or ``"numpy"``.
+        **kwargs : dict
+            Forwarded to :func:`smudgy.backend.taichi.init` when
+            ``backend="taichi"`` (e.g. ``arch``, ``force``); see
+            :class:`PointCloud`.
+
+        """
         assert isinstance(
             backend, str
-        ), f"'kernel_name' must be a string but found {type(backend)}"
+        ), f"'backend' must be a string but found {type(backend)}"
         assert backend in [
             "numpy",
             "taichi",
@@ -256,39 +267,34 @@ class PointCloud:
         if self.verbose and getattr(self, "rank", 0) == 0:
             print(f"[smudgy] Set {backend} backend")
 
-    def decompose(self) -> "PointCloud":
-        """No-op: decomposition now happens automatically in `__init__`.
-
-        Kept only so an existing `PointCloud(...).decompose().find_neighbors()
-        ...` call chain doesn't need to be edited -- there's no full array
-        left to re-decompose from by the time this could be called anyway
-        (see `self.decomposition`, already populated by `__init__`).
-        Re-decomposing/rebalancing after construction (e.g. after particle
-        positions move during a simulation) is not supported.
-
-        Returns
-        -------
-        PointCloud
-            self, for chaining.
-
-        """
-        return self
-
     def find_neighbors(
         self,
         num_neighbors: int | None = None,
         max_iterations: int = 20,
         on_max_iterations: str = "raise",
     ) -> "PointCloud":
-        """Ghost-particle exchange + iterative true-KNN solve.
+        """Find the exact ``num_neighbors`` nearest neighbors of every particle.
 
-        Required before any of `compute_smoothing`/`compute_density`/
-        `interpolate`/`deposit` -- they all need this call's result
-        (`self.ghosts`, see `ghosts.GhostInfo`) to compute anything, and
-        raise a clear error if it hasn't been called yet. `self.decomposition`
-        (needed here) is already populated by `__init__`, so this can be
-        called immediately after construction (once `num_neighbors` is set,
-        e.g. via `global_setup`).
+        Imports ghost particles from neighboring ranks and iteratively grows
+        the search radius until every local particle has found its true
+        nearest neighbors (identical to a single-rank search). The result is
+        stored in ``self.ghosts`` (:class:`smudgy.ghosts.GhostInfo`).
+
+        Calling this explicitly is optional: :meth:`compute_smoothing` and
+        :meth:`interpolate` call it automatically on first use. Call it again
+        to change the number of neighbors used by later computations.
+
+        Parameters
+        ----------
+        num_neighbors : int, optional
+            Number of nearest neighbors per particle. Defaults to the value
+            set via :meth:`global_setup`.
+        max_iterations : int, default 20
+            Maximum number of radius-growing ghost-exchange iterations.
+        on_max_iterations : str, default "raise"
+            Behavior if the search has not converged after
+            ``max_iterations``: ``"raise"`` raises a ``RuntimeError``; any
+            other value only emits a warning (on rank 0).
 
         Returns
         -------
@@ -316,20 +322,20 @@ class PointCloud:
     def gather_particles(
         self, local_array: npt.NDArray[Any], root: int = 0
     ) -> npt.NDArray[Any] | None:
-        """Gather a particle-indexed local array back onto `root` only, in
-        original particle order.
+        """Collect a per-particle array from all ranks, in the original particle order.
 
-        `local_array` must be indexed the way `decomposition.local_*` is
-        (row i = this rank's i-th local particle) -- e.g. `smoothing.
-        smoothing_lengths`/`smoothing_tensors`, `smoothing.density_isotropic`/
-        `density_covariant`, or an `interpolate()` (no `query_positions`)
-        result. Cheaper than shipping the reassembled array to every rank:
-        this delivers it to `root` only (see `execution._gather_to_root`).
+        Parameters
+        ----------
+        local_array : np.ndarray
+            Rank-local per-particle array, indexed like ``self.positions`` (e.g. a
+            density or an :meth:`interpolate` result without ``query_positions``).
+        root : int, default 0
+            Rank that receives the result.
 
         Returns
         -------
-        np.ndarray, shape (n_particles, *local_array.shape[1:]), on `root`;
-        `None` on every other rank.
+        np.ndarray or None
+            Full array of shape (N, ...) on `root`, None on all other ranks.
         """
         local_global_indices = self.decomposition.local_global_indices
         if local_array.shape[0] != local_global_indices.shape[0]:
@@ -347,26 +353,26 @@ class PointCloud:
     def gather_queries(
         self, local_array: npt.NDArray[Any], root: int = 0
     ) -> npt.NDArray[Any] | None:
-        """Gather a query-position-indexed local array back onto `root` only,
-        in the original query-array order (Step 5 of the domain-decomposition
-        roadmap).
+        """Collect a per-query-point array from all ranks, in the original query order.
 
-        `local_array` must be an `interpolate(query_positions=...)` result --
-        indexed the way `query_routing.local_positions` is (row i = this
-        rank's i-th routed query position). Requires that call to have
-        populated `self.query_routing`.
+        Parameters
+        ----------
+        local_array : np.ndarray
+            Rank-local result of :meth:`interpolate` with ``query_positions``.
+        root : int, default 0
+            Rank that receives the result.
 
         Returns
         -------
-        np.ndarray, shape (n_query_positions, *local_array.shape[1:]), on
-        `root`; `None` on every other rank.
+        np.ndarray or None
+            Full array of shape (M, ...) on `root`, None on all other ranks.
         """
         local_global_indices = self.query_routing.local_global_indices
         if local_global_indices is None:
             raise AttributeError(
                 "No query-position routing available yet; call 'interpolate' "
                 "with 'query_positions' set (with the local+ghost path active, "
-                "i.e. after 'decompose'/'find_neighbors'/'compute_smoothing') "
+                "i.e. after 'find_neighbors'/'compute_smoothing') "
                 "first."
             )
         if local_array.shape[0] != local_global_indices.shape[0]:
@@ -382,22 +388,20 @@ class PointCloud:
         )
 
     def get(self, name: str, root: int = 0) -> npt.NDArray[Any] | None:
-        """Gather a named per-particle field back to `root`, reassembled into
-        original input order -- the read-only, results-out-of-the-pipeline
-        counterpart to `add_fields`.
+        """Collect a named per-particle quantity from all ranks, in the original order.
 
-        `name` resolves against `self.smoothing` first (e.g.
-        `'smoothing_lengths'`, `'density_isotropic'`), then against `self`
-        directly (a custom field added via `add_fields`, or `'positions'`/
-        `'weights'`). Meant only for handing a final result back to the
-        caller -- internal computation should keep reading the per-rank
-        attribute directly (e.g. `self.smoothing.density_isotropic`), never
-        `get()`, since this triggers a real MPI collective (`gather_particles`)
-        and returns `None` on every rank but `root`.
+        Parameters
+        ----------
+        name : str
+            Attribute of ``self.smoothing`` (e.g. ``"smoothing_lengths"``,
+            ``"density_isotropic"``) or a field added via :meth:`add_fields`.
+        root : int, default 0
+            Rank that receives the result.
 
         Returns
         -------
-        np.ndarray, shape (n_particles, ...), on `root`; `None` elsewhere.
+        np.ndarray or None
+            Full array of shape (N, ...) on `root`, None on all other ranks.
         """
         if hasattr(self.smoothing, name):
             local_arr = getattr(self.smoothing, name)
@@ -489,8 +493,7 @@ class PointCloud:
         `find_neighbors()` call -- never by rank-dependent branching), so
         every rank reaches the same decision on whether to call
         `find_neighbors()` here. Relies on particle positions never changing
-        after construction (no re-decomposition/rebalancing is supported, see
-        `decompose()`'s docstring) -- once found, ghosts/neighbors remain
+        after construction (no re-decomposition/rebalancing is supported) -- once found, ghosts/neighbors remain
         valid for this `PointCloud`'s lifetime, so this triggers at most once;
         every call after the first sees `nn_inds` already populated and is a
         no-op.
@@ -859,7 +862,6 @@ class PointCloud:
         query_positions: npt.ArrayLike | None = None,
         num_neighbors: int | None = None,
         structure: Structure | None = None,
-        # backend: str = None,
         ratio_max: float = 100.0,
         min_axis: float | None = None,
         volume_preserving: bool = False,
@@ -869,13 +871,18 @@ class PointCloud:
         Parameters
         ----------
         query_positions : npt.ArrayLike, optional
-            Positions where smoothing is evaluated. If None, uses particle positions.
+            Positions where smoothing is evaluated, shape (M, D); only read
+            on rank 0. If None, uses the particle positions. Note that
+            passing query positions *replaces* ``self.smoothing`` with data
+            for those (routed, rank-local) query points; call this method
+            again without ``query_positions`` before :meth:`compute_density`,
+            :meth:`interpolate` or :meth:`deposit`.
         num_neighbors : int, optional
-            Number of neighbors for smoothing length computation.
+            Number of neighbors for smoothing length computation. Must match
+            the value :meth:`find_neighbors` was last called with.
         structure : Structure, optional
-            Smoothing structure for computation.
-        backend : {"numpy", "taichi"}, default "numpy"
-            Backend used for the smoothing computation.
+            Smoothing structure, one of ``"separable"``, ``"isotropic"`` or
+            ``"covariant"``.
         ratio_max : float, default 100.0
             ``covariant`` only. Maximum axis ratio h_max / h_min of the
             smoothing tensors (>= 1); guards against degenerate (coplanar or
@@ -895,13 +902,18 @@ class PointCloud:
 
         Notes
         -----
-        Results are stored in the ``smoothing`` attribute. Covariant smoothing
-        tensors follow Marinho (2021): H = zeta_max * Sigma^(1/2), with Sigma
-        the weighted second-moment tensor of the neighbors about the query
-        and zeta_max their largest Mahalanobis distance, so the kernel
-        support is the smallest ellipsoid of that shape enclosing all
-        neighbors. Like every collective call, all MPI ranks must pass the
-        same `ratio_max`/`min_axis`/`volume_preserving`.
+        Results are stored in the ``smoothing`` attribute and are rank-local
+        (use :meth:`get` or :meth:`gather_particles` to collect them).
+
+        Isotropic and separable smoothing lengths are the distance to the
+        ``num_neighbors``-th nearest neighbor. Covariant smoothing tensors
+        follow Marinho (2021): :math:`H = \\zeta_{\\max} \\Sigma^{1/2}`, with
+        :math:`\\Sigma` the mass-weighted covariance of the neighbors about
+        the query point and :math:`\\zeta_{\\max}` their largest Mahalanobis
+        distance, so the kernel support is the smallest ellipsoid of that
+        shape enclosing all neighbors. Like every collective call, all MPI
+        ranks must pass the same ``ratio_max``/``min_axis``/
+        ``volume_preserving``.
 
         """
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
@@ -1001,7 +1013,11 @@ class PointCloud:
 
         Notes
         -----
-        Results are stored in the `smoothing` attribute.
+        Results are stored in ``smoothing.density_isotropic`` (separable and
+        isotropic) or ``smoothing.density_covariant`` and are rank-local (use
+        :meth:`get`, e.g. ``pc.get("density_isotropic")``, to collect them).
+        Requires :meth:`compute_smoothing` at the particle positions with
+        the same structure.
 
         Only the `num_neighbors` nearest neighbors are summed, so kernels
         whose compact support exceeds 1 (in units of h) are scaled such that
@@ -1067,21 +1083,19 @@ class PointCloud:
     def add_fields(
         self, names: str | list[str], values: npt.ArrayLike | list[npt.ArrayLike]
     ) -> None:
-        """Add one or multiple custom fields to the PointCloud instance.
+        """Add one or multiple per-particle fields to the point cloud.
 
-        Split across ranks the same way positions/weights are: `values` is
-        only read on rank 0, reordered via `self.decomposition.root_order`
-        (the same Hilbert-sort permutation used at construction) and
-        scattered out, so the stored attribute is this rank's local slice --
-        never a full-N array replicated on every rank.
+        The fields are distributed across the MPI ranks in the same way as the
+        particles, and stored as rank-local attributes.
 
         Parameters
         ----------
         names : str or list of str
             Name(s) of the field(s) to add.
         values : array_like or list of array_like
-            Field values. Each array must have shape (N,) or (N, num_components).
-
+            Field values in the original particle order, each of shape (N,)
+            or (N, num_components) with N the *global* particle count. Only
+            read on rank 0.
         """
         # --- Case 1: multiple fields ---
         if isinstance(names, (list, tuple)) or isinstance(values, (list, tuple)):
@@ -1175,40 +1189,50 @@ class PointCloud:
     ) -> None:
         """Manually assign smoothing lengths or tensors to particles.
 
+        Intended for deposition with externally computed smoothing
+        information (e.g. smoothing lengths stored in a simulation
+        snapshot). All arrays are indexed like ``self.positions``, i.e. they
+        are this rank's local, Hilbert-ordered slice (on a single rank: the
+        original particle order).
+
         Parameters
         ----------
         structure : Structure, optional
-            Smoothing structure. Required if setting `smoothing_lengths` or `smoothing_tensors`.
+            Smoothing structure the values belong to: ``"isotropic"`` or
+            ``"separable"`` for ``smoothing_lengths``, ``"covariant"`` for
+            ``smoothing_tensors``.
         smoothing_lengths : npt.ArrayLike, optional
-            Isotropic smoothing lengths, shape (N,).
+            Smoothing lengths, shape (N_local,).
         smoothing_tensors : npt.ArrayLike, optional
-            Anisotropic smoothing tensors, shape (N, D, D).
+            Smoothing tensors, shape (N_local, D, D).
         smoothing_tensors_eigvals : npt.ArrayLike, optional
-            Eigenvalues of the smoothing tensors, shape (N, D).
+            Eigenvalues (principal smoothing lengths) of the smoothing
+            tensors, shape (N_local, D).
         smoothing_tensors_eigvecs : npt.ArrayLike, optional
-            Eigenvectors of the smoothing tensors, shape (N, D, D).
+            Eigenvectors (principal axes, as columns) of the smoothing
+            tensors, shape (N_local, D, D).
 
         """
-        # for smoothing_lengths, structure must be set and either 'separable' or 'isotropic'
-        if smoothing_lengths:
-            assert (
-                structure == "isotropic"
-            ), "Structure must be specified when providing 'smoothing_lengths'"
+        if smoothing_lengths is not None:
+            assert structure in (
+                "separable",
+                "isotropic",
+            ), "'structure' must be 'separable' or 'isotropic' when providing 'smoothing_lengths'"
             self._check_shape(np.asarray(smoothing_lengths), "smoothing_lengths")
             self.smoothing.smoothing_lengths = np.asarray(
                 smoothing_lengths, dtype=np.float32
             )
 
-        if smoothing_tensors:
+        if smoothing_tensors is not None:
             assert (
                 structure == "covariant"
-            ), "Structure must be specified when providing 'smoothing_tensors'"
+            ), "'structure' must be 'covariant' when providing 'smoothing_tensors'"
             self._check_shape(np.asarray(smoothing_tensors), "smoothing_tensors")
             self.smoothing.smoothing_tensors = np.asarray(
                 smoothing_tensors, dtype=np.float32
             )
 
-        if smoothing_tensors_eigvals:
+        if smoothing_tensors_eigvals is not None:
             self._check_shape(
                 np.asarray(smoothing_tensors_eigvals), "smoothing_tensors_eigvals"
             )
@@ -1216,7 +1240,7 @@ class PointCloud:
                 smoothing_tensors_eigvals, dtype=np.float32
             )
 
-        if smoothing_tensors_eigvecs:
+        if smoothing_tensors_eigvecs is not None:
             self._check_shape(
                 np.asarray(smoothing_tensors_eigvecs), "smoothing_tensors_eigvecs"
             )
@@ -1380,67 +1404,79 @@ class PointCloud:
     ) -> npt.NDArray[np.floating]:
         r"""Interpolate particle fields to query positions using SPH.
 
-        Compute interpolated field values, gradients, divergence, or curl at query positions
-        using smoothed particle hydrodynamics (SPH).
+        Compute interpolated field values, gradients, divergence, or curl at
+        query positions using the scatter form of the SPH estimate.
 
         Parameters
         ----------
         fields : Union[npt.ArrayLike, str, List[str]]
-            Field data to interpolate. Can be an array, string name, or list of both.
+            Field data to interpolate: a field name registered via
+            :meth:`add_fields`, an array, or a list of both. Arrays passed
+            directly must already be this rank's local slice (indexed like
+            ``self.positions``).
         query_positions : npt.ArrayLike, optional
-            Array of shape (M, D) with positions where quantities are computed.
-            If None, uses particle positions.
+            Array of shape (M, D) with positions where quantities are
+            computed; only read on rank 0. If None, uses the particle
+            positions.
         mode : InterpolationMode, default 'field'
             Type of quantity to compute:
 
-            - 'field': Return interpolated field values
-            - 'gradient': Return field gradients ∇f
-            - 'divergence': Return divergence ∇·**f** (vector fields only)
-            - 'curl': Return curl ∇×**f** (vector fields only)
+            - ``'field'``: interpolated field values
+            - ``'gradient'``: field gradients
+            - ``'divergence'``: divergence (vector fields only)
+            - ``'curl'``: curl (vector fields only)
         structure : Structure, optional
-            Smoothing structure to use for interpolation. If None, uses the globally set structure.
+            Smoothing structure, ``'isotropic'`` or ``'covariant'``. If None,
+            uses the globally set structure.
 
         Returns
         -------
         npt.NDArray[np.floating]
-            Interpolated quantities with shape depending on mode:
+            Interpolated quantities, where M is the number of (rank-local)
+            query points, C the total number of field components (summed
+            over all fields), F the number of fields and D the spatial
+            dimension:
 
-            - 'field': (M, F) - interpolated field values
-            - 'gradient': (M, F, D) - field gradients
-            - 'divergence': (M, 1) - divergence of vector field
-            - 'curl': (M, 1) in 2D or (M, 3) in 3D - curl of vector field
+            - ``'field'``: (M, C)
+            - ``'gradient'``: (M, C, D)
+            - ``'divergence'``: (M, F)
+            - ``'curl'``: (M, F) in 2D, (M, F, 3) in 3D
+
+            The result is rank-local: with ``query_positions=None`` its rows
+            follow ``self.positions``; otherwise they follow the routed query
+            points. Use :meth:`gather_particles` or :meth:`gather_queries`,
+            respectively, to collect it in the original order on the root
+            rank (on a single rank, both return the input order unchanged).
 
         Notes
         -----
-        **Mathematical formulas (SPH interpolation)**:
+        For particles :math:`i` in the neighbourhood :math:`\mathcal{N}` of
+        :math:`\boldsymbol{x}`, with masses (weights) :math:`m_i`, densities
+        :math:`\rho_i` and smoothing lengths :math:`h_i` (or tensors
+        :math:`\mathsf{H}_i`):
 
-        For a scalar field:
+        .. math::
 
-        $$f(x) = \\sum_j \\frac{m_j}{\\rho_j} f_j W(x-x_j,h)$$
+            f(\boldsymbol{x}) = \sum_{i \in \mathcal{N}} \frac{m_i}{\rho_i}
+            f_i \, W(\boldsymbol{x} - \boldsymbol{x}_i, h_i),
+            \qquad
+            \nabla f(\boldsymbol{x}) = \sum_{i \in \mathcal{N}}
+            \frac{m_i}{\rho_i} f_i \, \nabla W(\boldsymbol{x} -
+            \boldsymbol{x}_i, h_i),
 
-        Gradient:
+        and for a vector field :math:`\boldsymbol{v}`, the divergence and
+        curl replace :math:`f_i \nabla W` by
+        :math:`\boldsymbol{v}_i \cdot \nabla W` and
+        :math:`\boldsymbol{v}_i \times \nabla W`, respectively (in 2D the
+        curl is the scalar :math:`z`-component).
 
-        $$\\nabla f(x) = \\sum_j \\frac{m_j}{\\rho_j} f_j \\nabla W(x-x_j,h)$$
-
-        For a vector field **f**:
-
-        **Divergence**:
-
-        $$\\nabla \\cdot \\mathbf{f}(x) = \\sum_j \\frac{m_j}{\\rho_j} \\mathbf{f}_j \\cdot \\nabla W(x-x_j,h)$$
-
-        **Curl (3D)**:
-
-        $$\\nabla \\times \\mathbf{f}(x) = \\sum_j \\frac{m_j}{\\rho_j} \\mathbf{f}_j \\times \\nabla W(x-x_j,h)$$
-
-        **Curl (2D)** (scalar):
-
-        $$(\\nabla \\times \\mathbf{f})_z = \\sum_j \\frac{m_j}{\\rho_j} \\left( f_{x,j}\\frac{\\partial W}{\\partial y} - f_{y,j}\\frac{\\partial W}{\\partial x} \\right)$$
-
-        As in `compute_density`, only the nearest neighbors are summed, and
-        kernels with support > 1 are scaled so their compact support ends at
-        each particle's smoothing length / tensor ellipsoid
-        (h -> h / support), unlike deposition, which uses a footprint of
-        support * h.
+        The densities must have been computed beforehand with
+        :meth:`compute_density` for the same structure. As in
+        :meth:`compute_density`, only the nearest neighbors are summed, and
+        kernels with support :math:`n > 1` are scaled so their compact
+        support ends at each particle's smoothing length / tensor ellipsoid
+        (:math:`h \to h / n`), unlike deposition, which uses a footprint of
+        :math:`n h`.
 
         Examples
         --------
@@ -1449,21 +1485,16 @@ class PointCloud:
         >>> pc.compute_smoothing()
         >>> pc.compute_density()
         >>> pc.add_fields('velocity', velocity_data)
+        >>> query_positions = np.random.uniform(0, 1, size=(1000, 3))
 
-        Interpolate field values:
+        Interpolate field values and collect them on the root rank:
 
-        >>> values = pc.interpolate('velocity', query_positions)
+        >>> values = pc.gather_queries(pc.interpolate('velocity', query_positions))
 
-        Compute gradients:
+        Compute gradients, divergence and curl (vector fields):
 
         >>> grads = pc.interpolate('velocity', query_positions, mode='gradient')
-
-        Compute divergence (for vector fields):
-
         >>> div = pc.interpolate('velocity', query_positions, mode='divergence')
-
-        Compute curl (for 3D vector fields):
-
         >>> curl = pc.interpolate('velocity', query_positions, mode='curl')
 
         """
@@ -1590,34 +1621,63 @@ class PointCloud:
         npt.NDArray[np.floating]
         | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
     ):
-        """Deposit particle fields onto a structured grid.
+        r"""Deposit particle fields onto a structured grid.
+
+        For every grid cell, the deposited value is
+
+        .. math::
+
+            f_{\rm cell} = \sum_{i} m_i \, f_i \, I_{{\rm cell},i},
+            \qquad
+            I_{{\rm cell},i} = \int_{\Omega_{\rm cell}}
+            W(\boldsymbol{x} - \boldsymbol{x}_i, \mathsf{H}_i) \,
+            \mathrm{d}\boldsymbol{x},
+
+        i.e. every field is multiplied by the particle weights :math:`m_i`
+        internally, and the weights grid is :math:`\sum_i m_i I_{{\rm
+        cell},i}` (e.g. the mass in each cell). Fields are therefore
+        *specific* quantities (per unit weight): to obtain a mass map, use
+        ``fields=None`` (do not deposit the weights themselves as a field,
+        which would give :math:`\sum_i m_i^2 I_{{\rm cell},i}`).
 
         Parameters
         ----------
         fields : Union[npt.ArrayLike, str, List[str], None]
-            Field data to deposit. ``None`` deposits only the particle
-            weights (mass assignment) and returns just the weights grid;
-            ``averaged`` must then be False.
+            Field data to deposit: a field name registered via
+            :meth:`add_fields`, an array, or a list of both. Arrays passed
+            directly must already be this rank's local slice. ``None``
+            deposits only the particle weights (e.g. a mass map) and returns
+            just the weights grid; ``averaged`` must then be False.
         averaged : Union[bool, Sequence[bool]]
-            Whether to divide the result by weights for each field component.
+            Whether to divide the result by the weights grid for each field
+            (a weight-averaged quantity, e.g. temperature) or not (an
+            additive quantity).
         gridnums : Union[int, Sequence[int]]
             Number of cells along each axis.
         extent : Optional[Sequence[Sequence[float]]], optional
-            Domain bounds [[xmin, xmax], [ymin, ymax], ...]. If None, uses `boxsize`.
+            Domain bounds ``[[xmin, xmax], [ymin, ymax], ...]``, one row per
+            dimension of the point cloud. Only particles inside are
+            deposited. If None, uses ``[0, boxsize]`` (required for
+            non-periodic point clouds).
+        adaptive : bool, default True
+            If True, use the instance's smoothing data (see
+            :meth:`compute_smoothing`) with the selected structure and
+            kernel. If False, use a fixed-grid B-spline stencil and do not
+            consult smoothing data.
         kernel_name : str, optional
             Fixed-grid stencil (``ngp``, ``cic``, ``tsc``, ``bspline4``,
-            ``bspline5``, or ``bspline6``) when ``adaptive=False``. For adaptive deposition, a
-            rectangular kernel such as ``tsc_rect`` for ``separable``, or a
-            spherical kernel for ``isotropic`` and ``covariant``.
+            ``bspline5``, or ``bspline6``) when ``adaptive=False``. For
+            adaptive deposition, ``tophat``, ``tsc`` or ``gaussian`` for the
+            ``separable`` structure, or any radial kernel for ``isotropic``
+            and ``covariant``.
         structure : Structure, optional
             Adaptive smoothing structure. Required only when ``adaptive=True``.
-        adaptive : bool, default True
-            If True, use the instance's smoothing data. If False, use the
-            fixed-grid stencil and do not consult smoothing data.
         plane_projection : List[int], optional
-            Indices of the axes to project onto for 3D to 2D deposition.
+            Indices of the two axes spanning the projection plane for 3D to
+            2D deposition, e.g. ``[0, 1]`` for the x-y plane.
         integration_method : str, default 'midpoint'
-            Kernel integration method.
+            Cell quadrature rule for ``isotropic`` and ``covariant`` kernels:
+            ``'midpoint'``, ``'trapezoidal'`` or ``'simpson'``.
         eta_crit : float, default 4.0
             Anti-aliasing threshold, in units of kernel diameter / cell
             size, to switch a particle from the sampled kernel deposition to
@@ -1628,21 +1688,28 @@ class PointCloud:
             population uses the (cheaper) sampled path versus the
             (exact-per-cell) quadrature path.
         return_weights : bool, default False
-            If True, returns the weights (density) grid as well.
+            If True, returns the weights grid as well.
         gather_to_root : bool, default False
             If True, the summed grid is delivered to `root` only (via
-            `comm.reduce`) instead of every rank (via `comm.allreduce`,
-            today's default) -- cheaper when only `root` needs the result.
-            Non-`root` ranks then return `None` (or `(None, None)` if
-            `return_weights=True`).
+            ``comm.reduce``) instead of every rank (via ``comm.allreduce``,
+            the default) -- cheaper when only `root` needs the result.
+            Non-`root` ranks then return ``None`` (or ``(None, None)`` if
+            ``return_weights=True``).
         root : int, default 0
-            Destination rank when `gather_to_root=True`; unused otherwise.
+            Destination rank when ``gather_to_root=True``; unused otherwise.
 
         Returns
         -------
         Union[npt.NDArray[np.floating], tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]]
-            Deposited field grid, and optionally the weights grid. With
-            ``fields=None`` only the weights grid is deposited and returned.
+            Deposited field grid of shape ``(C, *gridnums)`` with C the total
+            number of field components, and optionally the weights grid of
+            shape ``gridnums``. With ``fields=None`` only the weights grid is
+            returned.
+
+        Notes
+        -----
+        The numpy backend supports fixed-grid deposition (``adaptive=False``)
+        only.
 
         """
         kernel_name_temp, structure_temp = self._resolve_deposition_options(

@@ -402,6 +402,48 @@ class TestFieldManagement:
 
 
 # =============================================================================
+# set_smoothing
+# =============================================================================
+class TestSetSmoothing:
+    """set_smoothing must accept numpy arrays (no ambiguous truth-value
+    checks) and validate structure/shape."""
+
+    @pytest.mark.parametrize("structure", ["isotropic", "separable"])
+    def test_sets_smoothing_lengths_from_array(self, rng, structure):
+        n = 20
+        pc = PointCloud(make_positions(rng, n=n), verbose=False)
+        h = rng.uniform(0.01, 0.1, size=n)
+        pc.set_smoothing(structure=structure, smoothing_lengths=h)
+        assert pc.smoothing.smoothing_lengths.shape == (n,)
+        assert pc.smoothing.smoothing_lengths.dtype == np.float32
+
+    def test_sets_smoothing_tensors_from_arrays(self, rng):
+        n, dim = 20, 3
+        pc = PointCloud(make_positions(rng, n=n, dim=dim), verbose=False)
+        eye = np.tile(np.eye(dim), (n, 1, 1))
+        pc.set_smoothing(
+            structure="covariant",
+            smoothing_tensors=0.1 * eye,
+            smoothing_tensors_eigvals=np.full((n, dim), 0.1),
+            smoothing_tensors_eigvecs=eye,
+        )
+        assert pc.smoothing.smoothing_tensors.shape == (n, dim, dim)
+        assert pc.smoothing.smoothing_tensors_eigvals.shape == (n, dim)
+        assert pc.smoothing.smoothing_tensors_eigvecs.shape == (n, dim, dim)
+
+    def test_wrong_structure_raises(self, rng):
+        n = 20
+        pc = PointCloud(make_positions(rng, n=n), verbose=False)
+        with pytest.raises(AssertionError):
+            pc.set_smoothing(structure="covariant", smoothing_lengths=np.ones(n))
+
+    def test_wrong_length_raises(self, rng):
+        pc = PointCloud(make_positions(rng, n=20), verbose=False)
+        with pytest.raises(ValueError):
+            pc.set_smoothing(structure="isotropic", smoothing_lengths=np.ones(7))
+
+
+# =============================================================================
 # interpolate
 # =============================================================================
 class TestInterpolate:

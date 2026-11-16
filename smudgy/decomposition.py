@@ -1,17 +1,8 @@
-"""Hilbert-curve spatial domain decomposition.
+"""Hilbert-curve domain decomposition of point clouds across MPI ranks.
 
-Step 1 of the MPI domain-decomposition roadmap: partitions particles across
-MPI ranks into count-balanced, spatially-contiguous chunks (sorted by
-Hilbert-curve code), then redistributes positions/weights via
-`execution._scatterv_rows`. Produces a `DecompositionInfo` side artifact
-(local chunk + provenance) for later steps (ghost exchange, local-only
-compute, gather-to-root) to build on.
-
-Also home to `route_query_positions` (Step 4b): routes an arbitrary
-(non-particle) query-position array to ranks using the *same* Hilbert-code
-partition, via `DecompositionInfo.boundary_codes` -- reusing the partition
-`decompose()` already computed rather than deriving a new one for query
-points.
+Particles are sorted along a Hilbert curve and split into count-balanced,
+spatially compact chunks, one per rank. Arbitrary query positions are routed
+to ranks using the same partition.
 """
 
 from __future__ import annotations
@@ -33,49 +24,28 @@ _DEFAULT_BITS_PER_DIM = {1: 64, 2: 32, 3: 21}
 
 @dataclass
 class DecompositionInfo:
-    """Result of a Hilbert-curve domain decomposition (see `hilbert_partition_and_scatter`).
+    """Result of :func:`hilbert_partition_and_scatter`.
 
     Parameters
     ----------
     local_positions : np.ndarray
-        This rank's chunk of positions, shape (n_local, D), Hilbert-sorted.
+        This rank's particle positions, shape (n_local, D), in Hilbert order.
     local_weights : np.ndarray
-        This rank's chunk of weights, shape (n_local,).
+        This rank's particle weights, shape (n_local,).
     local_global_indices : np.ndarray
-        Original row index (into the pre-decomposition array) of each local
-        particle, shape (n_local,). Needed to reassemble results in the
-        caller's original order later.
+        Original index of each local particle, shape (n_local,).
     counts : np.ndarray
-        Per-rank particle counts, shape (size,), identical on every rank.
+        Number of particles per rank, shape (size,).
     domain_min : np.ndarray
-        Lower extent, shape (D,), used for Hilbert quantization.
+        Lower domain bound used for the Hilbert quantization, shape (D,).
     domain_max : np.ndarray
-        Upper extent, shape (D,), used for Hilbert quantization.
+        Upper domain bound used for the Hilbert quantization, shape (D,).
     boundary_codes : np.ndarray
-        Shape (size+1,) uint64, identical on every rank. The actual
-        count-based partition cut points used above: rank `i` owns Hilbert
-        codes in `[boundary_codes[i], boundary_codes[i+1])`. `boundary_codes[0]`
-        is always 0 and `boundary_codes[size]` is always the maximum uint64
-        value, so together the intervals cover the entire code space (not
-        just where particles happen to be) -- needed so an arbitrary query
-        position (not a particle) can still be routed to exactly one rank,
-        consistently with the partition actually used above. A rank with 0
-        local particles gets a zero-width interval (its own boundary equals
-        the next non-empty rank's), so it is correctly never routed anything.
-        See `route_query_positions`.
-    root_order : np.ndarray
-        Shape (N,) int64, the Hilbert-sort permutation used to build every
-        rank's chunk above -- populated on `root` only (`None` on every
-        other rank; the one intentionally rank-asymmetric field on this
-        dataclass). This is the one piece of O(N) bookkeeping deliberately
-        kept on `root` after construction: a field added later (`add_fields`)
-        needs to be split across ranks *consistently* with how positions/
-        weights were originally split, and by the time a field arrives,
-        `root` no longer has the full positions array to re-derive that
-        split from -- `values[root_order]` reorders a newly-arriving full-N
-        field into the same order `local_global_indices` already encodes in
-        scattered form, before it's chunked out via `execution._scatterv_rows`.
-
+        Partition boundaries along the Hilbert curve, shape (size + 1,): rank
+        ``i`` owns codes in ``[boundary_codes[i], boundary_codes[i+1])``.
+    root_order : np.ndarray or None
+        Hilbert-sort permutation of the input particles, shape (N,), on the
+        root rank only (None elsewhere); used to split fields added later.
     """
 
     local_positions: np.ndarray = None
@@ -90,28 +60,16 @@ class DecompositionInfo:
 
 @dataclass
 class QueryRouting:
-    """Result of `route_query_positions`.
-
-    Routes an arbitrary (M, D) query-position array to ranks using the exact
-    same Hilbert-code partition `hilbert_partition_and_scatter` already
-    computed for particles (`DecompositionInfo.boundary_codes`) -- so a query
-    point lands on whichever rank's spatial region, as defined by that
-    partition, contains it. Unrelated to and independent from any earlier
-    `route_query_positions` call: there is no persistent "query decomposition"
-    the way there is for particles, this is recomputed fresh per call.
+    """Result of :func:`route_query_positions`.
 
     Parameters
     ----------
     local_positions : np.ndarray
-        This rank's chunk of query positions, shape (n_local_queries, D).
+        Query positions routed to this rank, shape (n_local_queries, D).
     local_global_indices : np.ndarray
-        Original row index (into the caller's (M, D) query array) of each
-        local query point, shape (n_local_queries,) -- mirrors
-        `DecompositionInfo.local_global_indices`'s role, needed to reassemble
-        a per-rank result back into the caller's original order.
+        Original index of each local query point, shape (n_local_queries,).
     counts : np.ndarray
-        Per-rank query-point counts, shape (size,), identical on every rank.
-
+        Number of query points per rank, shape (size,).
     """
 
     local_positions: np.ndarray = None
@@ -243,25 +201,24 @@ def hilbert_encode(
     periodic: bool = False,
     bits_per_dim: int | None = None,
 ) -> npt.NDArray[np.uint64]:
-    """Vectorized Hilbert-curve encoding of positions into uint64 keys.
+    """Compute Hilbert-curve keys of positions (Skilling 2004).
 
-    Quantizes `positions` (shape (N, D)) into fixed-point integer
-    coordinates within [domain_min, domain_max] per axis, then computes each
-    point's position along a Peano-Hilbert curve threaded through that
-    domain (Skilling 2004). Points close in D-dimensional space get close
-    Hilbert codes -- unlike a simpler Morton/Z-order interleave, the Hilbert
-    curve never makes long-range jumps, which matters for keeping later
-    ghost-exchange communication volume small.
-
-    `periodic` selects wrapping (mod domain extent) vs. clipping for
-    out-of-range coordinates -- see `_quantize`. `bits_per_dim` defaults to
-    the widest resolution that fits dim*bits_per_dim into 64 bits (64/32/21
-    for dim=1/2/3); exposed mainly for testing against a reference
-    implementation at a small, hand-checkable bit depth.
+    Parameters
+    ----------
+    positions : np.ndarray
+        Positions, shape (N, D).
+    domain_min, domain_max : np.ndarray
+        Domain bounds used for the quantization, shape (D,).
+    periodic : bool, default False
+        Wrap out-of-range coordinates (True) or clip them (False).
+    bits_per_dim : int, optional
+        Quantization depth per axis. Defaults to the largest value fitting into
+        64 bits (64, 32 and 21 for D = 1, 2, 3).
 
     Returns
     -------
-    npt.NDArray[np.uint64], shape (N,)
+    np.ndarray
+        Hilbert keys, shape (N,), dtype uint64.
     """
     dim = positions.shape[1]
     if bits_per_dim is None:
@@ -288,21 +245,27 @@ def hilbert_partition_and_scatter(
     periodic: bool = False,
     root: int = 0,
 ) -> DecompositionInfo:
-    """Rank-0 Hilbert sort + particle-count-balanced split, then Scatterv to all ranks.
+    """Sort particles along a Hilbert curve and distribute count-balanced chunks.
 
-    `positions`/`weights` must be the full, global (N,D)/(N,) arrays on
-    `root`; ignored (may be `None`) on every other rank -- mirrors
-    `execution._bcast_array`'s calling convention, so this is a drop-in
-    replacement for that broadcast once a later step stops needing full
-    replication. `domain_min`/`domain_max` (shape (D,)) must already be
-    resolved and identical on every rank before calling this.
+    Parameters
+    ----------
+    comm : MPI.Comm
+        MPI communicator.
+    positions : np.ndarray or None
+        All particle positions, shape (N, D); only read on ``root``.
+    weights : np.ndarray or None
+        All particle weights, shape (N,); only read on ``root``.
+    domain_min, domain_max : np.ndarray
+        Domain bounds, shape (D,), identical on every rank.
+    periodic : bool, default False
+        Whether the domain is periodic.
+    root : int, default 0
+        Rank holding the input arrays.
 
     Returns
     -------
     DecompositionInfo
-        `local_positions`/`local_weights` (this rank's Hilbert-sorted
-        chunk), `local_global_indices` (original row index of each local
-        particle), `counts` (per-rank counts, identical on every rank).
+        This rank's chunk of the point cloud and its provenance.
     """
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -413,29 +376,25 @@ def route_query_positions(
     periodic: bool = False,
     root: int = 0,
 ) -> QueryRouting:
-    """Route an arbitrary (M, D) query-position array to ranks by the same
-    Hilbert-code partition already used for particles, then Scatterv.
+    """Distribute query positions to ranks using the particle partition.
 
-    `query_positions` must be the full, global (M, D) array on `root`;
-    ignored (may be `None`) on every other rank -- same calling convention as
-    `hilbert_partition_and_scatter`. `decomposition` must already have
-    `boundary_codes` set (i.e. come from `hilbert_partition_and_scatter`).
-    Uses `decomposition.domain_min`/`domain_max` (the *same* domain particles
-    were quantized against) so a query point's code is computed on the
-    identical curve, making "which rank owns this code" well-defined
-    everywhere in the domain, not just where particles happen to be. An
-    out-of-domain, non-periodic query position is handled by
-    `hilbert_encode`'s existing defensive clipping (see `_quantize`) -- it
-    routes to whichever rank owns the nearest boundary region, which affects
-    only which rank does the work, never the correctness of the final K-NN
-    answer found later by `ghosts.exchange_ghosts`.
+    Parameters
+    ----------
+    comm : MPI.Comm
+        MPI communicator.
+    decomposition : DecompositionInfo
+        Domain decomposition of the point cloud.
+    query_positions : np.ndarray or None
+        All query positions, shape (M, D); only read on ``root``.
+    periodic : bool, default False
+        Whether the domain is periodic.
+    root : int, default 0
+        Rank holding the query positions.
 
     Returns
     -------
     QueryRouting
-        `local_positions` (this rank's routed chunk), `local_global_indices`
-        (original row index of each local query point, into the caller's
-        (M, D) array), `counts` (per-rank counts, identical on every rank).
+        This rank's share of the query positions and their provenance.
     """
     rank = comm.Get_rank()
     size = comm.Get_size()

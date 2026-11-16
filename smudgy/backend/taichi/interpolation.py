@@ -136,12 +136,22 @@ def _density_kernel(
 def density(
     *, kernel_name, dim, query_positions, positions, weights, nn_inds, h, boxsize, structure
 ):
-    """Compute SPH density using the Taichi backend.
+    """Compute SPH densities (Taichi backend).
 
-    `positions`/`weights` are per-particle arrays of shape (Nc, D)/(Nc,) that
-    `nn_inds` (N, K) indexes into; `h` is the smoothing length (N,) or tensor
-    (N, D, D) of each query. Relative coordinates are computed in-kernel.
-    The kernel is scaled so its support does not exceed `h` (see `_support_scaled`).
+    Parameters
+    ----------
+    kernel_name, dim, structure
+        Kernel, spatial dimension and smoothing structure.
+    query_positions : np.ndarray
+        Query positions, shape (N, D).
+    positions, weights : np.ndarray
+        Particle positions (Nc, D) and weights (Nc,), indexed by `nn_inds`.
+    nn_inds : np.ndarray
+        Neighbour indices of each query, shape (N, K).
+    h : np.ndarray
+        Smoothing lengths (N,) or tensors (N, D, D) of the queries.
+    boxsize : np.ndarray or None
+        Box sizes for periodic boundary conditions.
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
@@ -350,12 +360,26 @@ def interpolate(
     mode,
     structure,
 ):
-    """Interpolate fields at query positions using the Taichi backend.
+    """Interpolate fields at query positions (Taichi backend).
 
-    `positions` (Nc, D), `weights` (Nc,) = m_j / rho_j, `fields` (Nc, F) --
-    or (Nc, F, D) for divergence/curl -- and `h` (Nc,) / (Nc, D, D) are
-    per-particle arrays that `nn_inds` (N, K) indexes into. The kernel is
-    scaled so its support does not exceed `h` (see `_support_scaled`).
+    Parameters
+    ----------
+    kernel_name, dim, structure, mode
+        Kernel, spatial dimension, smoothing structure and interpolation mode.
+    query_positions : np.ndarray
+        Query positions, shape (N, D).
+    positions : np.ndarray
+        Particle positions, shape (Nc, D), indexed by `nn_inds`.
+    weights : np.ndarray
+        Particle volumes m / rho, shape (Nc,).
+    nn_inds : np.ndarray
+        Neighbour indices of each query, shape (N, K).
+    fields : np.ndarray
+        Particle fields, shape (Nc, F), or (Nc, F, D) for divergence and curl.
+    h : np.ndarray
+        Smoothing lengths (Nc,) or tensors (Nc, D, D) of the particles.
+    boxsize : np.ndarray or None
+        Box sizes for periodic boundary conditions.
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")

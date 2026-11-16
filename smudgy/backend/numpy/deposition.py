@@ -1856,6 +1856,16 @@ def deposit(
     structure=None,
     **kwargs,
 ):
+    """Deposit particle data onto a grid with a fixed-grid stencil (NumPy backend).
+
+    Only fixed-grid deposition (``adaptive=False``) with the stencils ``ngp``,
+    ``cic``, ``tsc``, ``bspline4``, ``bspline5`` and ``bspline6`` is supported.
+
+    Returns
+    -------
+    grid_fields : ndarray, shape (F, *gridnums)
+    grid_weights : ndarray, shape (*gridnums,)
+    """
     if adaptive:
         raise ValueError(
             "backend='numpy' does not support adaptive deposition; "

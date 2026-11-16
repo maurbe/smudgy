@@ -7,48 +7,40 @@ import numpy as np
 
 @dataclass
 class SmoothingInfo:
-    """Dataclass to store smoothing-related information.
+    """Smoothing information of a point cloud (``PointCloud.smoothing``).
+
+    All arrays are rank-local, i.e. indexed like ``PointCloud.positions``.
 
     Parameters
     ----------
     num_neighbors : int
-        Number of nearest neighbors used for smoothing.
+        Number of nearest neighbours used for smoothing.
     nn_inds : np.ndarray
-        Indices of nearest neighbors for each particle, into the combined
-        [local particles, ghost particles] array -- see `ghost_positions`/
-        `ghost_weights` below for the ghost half of that array.
+        Nearest-neighbour indices, into the local particles followed by the
+        ghost particles.
     nn_dists : np.ndarray
-        Distances to nearest neighbors for each particle.
+        Distances to the nearest neighbours.
     smoothing_lengths : np.ndarray
-        Smoothing lengths for each particle.
+        Smoothing lengths, shape (N,).
     smoothing_tensors : np.ndarray
-        Smoothing tensors for each particle.
+        Smoothing tensors, shape (N, D, D).
     smoothing_tensors_eigvals : np.ndarray
-        Eigenvalues of the smoothing tensors.
+        Principal smoothing lengths (eigenvalues), shape (N, D).
     smoothing_tensors_eigvecs : np.ndarray
-        Eigenvectors of the smoothing tensors.
+        Principal axes (eigenvectors, as columns), shape (N, D, D).
     tensor_options : dict
-        Options the smoothing tensors were last computed with
-        (`ratio_max`, `min_axis`, `volume_preserving`).
+        Options used for the smoothing tensors (``ratio_max``, ``min_axis``,
+        ``volume_preserving``).
     kernel_name : str
-        Name of the smoothing kernel used.
+        Kernel used for the density estimates.
     density_isotropic : np.ndarray
-        Isotropic density estimates for each particle.
+        Isotropic (and separable) density estimates, shape (N,).
     density_covariant : np.ndarray
-        Anisotropic density estimates for each particle.
+        Covariant density estimates, shape (N,).
     ghost_positions : np.ndarray
-        The ghost positions `nn_inds` values `>= n_local` index into
-        (`n_local` = `decomposition.local_positions.shape[0]`), aliased
-        (not copied) from whichever `GhostInfo` the last `compute_smoothing()`
-        call actually used -- `self.ghosts` for the particle-position case,
-        or a freshly-routed query-position ghost exchange otherwise.
-        `compute_density`/`interpolate` reuse this (not `self.ghosts`
-        directly) so they stay consistent with whichever ghost set actually
-        produced the currently-stored smoothing data, rather than assuming
-        it was always `self.ghosts`.
+        Positions of the ghost particles referenced by ``nn_inds``.
     ghost_weights : np.ndarray
-        Companion to `ghost_positions`, same provenance.
-
+        Weights of the ghost particles referenced by ``nn_inds``.
     """
 
     num_neighbors: int = None

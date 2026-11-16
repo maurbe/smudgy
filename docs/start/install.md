@@ -1,6 +1,6 @@
 # Installation
 
-You can install `smudgy` in several ways. MPI support is optional but recommended for parallel performance over multiple ranks. See the {ref}`mpi-support` section for details on how to install MPI.
+You can install `smudgy` in several ways. `smudgy` depends on [Taichi](https://www.taichi-lang.org/) and on [mpi4py](https://mpi4py.github.io/), which requires an MPI library on your system, so make sure MPI is installed first (see the {ref}`mpi-support` section below).
 
 1. Install from PyPI (recommended)
 
@@ -19,8 +19,7 @@ pip install .
 (mpi-support)=
 ## MPI Support
 
-To enable MPI, you must have installed it on your system **before** installing `smudgy`.
-If MPI is not found, `smudgy` will still work, but parallelization over ranks will be disabled.
+`mpi4py` is a required dependency of `smudgy` and needs an MPI library, which should be installed on your system **before** installing `smudgy`. A working MPI installation is needed even if you only ever run on a single rank (e.g. in a notebook); scripts then simply run on one rank without an MPI launcher.
 To install it, see instructions for your operating system below.
 
 ::::{tab-set}
@@ -74,11 +73,15 @@ python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
 ```
 
 
+## GPU support
+
+The default `taichi` backend runs on the GPU if one is available (CUDA, Metal or Vulkan) and falls back to the CPU otherwise. No additional installation is required beyond the GPU drivers; see {doc}`backends <../wiki/backend>` for how to choose the architecture explicitly.
+
 ## Running the Test Suite
 
 After installation, it is recommended to run the test suite to verify your installation.
 
-Identify the `smudgy` installation directory and run `pytest`:
+Run `pytest` on the installed package (the multi-rank tests launch `mpiexec` themselves):
 
 ```bash
 python -m pytest --pyargs smudgy

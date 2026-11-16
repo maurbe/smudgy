@@ -13,17 +13,19 @@ _ARCH_MAP = {
 
 
 def init(arch=None, force=False, **kwargs):
-    """Safe to call repeatedly: no-op if already initialized, unless
-    force=True, which tears down and reconfigures the runtime -- e.g.
-    to compare backends interactively in a notebook.
+    """Initialize the Taichi runtime used by smudgy (safe to call repeatedly).
 
-    arch=None means "no preference": reuse whatever is already active if
-    the runtime has been initialized before, or fall back to "gpu" on the
-    very first call in the process. This matters because switching a live
-    Taichi runtime's arch mid-process (e.g. gpu -> cpu -> gpu) has been
-    observed to destabilize previously-compiled @ti.kernel functions --
-    callers that don't care about arch should never force that switch just
-    by omitting the argument.
+    Parameters
+    ----------
+    arch : str, optional
+        One of ``"cpu"``, ``"gpu"``, ``"cuda"``, ``"vulkan"``, ``"metal"``. If
+        None, the already running runtime is kept, or ``"gpu"`` is used on the
+        first call.
+    force : bool, default False
+        Re-initialize the runtime even if it is already running, e.g. to switch
+        the architecture. Switching mid-process recompiles all kernels.
+    **kwargs
+        Further keyword arguments passed to ``ti.init``.
     """
     global _initialized, _current_config
 
@@ -47,4 +49,5 @@ def init(arch=None, force=False, **kwargs):
 
 
 def current_config():
+    """Return the configuration the Taichi runtime was last initialized with."""
     return _current_config

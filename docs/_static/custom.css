@@ -1,41 +1,132 @@
-
-/* load Inconsolata for code */
-@import url('https://fonts.googleapis.com/css2?family=Inconsolata:wght@400..700&display=swap');
-
-/* load Atkinson Hyperlegible for body text */
-@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+/* Fonts */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,700;1,400&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap');
 
 /* ============================================================
-   THEME VARIABLES (LIGHT / DARK)
-   Custom (non-Furo-native) CSS variables used below, given a
-   light value and a dark value each, following Furo's own
-   light/dark toggle mechanism (body[data-theme] + prefers-color-scheme
-   fallback for "auto"). Add new --smudgy-* variables here when a
-   rule below needs a color that should differ, or later be tuned
-   differently, between light and dark mode.
+   PALETTE: one set of semantic colours, a light and a dark value
+   of the same hue. conf.py maps furo's own variables onto these.
+   Selectors follow furo: body[data-theme] + prefers-color-scheme
+   for "auto".
    ============================================================ */
 body {
-    --smudgy-sidebar-caption-bg: #0B0C13;
-    --smudgy-sidebar-caption-fg: #fff;
+    --smudgy-accent: #3352cc;
+    --smudgy-accent-hover: #2440b0;
+    --smudgy-fg: #1f2330;
+    --smudgy-fg-muted: #5a5f6e;
+    --smudgy-bg: #ffffff;
+    --smudgy-surface: #f6f7fa;
+    --smudgy-border: #e2e5ec;
+    --smudgy-caption-bg: transparent;
+    --smudgy-caption-fg: var(--smudgy-fg-muted);
+    --smudgy-code-bg: var(--smudgy-bg);
+    --smudgy-code-fg: #1f2330;
+    --smudgy-code-border: #e2e5ec;
+
+    --smudgy-font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --smudgy-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --smudgy-code-size: 0.85em;
+    --smudgy-inline-code-size: 0.8em;
 }
 body[data-theme="dark"] {
-    --smudgy-sidebar-caption-bg: #22222d; /* TODO: tune in dark-theme pass */
-    --smudgy-sidebar-caption-fg: #fff;
+    --smudgy-accent: #8ba4f0;
+    --smudgy-accent-hover: #adc0f7;
+    --smudgy-fg: #d9dee8;
+    --smudgy-fg-muted: #9aa1b2;
+    --smudgy-bg: #141414;
+    --smudgy-surface: #1e1e28;
+    --smudgy-border: #2e2f3d;
+    --smudgy-caption-bg: transparent;
+    --smudgy-caption-fg: var(--smudgy-fg-muted);
+    --smudgy-code-bg: var(--smudgy-bg);
+    --smudgy-code-fg: #d9dee8;
+    --smudgy-code-border: #2e2f3d;
 }
 @media (prefers-color-scheme: dark) {
-    body:not([data-theme="light"]) {
-        --smudgy-sidebar-caption-bg: #22222d;
-        --smudgy-sidebar-caption-fg: #fff;
+    body[data-theme="auto"] {
+        --smudgy-accent: #8ba4f0;
+        --smudgy-accent-hover: #adc0f7;
+        --smudgy-fg: #d9dee8;
+        --smudgy-fg-muted: #9aa1b2;
+        --smudgy-bg: #141414;
+        --smudgy-surface: #1e1e28;
+        --smudgy-border: #2e2f3d;
+        --smudgy-caption-bg: transparent;
+        --smudgy-caption-fg: var(--smudgy-fg-muted);
+        --smudgy-code-bg: var(--smudgy-bg);
+        --smudgy-code-fg: #d9dee8;
+        --smudgy-code-border: #2e2f3d;
     }
 }
 
-/* Control logo size in sidebar */
-.sidebar-brand img {
-    max-width: 120px;   /* change this */
-    height: auto;
+/* Derived colours (same formula in both modes) */
+body {
+    --smudgy-accent-soft: color-mix(in srgb, var(--smudgy-accent) 12%, transparent);
+    --smudgy-accent-target: color-mix(in srgb, var(--smudgy-accent) 22%, transparent);
+
+    /* myst-nb notebook cells use the same panel as code blocks */
+    --mystnb-source-bg-color: var(--smudgy-code-bg);
+    --mystnb-source-border-color: var(--smudgy-code-border);
+    --mystnb-stdout-bg-color: var(--smudgy-code-bg);
+    --mystnb-stdout-border-color: var(--smudgy-code-border);
+    --mystnb-source-margin-color: var(--smudgy-accent);
 }
 
-/* Keep icon images truly inline and text-sized inside headings. */
+/* myst-nb "Show code cell source" toggles: accent instead of furo's purple */
+details.hide.above-input,
+details.hide.below-input {
+    --color-admonition-title: var(--smudgy-accent);
+    --color-admonition-title-background: var(--smudgy-accent-soft);
+}
+
+/* ============================================================
+   CODE
+   ============================================================ */
+/* Panel colours come from the palette, token colours from the Pygments
+   pair in conf.py. body[data-theme] beats furo's dark .highlight rule. */
+body[data-theme] .highlight {
+    background: var(--smudgy-code-bg);
+    color: var(--smudgy-code-fg);
+}
+.highlight pre {
+    padding: 1em 1.25em;
+    font-size: var(--smudgy-code-size);
+}
+div.highlight {
+    border: 1px solid var(--smudgy-code-border);
+    border-radius: 6px;
+}
+div.cell div.cell_input div.highlight,
+div.cell div.cell_output div.highlight {
+    border: none;
+}
+/* Plain tokens: same weight/style in light and dark */
+html:not([data-lab]) body[data-theme] .highlight span { /* lab sets its own */
+    font-weight: normal !important;
+    font-style: normal !important;
+}
+code.literal,
+.sig-inline {
+    font-size: var(--smudgy-inline-code-size);
+    border: 1px solid var(--smudgy-code-border);
+}
+
+/* ============================================================
+   LAYOUT / MISC
+   ============================================================ */
+.content {
+    width: 50.6em; /* furo default 46em, ~10% wider */
+}
+img {
+    max-width: 100%;
+    height: auto;
+}
+mjx-container[jax="CHTML"] {
+    line-height: 0;
+}
+h1, h2, h3, h4 {
+    font-weight: 500;
+}
+
+/* Inline icons in headings, text-sized */
 .inline-title-icon {
     display: inline-block !important;
     height: 1em !important;
@@ -46,166 +137,24 @@ body[data-theme="dark"] {
     margin-left: 0.2em;
 }
 
-img {
-    max-width: 100%;
-    height: auto;
-}
-.bd-article img {
-    max-width: 100%;
-    height: auto;
-}
-
-mjx-container[jax="CHTML"] {
-    line-height: 0;
-}
-
-
-
-/* Widen the main content column ~10% (default furo .content width is 46em) */
-.content {
-    width: 50.6em;
-}
-
-/* Higher-contrast code block panel */
-/*.highlight { */
-/*    border-radius: 8px; */
-/*    border: 1px solid var(--color-background-border); */
-/*    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); */
-/*} */
-.highlight pre {
-    padding: 1em 1.25em;
-    font-size: 1.0em;
-}
-
-/* ```text fenced blocks are used for ASCII-art diagrams built from
-   box-drawing characters (- | + arrows, etc). Inconsolata (our
-   configured monospace webfont) doesn't include glyphs for the Unicode
-   Box Drawing block, so the browser silently substitutes a fallback
-   font for just those characters -- which has a different advance
-   width than Inconsolata, so the box edges drift out of alignment with
-   the plain-ASCII characters around them the further right they are on
-   the line. Force these blocks to a single plain monospace font instead
-   of Inconsolata, so every character (letters, digits, box-drawing
-   symbols alike) comes from the same font file and lines up exactly. */
-/*.highlight-text pre {
-    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-}*/
-
-/* Inline backtick code (`like this`) uses a separate, smaller Furo rule
-   by default (--font-size--small--2, ~81% of body text) -- bump it to
-   match the code-block size above. */
-code.literal,
-.sig-inline {
-    font-size: 1.05em;
-}
-
-/* Code-block panel background/text color (light mode only).
-   NOT the same as the "color-code-background"/"color-code-foreground"
-   theme variables in conf.py -- those only affect pre.literal-block,
-   .code-block-caption and line-number gutters. The main highlighted
-   code panel's colors come from a hardcoded, unscoped `.highlight {...}`
-   rule generated by pygments_style (currently "tango"), which never
-   reads those variables at all. Override it directly here instead;
-   per-token colors (keywords/strings/etc, higher-specificity
-   `.highlight .k` etc. rules) are unaffected. */
-.highlight {
-    background: #F8F9FB;
-}
-body[data-theme="dark"] .highlight {
-    background: #22222d;
-    color: #D9DEE8;
-}
-@media (prefers-color-scheme: dark) {
-    body:not([data-theme="light"]) .highlight {
-        background: #22222d;
-        color: #D9DEE8;
-    }
-}
-
 /* ============================================================
-   PYGMENTS TOKEN OVERRIDES (LIGHT / DARK)
-   Fine-grained overrides for individual Pygments token classes,
-   layered on top of whichever pygments_style / pygments_dark_style
-   is selected in conf.py. Everything below is commented out by
-   default -- an active rule with an unset variable would silently
-   break the chosen style's look for every token of that type, so
-   nothing here takes effect until you deliberately uncomment both
-   the variable value(s) and the corresponding .highlight rule.
-   Token class reference: https://pygments.org/docs/tokens/
+   SIDEBAR
    ============================================================ */
-/*
-body {
-    --smudgy-pygments-keyword-color: ;
-    --smudgy-pygments-keyword-font: ;
-    --smudgy-pygments-string-color: ;
-    --smudgy-pygments-string-font: ;
-    --smudgy-pygments-comment-color: ;
-    --smudgy-pygments-comment-font: ;
-    --smudgy-pygments-function-color: ;
-    --smudgy-pygments-function-font: ;
-    --smudgy-pygments-number-color: ;
-    --smudgy-pygments-number-font: ;
-}
-body[data-theme="dark"] {
-    --smudgy-pygments-keyword-color: ;
-    --smudgy-pygments-keyword-font: ;
-    --smudgy-pygments-string-color: ;
-    --smudgy-pygments-string-font: ;
-    --smudgy-pygments-comment-color: ;
-    --smudgy-pygments-comment-font: ;
-    --smudgy-pygments-function-color: ;
-    --smudgy-pygments-function-font: ;
-    --smudgy-pygments-number-color: ;
-    --smudgy-pygments-number-font: ;
-}
-@media (prefers-color-scheme: dark) {
-    body:not([data-theme="light"]) {
-        --smudgy-pygments-keyword-color: ;
-        --smudgy-pygments-keyword-font: ;
-        --smudgy-pygments-string-color: ;
-        --smudgy-pygments-string-font: ;
-        --smudgy-pygments-comment-color: ;
-        --smudgy-pygments-comment-font: ;
-        --smudgy-pygments-function-color: ;
-        --smudgy-pygments-function-font: ;
-        --smudgy-pygments-number-color: ;
-        --smudgy-pygments-number-font: ;
-    }
-}
-
-.highlight .k  { color: var(--smudgy-pygments-keyword-color);  font-family: var(--smudgy-pygments-keyword-font); }
-.highlight .s, .highlight .s1, .highlight .s2 { color: var(--smudgy-pygments-string-color); font-family: var(--smudgy-pygments-string-font); }
-.highlight .c, .highlight .c1 { color: var(--smudgy-pygments-comment-color); font-family: var(--smudgy-pygments-comment-font); }
-.highlight .nf { color: var(--smudgy-pygments-function-color); font-family: var(--smudgy-pygments-function-font); }
-.highlight .mi, .highlight .mf { color: var(--smudgy-pygments-number-color); font-family: var(--smudgy-pygments-number-font); }
-*/
-
-
-
-/* NEW CUSTOMIZATIONS */
-/* MAKE HEADERS IN GEORGIA SANS -- LOOKS NEAT */
-h1, h2, h3, h4 {
-  /*font-family: "Newsreader", IBM Plex Sans;*/
-  font-weight: 500;
-}
-
-/* Underlay left-nav section titles (captions) with a solid color */
 .sidebar-tree .caption,
 .sidebar-tree :not(.caption) > .caption-text {
-    background-color: var(--smudgy-sidebar-caption-bg);
-    color: var(--smudgy-sidebar-caption-fg);
-    border-radius: 2px;
+    background-color: var(--smudgy-caption-bg);
+    color: var(--smudgy-caption-fg);
+    border-radius: 3px;
     padding: 0.2em 0.5em;
     font-size: 0.9em;
 }
+.sidebar-tree .current-page > .reference {
+    color: var(--smudgy-accent);
+}
 
-/* GitHub icon button, injected by custom.js as the leftmost item in
-   Furo's top icon row (view/edit/theme-toggle on desktop; theme-toggle/
-   toc-icon on mobile). Furo leaves align-items on those rows at its
-   default (stretch), which top-aligns each icon's own content instead of
-   centering it -- force center alignment on the shared rows themselves so
-   every icon (including this one) lines up consistently, rather than just
-   centering our own icon within a differently-sized box. */
+/* ============================================================
+   TOP ICON ROW + GITHUB LINK (injected by custom.js)
+   ============================================================ */
 .content-icon-container,
 .mobile-header .header-right {
     align-items: center;
@@ -216,10 +165,15 @@ h1, h2, h3, h4 {
 .smudgy-github-link {
     display: flex;
     align-items: center;
+    color: var(--color-foreground-secondary);
+    transition: color 0.1s ease-out;
 }
-/*.smudgy-github-link:hover {
-    color:  #b38a2a;
-}*/
+.smudgy-github-link:hover,
+.theme-toggle:hover svg,
+.view-this-page a:hover svg,
+.edit-this-page a:hover svg {
+    color: var(--smudgy-accent);
+}
 .smudgy-github-link svg {
     height: 1.25rem;
     width: 1.25rem;

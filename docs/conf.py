@@ -33,7 +33,6 @@ napoleon_numpy_docstring = True
 
 autodoc_member_order = "bysource"
 autodoc_mock_imports = [
-    "smudgy.core._cpp_functions_ext",  # needed otherwise API docs fail to build
     # mpi4py and taichi are heavy/native dependencies that are prone to
     # failing to import (missing system MPI runtime, no GPU/display, etc.)
     # in RTD's minimal build container. Mocking them means autodoc never
@@ -60,115 +59,92 @@ myst_enable_extensions = [
     "amsmath",
 ]
 
-templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# docs/src holds the notebooks that generate the static wiki figures; they
+# are not pages of the docs themselves.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "src/**"]
 
-# html_logo = "_static/test.png"
+# Same LaTeX macros as the smudgy paper (MNRAS style), so equations can be
+# copied verbatim between paper and docs.
+mathjax3_config = {
+    "tex": {
+        "macros": {
+            "mathbfit": [r"\boldsymbol{#1}", 1],  # bold italic vectors, e.g. x
+            "mathbfss": [r"\boldsymbol{\mathsf{#1}}", 1],  # bold sans tensors, e.g. H
+            "bmath": [r"\boldsymbol{#1}", 1],  # bold Greek, e.g. Sigma
+            "upi": r"\pi",
+        }
+    }
+}
+
 html_theme = "furo"
-html_css_files = ["custom.css",]
-html_js_files = ["custom.js",]
 html_static_path = ["_static"]
-html_theme_options = {
+html_css_files = ["custom.css"]
+html_js_files = ["custom.js"]
 
-    # repository information
+# Furo variables, identical for light and dark: every colour points at a
+# --smudgy-* palette variable from _static/custom.css, which holds the
+# light and dark values (same hue, tuned lightness).
+_furo_vars = {
+    "font-stack": "var(--smudgy-font-body)",
+    "font-stack--monospace": "var(--smudgy-font-mono)",
+    "api-font-size": "var(--smudgy-code-size)",
+    # text and backgrounds
+    "color-foreground-primary": "var(--smudgy-fg)",
+    "color-foreground-secondary": "var(--smudgy-fg-muted)",
+    "color-background-primary": "var(--smudgy-bg)",
+    "color-background-border": "var(--smudgy-border)",
+    "color-sidebar-background": "var(--smudgy-surface)",
+    "color-sidebar-background-border": "var(--smudgy-border)",
+    "color-sidebar-search-background": "var(--smudgy-bg)",
+    "color-sidebar-search-background--focus": "var(--smudgy-bg)",
+    # accent: links, sidebar, toc, anchors
+    "color-brand-primary": "var(--smudgy-fg)",
+    "color-brand-content": "var(--smudgy-accent)",
+    "color-brand-visited": "var(--smudgy-accent)",
+    "color-link": "var(--smudgy-accent)",
+    "color-link--hover": "var(--smudgy-accent-hover)",
+    "color-link--visited": "var(--smudgy-accent)",
+    "color-link--visited--hover": "var(--smudgy-accent-hover)",
+    "color-link-underline": "var(--smudgy-accent-soft)",
+    "color-link-underline--hover": "var(--smudgy-accent-hover)",
+    "color-link-underline--visited": "var(--smudgy-accent-soft)",
+    "color-link-underline--visited--hover": "var(--smudgy-accent-hover)",
+    "color-sidebar-link-text": "var(--smudgy-fg-muted)",
+    "color-sidebar-link-text--top-level": "var(--smudgy-fg)",
+    "color-sidebar-item-background--hover": "var(--smudgy-accent-soft)",
+    "color-sidebar-item-expander-background--hover": "var(--smudgy-accent-soft)",
+    "color-toc-item-text--active": "var(--smudgy-accent)",
+    "color-toc-item-text--hover": "var(--smudgy-accent-hover)",
+    "color-highlight-on-target": "var(--smudgy-accent-target)",
+    # code
+    "color-code-background": "var(--smudgy-code-bg)",
+    "color-code-foreground": "var(--smudgy-code-fg)",
+    "color-inline-code-background": "var(--smudgy-code-bg)",
+    "color-api-background": "var(--smudgy-code-bg)",
+    "color-api-background-hover": "var(--smudgy-accent-soft)",
+    "color-api-name": "var(--smudgy-accent)",
+    "color-api-pre-name": "var(--smudgy-fg-muted)",
+}
+html_theme_options = {
     "source_repository": "https://github.com/maurbe/smudgy/",
     "source_branch": "main",
     "source_directory": "docs/",
-    #"edit_button_type": "edit",
-
     "sidebar_hide_name": True,
+    "light_css_variables": _furo_vars,
+    "dark_css_variables": _furo_vars,
+    "light_logo": "smudgy_logo_light.svg",   # relative to _static/
+    "dark_logo": "smudgy_logo_dark.svg",
 
-       "light_css_variables": {
-           "color-brand-primary": "black",
-           "color-brand-content": "#3352CC",
-
-           "font-stack": "'IBM Plex Sans', -apple-system, sans-serif",
-           #"font-stack--headings": "'Roboto', -apple-system, sans-serif",
-           "font-stack--monospace": "'Inconsolata', monospace",
-
-           # Match custom.css's code/inline-code font-size bump on the
-           # autodoc-generated API signature blocks (dl.py .sig), which use
-           # a separate Furo variable that custom.css's overrides don't reach.
-           "api-font-size": "1.05em",
-
-           # Keep visited links identical to normal links (no purple).
-           "color-link--visited": "var(--color-brand-content)",
-           "color-link--visited--hover": "var(--color-brand-content)",
-           "color-link-underline--visited": "var(--color-background-border)",
-           "color-link-underline--visited--hover": "var(--color-foreground-border)",
-
-           # Backgrounds -- both are native Furo variables (not custom).
-           # Uncomment + edit to override; shown values are Furo's own
-           # light-mode defaults.
-           #"color-background-primary": "#fff",     # main site (article/content) background
-           #"color-sidebar-background": "#f8f9fb",  # left sidebar background
-
-           # Text colors -- native Furo variables (not custom).
-           # color-sidebar-link-text--top-level defaults to color-brand-primary
-           # (currently "black" above) unless set separately here.
-           #"color-foreground-primary": "#000",             # main site body text
-           #"color-sidebar-link-text": "#5a5c63",            # sidebar nav links (nested)
-           #"color-sidebar-link-text--top-level": "black",   # sidebar nav links (top-level)
-
-           # Background flashed behind a heading/table/footnote/etc. when you
-           # jump to it via a TOC link or #anchor (native Furo variable, not
-           # custom). Shown value is Furo's own light-mode default (yellow).
-           "color-highlight-on-target": "#6494ED40",
-
-           #"color-code-background": "#C8D3E9",
-           #"color-code-foreground": "#7d5050",
-    },
-       "dark_css_variables": {
-           "color-brand-primary": "black",       # TODO: tune in dark-theme pass
-           "color-brand-content": "#7EB4F9",      # TODO: tune in dark-theme pass
-           
-           "font-stack": "'IBM Plex Sans', -apple-system, sans-serif",
-           #"font-stack--headings": "'Roboto', -apple-system, sans-serif",
-           "font-stack--monospace": "'Inconsolata', monospace",
-
-           "api-font-size": "1.05em",
-
-           # Keep visited links identical to normal links (no purple).
-           "color-link--visited": "var(--color-brand-content)",
-           "color-link--visited--hover": "var(--color-brand-content)",
-           "color-link-underline--visited": "var(--color-background-border)",
-           "color-link-underline--visited--hover": "var(--color-foreground-border)",
-
-           # Backgrounds -- native Furo variables (not custom). Shown
-           # values are Furo's own dark-mode defaults; TODO: tune in
-           # dark-theme pass.
-           "color-background-primary": "#191921",  # main site (article/content) background
-           "color-sidebar-background": "#191921",  # left sidebar background
-
-           # Sidebar search box -- defaults to color-background-secondary,
-           # which is untouched here and so no longer matched the sidebar
-           # once color-sidebar-background was overridden above. Reference
-           # the variable (not a duplicated hex) so it keeps tracking
-           # color-sidebar-background automatically if that's tuned later.
-           "color-sidebar-search-background": "var(--color-sidebar-background)",
-           "color-sidebar-search-background--focus": "var(--color-sidebar-background)",
-
-           # Text colors -- native Furo variables (not custom). TODO:
-           # tune in dark-theme pass.
-           "color-foreground-primary": "#D9DEE8",            # main site body text
-           "color-sidebar-link-text": "#D9DEE8",             # sidebar nav links (nested)
-           "color-sidebar-link-text--top-level": "#D9DEE8",  # sidebar nav links (top-level)
-
-           # Right-hand "On this page" TOC: color of the currently-scrolled-to
-           # section. Overridden directly (rather than inheriting
-           # color-brand-primary, which is "black" above and was making it
-           # unreadable here) so it doesn't drag every other brand-colored
-           # element along with it.
-           "color-toc-item-text--active": "#D9DEE8",
-
-           # Background flashed behind a heading/table/footnote/etc. when you
-           # jump to it via a TOC link or #anchor (native Furo variable, not
-           # custom). Shown value is Furo's own dark-mode default (yellow).
-           "color-highlight-on-target": "#6494ED40",
-
-           #"color-code-background": "#1e2127",
-           #"color-code-foreground": "#e6e6e6",
-    },
 }
-pygments_style = "tango"        # Style for light mode: black default text, colored keywords/strings/comments
-pygments_dark_style = "nord-darker"  # Style for dark mode (Furo specific)
+# Catppuccin latte / mocha: same token hues in both modes (furo uses the
+# dark style in dark mode). Bold/italic is stripped in custom.css.
+pygments_style = "catppuccin-latte"
+pygments_dark_style = "catppuccin-mocha"
+
+# --- Theme lab: SMUDGY_THEME_LAB=1 sphinx-build ... ----------------------
+# Floating picker (docs/_lab) to try code styles, accent, fonts and sizes
+# live; "Copy config" exports the choice. Not part of normal builds.
+if os.environ.get("SMUDGY_THEME_LAB"):
+    html_static_path.append("_lab")
+    html_css_files += ["lab_pygments.css", "lab.css"]
+    html_js_files.insert(0, "lab.js")

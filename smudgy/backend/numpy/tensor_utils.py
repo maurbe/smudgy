@@ -18,7 +18,24 @@ def _fix_eigvec_sign(eigvecs: np.ndarray) -> np.ndarray:
 
 
 def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
+    """Project 3D smoothing tensors onto a coordinate plane.
 
+    Parameters
+    ----------
+    h_tensor : np.ndarray
+        Smoothing tensors, shape (N, 3, 3).
+    plane : tuple of int, default (0, 1)
+        Axes spanning the projection plane.
+
+    Returns
+    -------
+    h2d : np.ndarray
+        Projected tensors, shape (N, 2, 2).
+    eigvals : np.ndarray
+        Eigenvalues of the projected tensors, shape (N, 2).
+    eigvecs : np.ndarray
+        Eigenvectors of the projected tensors, shape (N, 2, 2).
+    """
     ea = BASIS_VECTORS[plane[0]]
     eb = BASIS_VECTORS[plane[1]]
 

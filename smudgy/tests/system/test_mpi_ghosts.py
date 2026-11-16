@@ -73,7 +73,6 @@ def _run_knn_under_mpi(out_path, mode, k):
         positions=positions, weights=weights, boxsize=boxsize, verbose=False,
         backend="numpy",
     )
-    pc.decompose()
     pc.find_neighbors(num_neighbors=k)
 
     n_local = pc.ghosts.n_local
@@ -152,7 +151,6 @@ def _run_deadlock_check_under_mpi(out_path):
     weights = np.ones(n, dtype=np.float32)
 
     pc = PointCloud(positions=positions, weights=weights, boxsize=None, verbose=False, backend="numpy")
-    pc.decompose()
     pc.find_neighbors(num_neighbors=k)
 
     shape_ok = pc.ghosts.nn_inds.shape == (pc.ghosts.n_local, k)
@@ -185,7 +183,6 @@ def _run_half_box_guard_under_mpi():
     weights = np.ones(n, dtype=np.float32)
 
     pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")
-    pc.decompose()
     try:
         pc.find_neighbors(num_neighbors=k)
         raised = False
@@ -211,7 +208,6 @@ def _run_negative_test_under_mpi():
     weights = np.ones(n, dtype=np.float32)
 
     pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")
-    pc.decompose()
     try:
         pc.find_neighbors(num_neighbors=n + 5)
         raised = False
@@ -243,7 +239,6 @@ def _run_push_to_ghosts_under_mpi(out_path):
     weights = np.ones(n, dtype=np.float32)
 
     pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")
-    pc.decompose()
     pc.find_neighbors(num_neighbors=8)
 
     # a synthetic local array that unambiguously encodes both which particle
@@ -297,7 +292,6 @@ def _run_target_positions_under_mpi(out_path, mode):
         positions=positions, weights=weights, boxsize=boxsize, verbose=False,
         backend="numpy",
     )
-    pc.decompose()
 
     default_ghosts = exchange_ghosts(
         comm, pc.decomposition, k, dim, periodic, boxsize,
@@ -407,7 +401,6 @@ def _run_sparse_target_density_under_mpi(out_path):
         positions=positions, weights=weights, boxsize=boxsize, verbose=False,
         backend="numpy",
     )
-    pc.decompose()
 
     # ~10x fewer target points than particles, spread over the SAME
     # near-full-domain extent as the particles (not confined to a small

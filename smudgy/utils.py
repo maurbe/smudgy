@@ -1,4 +1,4 @@
-"""Visualization utilities."""
+"""Grid construction and plotting utilities."""
 
 from __future__ import annotations
 

@@ -199,3 +199,4 @@ temp.*/
 
 # Data files
 .vscode/
+.ruff_cache/

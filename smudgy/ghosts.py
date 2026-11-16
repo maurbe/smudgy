@@ -1,29 +1,10 @@
-"""Ghost-particle exchange and iterative true-KNN solver.
+"""Ghost-particle exchange and exact nearest-neighbour search across MPI ranks.
 
-Step 2 of the MPI domain-decomposition roadmap: given a `DecompositionInfo`
-(Step 1), finds each local particle's true global K-nearest-neighbor result
-using only ghost particles fetched from other ranks -- never a full
-broadcast. Handles periodic boundary conditions (`boxsize`) via periodic-image
-bounding-box overlap checks for ghost SELECTION; the actual periodic distance
-math needs no new code, since `backend.neighbors.build_kdtree`/`query_kdtree`
-already support scipy's periodic `boxsize` mode (used today for the single
-global tree in `PointCloud._check_tree`) -- a local tree built the same way
-over (local + ghost) points computes correct wraparound distances
-automatically, so ghost positions are sent and stored unmodified (no
-+/-boxsize shifting of particle data is ever needed, only of the SEARCH
-REGION used to decide who to fetch from -- see `_select_ghosts_to_send`).
-
-This module is opt-in and self-contained: nothing else in the package reads
-`GhostInfo` yet (see `PointCloud.find_neighbors`).
-
-`PointCloud.__init__` already wraps `self.positions` into `[0, boxsize)` for
-periodic clouds (fixing raw unwrapped input, and float32-rounding artifacts
-right at the boundary that scipy's periodic `cKDTree` rejects outright). So
-`decomposition.local_positions` -- a reordered/redistributed slice of
-`self.positions` -- is canonical by construction in practice, which makes
-this module's own `wrap_periodic` call a safety net, not the primary fix:
-it's usually a no-op, kept so this module doesn't silently depend on
-`__init__` being the only path its input could ever arrive from.
+Each rank imports the particles of other ranks that lie within a search
+radius around its own particles (ghost particles) and grows the radius until
+every particle has found its true nearest neighbours. Periodic boundaries are
+handled through scipy's periodic k-d tree; ghost positions are stored
+unshifted.
 """
 
 from __future__ import annotations
@@ -47,61 +28,36 @@ _UNIT_BALL_VOLUME = {1: 2.0, 2: np.pi, 3: 4.0 / 3.0 * np.pi}
 
 @dataclass
 class GhostInfo:
-    """Result of `exchange_ghosts`.
+    """Result of :func:`exchange_ghosts`.
 
     Parameters
     ----------
     ghost_positions : np.ndarray
-        Canonical (wrapped into [0, boxsize) if periodic) positions of
-        particles imported from other ranks, shape (n_ghost, dim). Unlike
-        `DecompositionInfo.local_positions`, these are guaranteed wrapped --
-        a caller combining this with local data should wrap
-        `decomposition.local_positions` itself first (see `wrap_periodic`);
-        this dataclass does not duplicate a wrapped copy of the local array.
+        Positions of the particles imported from other ranks, shape
+        (n_ghost, dim), wrapped into ``[0, boxsize)`` if periodic.
     ghost_weights : np.ndarray
-        Shape (n_ghost,).
+        Weights of the ghost particles, shape (n_ghost,).
     ghost_source_rank : np.ndarray
-        Owning rank of each ghost, shape (n_ghost,) int64.
+        Owning rank of each ghost, shape (n_ghost,).
     ghost_source_local_index : np.ndarray
-        Row index into the source rank's own `DecompositionInfo.local_*`
-        arrays, shape (n_ghost,) int64.
+        Row index of each ghost in its source rank's local arrays, shape
+        (n_ghost,).
     ghost_global_index : np.ndarray
-        Original pre-decomposition row index of each ghost, shape (n_ghost,)
-        int64 (== source rank's `local_global_indices[ghost_source_local_index]`).
+        Original (pre-decomposition) index of each ghost, shape (n_ghost,).
     nn_inds : np.ndarray
-        Shape (n_target, k) int32 (int64 if the combined array has >= 2**31
-        rows), where n_target is n_local unless
-        `exchange_ghosts` was called with an explicit `target_positions`
-        (Step 4b: solving K-NN for an arbitrary point set, e.g. routed
-        interpolation query positions, instead of this rank's own particles),
-        in which case n_target = target_positions.shape[0]. Indices are
-        always into the CONCEPTUAL combined array of this rank's own
-        particles -- [rows 0..n_local) -- followed by ghost particles --
-        [rows n_local..n_local+n_ghost) -- regardless of what was queried: a
-        value < n_local indexes this rank's own `decomposition.local_*`
-        arrays directly; a value >= n_local indexes `ghost_*` at row
-        (value - n_local).
+        Nearest-neighbour indices, shape (n_target, k), into the combined array
+        of local particles (rows ``0..n_local``) followed by ghosts.
     nn_dists : np.ndarray
-        Shape (n_target, k) float32 (see `nn_inds`).
+        Nearest-neighbour distances, shape (n_target, k).
     radius : float
-        This rank's final converged padding radius.
-    n_local : int
-        Local particle count at exchange time (the local/ghost split point
-        used by `nn_inds` above).
+        Final search radius of this rank.
     export_local_index : np.ndarray
-        The mirror image of `ghost_source_local_index`, from this rank's own
-        (sender) perspective: row index into this rank's own
-        `DecompositionInfo.local_*` arrays for each particle it exported as
-        a ghost to some other rank, grouped by destination rank ascending,
-        shape (n_exported,) int64. Used by `push_to_ghosts` to ship a
-        later-computed local value (density, smoothing length/tensor, a
-        field) out along the exact same routing this exchange already
-        established, without rediscovering it.
+        Local row indices of the particles this rank exported as ghosts,
+        grouped by destination rank, shape (n_exported,).
     export_counts : np.ndarray
-        How many of this rank's local particles were exported to each
-        destination rank, shape (size,) int64 -- the send-side counts that
-        produced `export_local_index`'s grouping.
-
+        Number of particles exported to each rank, shape (size,).
+    n_local : int
+        Number of local particles at exchange time.
     """
 
     ghost_positions: np.ndarray = None
@@ -118,14 +74,19 @@ class GhostInfo:
 
 
 def wrap_periodic(positions: FloatArray, boxsize: FloatArray | None) -> FloatArray:
-    """Wrap positions into [0, boxsize) per axis; identity if boxsize is None.
+    """Wrap positions into ``[0, boxsize)`` per axis.
 
-    `PointCloud.__init__` already does this (in float32, with an extra clip
-    against boundary-rounding artifacts) for `self.positions`, so calling
-    this on a slice/redistribution of that array -- as `exchange_ghosts`
-    does on `decomposition.local_positions` -- is normally a no-op. Kept as
-    a cheap, idempotent safety net rather than assuming `__init__` is the
-    only path this data could ever arrive from.
+    Parameters
+    ----------
+    positions : np.ndarray
+        Positions, shape (N, D).
+    boxsize : np.ndarray or None
+        Box size per axis; if None, the positions are returned unchanged.
+
+    Returns
+    -------
+    np.ndarray
+        Wrapped positions, shape (N, D).
     """
     if boxsize is None:
         return positions
@@ -304,38 +265,38 @@ def exchange_ghosts(
     max_iterations: int = 20,
     on_max_iterations: str = "raise",
 ) -> GhostInfo:
-    """Iteratively fetch ghosts and solve true K-NN for `target_positions`.
+    """Import ghost particles and solve the exact k-nearest-neighbour problem.
 
-    See module docstring for the periodic-boundary design. Every rank must
-    call this collectively (it runs the same sequence of MPI collectives on
-    every rank every iteration, including ranks with zero local particles --
-    see `DecompositionInfo`'s `N < P` case -- so that no rank ever waits on
-    a peer that has stopped participating).
+    Collective call: every rank must call it, including ranks without local
+    particles.
 
-    `target_positions`, default `None`, is the (possibly per-rank-varying
-    size) set of points to solve K-NN for -- defaults to this rank's own
-    `decomposition.local_positions` (Step 2's original use: find each local
-    particle's true neighbors). Passing a different array (Step 4b: e.g.
-    routed interpolation query positions) solves K-NN for those points
-    instead, using the exact same mechanism: the *requested-region bounding
-    box and convergence check* are based on `target_positions`, while the
-    *initial radius estimate* is deliberately still based on this rank's own
-    PARTICLE density (`n_local`/local bbox), never on `target_positions`'s
-    own count/bbox -- the radius needed to reach `num_neighbors` particles is
-    governed by how densely packed particles are nearby, which has nothing
-    to do with how many target points happen to be nearby (a target batch
-    far sparser than the local particles over a similar region would
-    otherwise produce a wildly inflated first guess; see `_initial_radius`'s
-    call site). Ghosts are still always drawn from other ranks' own particle
-    data regardless (the sender side, `_select_ghosts_to_send`, only ever
-    looks at *its own* particles against the *destination's* requested box --
-    it does not care what that box represents). The provably-sufficient
-    radius-growth argument (see below) depends only on what a given radius
-    makes available to fetch, via that same sender-side overlap test --
-    never on whether the requesting box came from the requester's own
-    particles -- so it carries over
-    unchanged. `target_positions` need not have associated weights (it is
-    never sent to any rank as a ghost, only queried against).
+    Parameters
+    ----------
+    comm : MPI.Comm
+        MPI communicator.
+    decomposition : DecompositionInfo
+        Domain decomposition of the point cloud.
+    num_neighbors : int
+        Number of nearest neighbours k.
+    dim : int
+        Spatial dimension.
+    periodic : bool
+        Whether the domain is periodic.
+    boxsize : np.ndarray or None
+        Box size per axis (periodic domains only).
+    target_positions : np.ndarray, optional
+        Points to find neighbours for, shape (M, D). Defaults to this rank's
+        own particles.
+    max_iterations : int, default 20
+        Maximum number of radius-growing iterations.
+    on_max_iterations : str, default "raise"
+        ``"raise"`` raises a ``RuntimeError`` if the search has not converged
+        after ``max_iterations``; any other value only warns.
+
+    Returns
+    -------
+    GhostInfo
+        Ghost particles and the nearest-neighbour indices and distances.
     """
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -537,21 +498,22 @@ def exchange_ghosts(
 def push_to_ghosts(
     comm: MPI.Comm, ghost_info: GhostInfo, local_array: np.ndarray
 ) -> np.ndarray:
-    """Ship `local_array`'s values out to whichever ranks imported those
-    particles as ghosts of theirs, reusing `exchange_ghosts`'s already-
-    established routing.
+    """Send per-particle values to the ranks that imported these particles as ghosts.
 
-    `local_array` must be indexed the same way as `decomposition.local_*`
-    (row i = this rank's i-th local particle) -- e.g. a just-computed
-    `smoothing_lengths`, `density_isotropic`, or a locally-sliced field.
-    No new selection or communication topology is discovered here:
-    `ghost_info.export_local_index`/`export_counts` are exactly the arrays
-    that built `ghost_info.ghost_positions` etc. in the first place, so
-    replaying them for a new payload reproduces the identical per-destination
-    grouping -- the result lands aligned row-for-row with `ghost_positions`
-    (and friends), directly usable via
-    `np.concatenate([local_array, push_to_ghosts(comm, ghost_info, local_array)])`
-    wherever an `nn_inds` value `>= n_local` needs to index into it.
+    Parameters
+    ----------
+    comm : MPI.Comm
+        MPI communicator.
+    ghost_info : GhostInfo
+        Result of :func:`exchange_ghosts`.
+    local_array : np.ndarray
+        Values of this rank's local particles, shape (n_local, ...).
+
+    Returns
+    -------
+    np.ndarray
+        Values of this rank's ghost particles, aligned with
+        ``ghost_info.ghost_positions``.
     """
     send_values = local_array[ghost_info.export_local_index]
     recv_counts = execution._alltoall_counts(comm, ghost_info.export_counts)

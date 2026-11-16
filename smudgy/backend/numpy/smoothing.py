@@ -29,6 +29,7 @@ def _as_float32(array):
 
 
 def compute_hsml(nn_dists: FloatArray) -> FloatArray:
+    """Return the distance to the farthest (k-th) neighbour as smoothing length."""
     nn_dists = _as_float32(nn_dists)
     return nn_dists[:, -1]
 
@@ -44,21 +45,40 @@ def compute_hmat(
     volume_preserving: bool = False,  # det H = hsml^D instead of the hull scaling
     hsml: FloatArray | None = None,  # required if volume_preserving
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
-    """Covariance-based smoothing tensor, following Marinho (2021), eqs. 39-44.
+    """Compute covariant smoothing tensors (Marinho 2021); NumPy reference.
 
-    H = zeta_max * Sigma^(1/2), with zeta_max the largest Mahalanobis distance
-    among the K neighbours, so the support ellipsoid is the smallest one of the
-    covariance's shape that still contains every neighbour. In the isotropic
-    limit each axis reduces to the distance to the farthest neighbour, i.e. to
-    the usual smoothing length, for any K and any weighting.
+    ``H = zeta_max * Sigma^(1/2)``, the smallest ellipsoid of the neighbours'
+    covariance shape that encloses all neighbours.
 
-    Returns (H, axes, eigvecs), where `axes` and `eigvecs` are the
-    eigenvalues and eigenvectors of H itself: H = V diag(axes) V^T. Axes are
-    sorted in descending order; eigenvectors follow the sign convention of
-    `_fix_eigvec_sign` (largest-magnitude component positive).
+    Parameters
+    ----------
+    query_positions : np.ndarray
+        Query positions, shape (N, D).
+    positions : np.ndarray
+        Particle positions, shape (Nc, D), indexed by `nn_inds`.
+    weights : np.ndarray
+        Particle weights, shape (Nc,), indexed by `nn_inds`.
+    nn_inds : np.ndarray
+        Neighbour indices of each query, shape (N, K).
+    boxsize : np.ndarray, optional
+        Box sizes for periodic boundary conditions.
+    ratio_max : float, default 100.0
+        Maximum axis ratio h_max / h_min (>= 1).
+    min_axis : float, optional
+        Lower bound on every axis.
+    volume_preserving : bool, default False
+        Rescale the axes so that det H = hsml^D. Requires `hsml`.
+    hsml : np.ndarray, optional
+        Isotropic smoothing lengths, shape (N,).
 
-    If every neighbour coincides with the query, Sigma vanishes and H = 0; pass
-    `min_axis` to keep H invertible in that case.
+    Returns
+    -------
+    H : np.ndarray
+        Smoothing tensors, shape (N, D, D).
+    eigvals : np.ndarray
+        Principal smoothing lengths in descending order, shape (N, D).
+    eigvecs : np.ndarray
+        Principal axes (columns), shape (N, D, D).
     """
     dim = query_positions.shape[-1]
     if dim not in (1, 2, 3):

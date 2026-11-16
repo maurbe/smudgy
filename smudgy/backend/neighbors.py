@@ -1,4 +1,4 @@
-"""Utility functions for SPH operations."""
+"""k-d tree neighbour search and periodic coordinate utilities."""
 
 from __future__ import annotations
 

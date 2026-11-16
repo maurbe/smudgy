@@ -43,11 +43,9 @@ def density(
     boxsize,
     structure,
 ):
-    """Compute SPH density using isotropic or covariant smoothing.
+    """Compute SPH densities (NumPy reference backend).
 
-    `positions`/`weights` are per-particle arrays that `nn_inds` (N, K)
-    indexes into; `h` is the smoothing length/tensor of each query. The
-    kernel is scaled so its support does not exceed `h` (see `_support_scaled`).
+    Same arguments as :func:`smudgy.backend.taichi.interpolation.density`.
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
@@ -92,11 +90,9 @@ def interpolate(
     mode,
     structure,
 ):
-    """Interpolate fields using isotropic or covariant smoothing.
+    """Interpolate fields at query positions (NumPy reference backend).
 
-    `positions`, `weights` (m_j / rho_j), `fields` and `h` are per-particle
-    arrays that `nn_inds` (N, K) indexes into. The kernel is scaled so its
-    support does not exceed `h` (see `_support_scaled`).
+    Same arguments as :func:`smudgy.backend.taichi.interpolation.interpolate`.
     """
     if structure == "separable":
         raise ValueError(
