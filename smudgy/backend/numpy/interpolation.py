@@ -45,7 +45,7 @@ def density(
 ):
     """Compute SPH densities (NumPy reference backend).
 
-    Same arguments as :func:`smudgy.backend.taichi.interpolation.density`.
+    Same arguments as :func:`smudgy.backend.quadrants.interpolation.density`.
     """
     if structure == "separable":
         raise ValueError("structure='separable' is not supported for particle density.")
@@ -92,7 +92,7 @@ def interpolate(
 ):
     """Interpolate fields at query positions (NumPy reference backend).
 
-    Same arguments as :func:`smudgy.backend.taichi.interpolation.interpolate`.
+    Same arguments as :func:`smudgy.backend.quadrants.interpolation.interpolate`.
     """
     if structure == "separable":
         raise ValueError(

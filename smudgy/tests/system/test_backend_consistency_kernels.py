@@ -22,8 +22,8 @@ import quadrants as ti
 # Adjust these imports to your package layout.
 # ---------------------------------------------------------------------------
 from smudgy.backend.numpy.kernels import KERNEL_CLASSES, get_kernel
-from smudgy.backend.taichi import init as taichi_init  # noqa: F401 (kept for reference)
-from smudgy.backend.taichi.kernels import (
+from smudgy.backend.quadrants import init as quadrants_init  # noqa: F401 (kept for reference)
+from smudgy.backend.quadrants.kernels import (
     SEPARABLE_KERNELS,
     SPHERICAL_KERNELS,
     create_separable_kernel,

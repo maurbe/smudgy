@@ -55,7 +55,7 @@ def test_backend_consistency_isotropic(dim, shape):
     """Test consistency between backends for smoothing lengths."""
     data = _generate_dataset(dim, shape)
     s_numpy, s_taichi = (
-        _smoothing(b, data, "isotropic").smoothing_lengths for b in ("numpy", "taichi")
+        _smoothing(b, data, "isotropic").smoothing_lengths for b in ("numpy", "quadrants")
     )
     assert s_numpy.shape == s_taichi.shape
     np.testing.assert_allclose(s_numpy, s_taichi, rtol=1e-4, atol=1e-6)
@@ -69,7 +69,7 @@ def test_backend_consistency_covariant(dim, shape, options):
     data = _generate_dataset(dim, shape)
     s_numpy, s_taichi = (
         _smoothing(b, data, "covariant", **TENSOR_OPTIONS[options])
-        for b in ("numpy", "taichi")
+        for b in ("numpy", "quadrants")
     )
 
     h_numpy, h_taichi = s_numpy.smoothing_tensors, s_taichi.smoothing_tensors

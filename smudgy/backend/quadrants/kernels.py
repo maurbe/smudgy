@@ -1576,9 +1576,9 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
     float
         Total integral of the kernel.
     """
-    from . import init as _taichi_init
+    from . import init as _quadrants_init
 
-    _taichi_init(arch="cpu")
+    _quadrants_init(arch="cpu")
     kspec = create_separable_kernel(kernel_name)
 
     @ti.kernel
@@ -1617,9 +1617,9 @@ def compute_total_integral_spherical(
     float
         Total integral of the kernel.
     """
-    from . import init as _taichi_init
+    from . import init as _quadrants_init
 
-    _taichi_init(arch="cpu")
+    _quadrants_init(arch="cpu")
     grid = build_kernel_sample_grid(kernel_name, dim, eta_crit)
     return float(np.sum(grid["integrals"]))
 
@@ -1677,9 +1677,9 @@ def get_spherical_kernel_values_1D(kernel_name: str):
     values : np.ndarray
         Kernel values at the sample points.
     """
-    from . import init as _taichi_init
+    from . import init as _quadrants_init
 
-    _taichi_init(arch="cpu")
+    _quadrants_init(arch="cpu")
     kspec = create_spherical_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)
@@ -1705,9 +1705,9 @@ def get_separable_kernel_values_1D(kernel_name: str):
     values : np.ndarray
         Kernel values at the sample points.
     """
-    from . import init as _taichi_init
+    from . import init as _quadrants_init
 
-    _taichi_init(arch="cpu")
+    _quadrants_init(arch="cpu")
     kspec = create_separable_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)

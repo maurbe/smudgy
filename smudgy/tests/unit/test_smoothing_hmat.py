@@ -9,9 +9,9 @@ import pytest
 from scipy.spatial import cKDTree
 
 from smudgy.backend.numpy import smoothing as np_smoothing
-from smudgy.backend.taichi import smoothing as ti_smoothing
+from smudgy.backend.quadrants import smoothing as ti_smoothing
 
-BACKENDS = {"numpy": np_smoothing, "taichi": ti_smoothing}
+BACKENDS = {"numpy": np_smoothing, "quadrants": ti_smoothing}
 
 
 @pytest.fixture(params=list(BACKENDS))

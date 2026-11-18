@@ -102,12 +102,12 @@ def test_backend_consistency(dim, structure, mode, kernel_name):
     query_positions = _generate_dataset(dim, seed=43)["positions"]
 
     results = {}
-    for backend in ["numpy", "taichi"]:
+    for backend in ["numpy", "quadrants"]:
         results[backend] = _run_backend(
             backend, dim, structure, mode, kernel_name, data, query_positions
         )
 
-    f_numpy, f_taichi = results["numpy"], results["taichi"]
+    f_numpy, f_taichi = results["numpy"], results["quadrants"]
 
     assert f_numpy.shape == f_taichi.shape
     assert np.all(np.isfinite(f_numpy)), "numpy backend produced non-finite values"
@@ -129,12 +129,12 @@ def test_backend_consistency_at_particle_positions(dim, structure, kernel_name):
     data = _generate_dataset(dim, seed=42)
 
     results = {}
-    for backend in ["numpy", "taichi"]:
+    for backend in ["numpy", "quadrants"]:
         results[backend] = _run_backend(
             backend, dim, structure, "field", kernel_name, data, query_positions=None
         )
 
-    f_numpy, f_taichi = results["numpy"], results["taichi"]
+    f_numpy, f_taichi = results["numpy"], results["quadrants"]
     assert f_numpy.shape == f_taichi.shape
     np.testing.assert_allclose(f_numpy, f_taichi, rtol=1e-2, atol=1e-3)
 

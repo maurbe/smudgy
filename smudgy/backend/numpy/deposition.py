@@ -1869,7 +1869,7 @@ def deposit(
     if adaptive:
         raise ValueError(
             "backend='numpy' does not support adaptive deposition; "
-            "use backend='taichi'."
+            "use backend='quadrants'."
         )
     if structure is not None:
         raise ValueError("structure is only valid when adaptive=True.")

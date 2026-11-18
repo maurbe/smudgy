@@ -41,7 +41,7 @@ def fake_backend(monkeypatch):
     bypass it with), and is cheap/fast at these tests' small particle counts
     even without faking it, using the real scipy cKDTree under the hood.
     """
-    monkeypatch.setattr("smudgy.pointcloud.taichi_init", lambda **kwargs: None)
+    monkeypatch.setattr("smudgy.pointcloud.quadrants_init", lambda **kwargs: None)
 
     def fake_dispatch(name, **kwargs):
         dim = kwargs.get("dim", 3)
@@ -206,14 +206,14 @@ class TestInit:
         row = find_local_row(pc, 0)
         np.testing.assert_allclose(pc.positions[row], [-0.1, 1.3, 0.5], atol=1e-6)
 
-    def test_backend_default_is_taichi(self, rng):
+    def test_backend_default_is_quadrants(self, rng):
         pos = make_positions(rng, n=10)
         pc = PointCloud(pos, verbose=False)
-        assert pc.backend == "taichi"
+        assert pc.backend == "quadrants"
 
     def test_invalid_backend_raises(self, rng):
         pos = make_positions(rng, n=10)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             PointCloud(pos, backend="not_a_backend", verbose=False)
 
     def test_backend_non_string_raises(self, rng):
@@ -233,7 +233,7 @@ class TestSetupProperties:
 
     def test_set_backend_invalid_raises(self, rng):
         pc = PointCloud(make_positions(rng), verbose=False)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             pc.set_backend("bogus")
 
     def test_global_setup_returns_self_for_chaining(self, rng):

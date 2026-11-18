@@ -11,8 +11,8 @@ _BACKEND_ROUTINES = {
 
 
 def _check_backend(backend: str):
-    if backend not in ("numpy", "taichi"):
-        raise ValueError(f"Unknown backend: {backend!r}. Expected 'numpy' or 'taichi'.")
+    if backend not in ("numpy", "quadrants"):
+        raise ValueError(f"Unknown backend: {backend!r}. Expected 'numpy' or 'quadrants'.")
 
 
 def _dispatch(routine: str, *args, backend: str, **kwargs):

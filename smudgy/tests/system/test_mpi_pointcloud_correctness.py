@@ -55,7 +55,7 @@ def _run_under_mpi():
             weights=weights,
             boxsize=boxsize,
             verbose=False,
-            backend="taichi",
+            backend="quadrants",
             arch="cpu",
         ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure=structure)
         pc.find_neighbors()

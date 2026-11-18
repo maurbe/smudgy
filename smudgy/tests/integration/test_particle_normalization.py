@@ -14,7 +14,7 @@ from smudgy import PointCloud
 from smudgy.backend.numpy.kernels import get_kernel
 
 DIMS = [1, 2, 3]
-BACKENDS = ["numpy", "taichi"]
+BACKENDS = ["numpy", "quadrants"]
 VARIANTS = [("isotropic", False), ("covariant", False), ("covariant", True)]
 KERNEL_NAMES = [
     "tophat",

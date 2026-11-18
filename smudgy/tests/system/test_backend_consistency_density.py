@@ -30,7 +30,7 @@ def test_backend_consistency(dim, structure):
     boxsize = data["boxsize"]
 
     density_objects = []
-    for backend in ["numpy", "taichi"]:
+    for backend in ["numpy", "quadrants"]:
         pc = PointCloud(
             positions=positions,
             weights=weights,

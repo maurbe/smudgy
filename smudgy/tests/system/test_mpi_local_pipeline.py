@@ -80,7 +80,7 @@ def _run_pipeline_under_mpi(out_path, dist_mode, structure, periodic):
 
     pc = PointCloud(
         positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
-        verbose=False, backend="taichi", arch="cpu",
+        verbose=False, backend="quadrants", arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure=structure)
     pc.find_neighbors()
     pc.compute_smoothing()
@@ -127,7 +127,7 @@ def _run_num_neighbors_mismatch_under_mpi(out_path):
 
     pc = PointCloud(
         positions=positions.copy(), weights=weights.copy(), boxsize=1.0,
-        verbose=False, backend="taichi", arch="cpu",
+        verbose=False, backend="quadrants", arch="cpu",
     ).global_setup(kernel_name="cubic_spline", structure="isotropic")
     pc.find_neighbors(num_neighbors=8)
     raised = False

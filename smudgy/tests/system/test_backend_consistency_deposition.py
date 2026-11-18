@@ -51,7 +51,7 @@ def test_backend_consistency(dim, kernel_name):
     pc.set_backend(backend="numpy")
     f_numpy, w_numpy = pc.deposit(**kwargs)
 
-    pc.set_backend(backend="taichi", arch="cpu")
+    pc.set_backend(backend="quadrants", arch="cpu")
     f_taichi, w_taichi = pc.deposit(**kwargs)
 
     assert f_numpy.shape == f_taichi.shape

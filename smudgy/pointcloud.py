@@ -9,7 +9,7 @@ import numpy.typing as npt
 from mpi4py import MPI
 
 from . import execution
-from .backend.taichi import init as taichi_init
+from .backend.quadrants import init as quadrants_init
 from .decomposition import (
     QueryRouting,
     hilbert_partition_and_scatter,
@@ -34,7 +34,7 @@ class PointCloud:
         weights: npt.NDArray[np.floating] | None = None,
         boxsize: float | Sequence[float] | None = None,
         verbose: bool = True,
-        backend: str = "taichi",
+        backend: str = "quadrants",
         **kwargs,
     ) -> None:
         """Initialize a point cloud.
@@ -55,13 +55,13 @@ class PointCloud:
             Periodic box size(s). If None, no periodicity is used.
         verbose : bool, default True
             Verbosity flag.
-        backend : str, default "taichi"
-            Computational backend, one of ``"taichi"`` or ``"numpy"``. The
+        backend : str, default "quadrants"
+            Computational backend, one of ``"quadrants"`` or ``"numpy"``. The
             numpy backend supports interpolation and fixed-grid
             (``adaptive=False``) deposition only.
         **kwargs : dict
             Forwarded to the Taichi runtime initialization
-            (:func:`smudgy.backend.taichi.init`), e.g. ``arch`` (one of
+            (:func:`smudgy.backend.quadrants.init`), e.g. ``arch`` (one of
             ``"cpu"``, ``"gpu"``, ``"cuda"``, ``"vulkan"``, ``"metal"``;
             ``"gpu"`` on first initialization if omitted), ``force=True`` to
             re-initialize an already running runtime, or any other
@@ -241,29 +241,29 @@ class PointCloud:
     # =============================================================================
     # Set utilities
     # =============================================================================
-    def set_backend(self, backend: str = "taichi", **kwargs) -> None:
+    def set_backend(self, backend: str = "quadrants", **kwargs) -> None:
         """Set the computational backend.
 
         Parameters
         ----------
-        backend : str, default "taichi"
-            One of ``"taichi"`` or ``"numpy"``.
+        backend : str, default "quadrants"
+            One of ``"quadrants"`` or ``"numpy"``.
         **kwargs : dict
-            Forwarded to :func:`smudgy.backend.taichi.init` when
-            ``backend="taichi"`` (e.g. ``arch``, ``force``); see
+            Forwarded to :func:`smudgy.backend.quadrants.init` when
+            ``backend="quadrants"`` (e.g. ``arch``, ``force``); see
             :class:`PointCloud`.
 
         """
         assert isinstance(
             backend, str
         ), f"'backend' must be a string but found {type(backend)}"
-        assert backend in [
-            "numpy",
-            "taichi",
-        ], f"backend must be one of 'numpy' or 'taichi' but found {backend}"
+        if backend not in ("numpy", "quadrants"):
+            raise ValueError(
+                f"backend must be one of 'numpy' or 'quadrants' but found {backend!r}"
+            )
         self.backend = backend
-        if backend == "taichi":
-            taichi_init(**kwargs)
+        if backend == "quadrants":
+            quadrants_init(**kwargs)
         if self.verbose and getattr(self, "rank", 0) == 0:
             print(f"[smudgy] Set {backend} backend")
 
@@ -762,7 +762,7 @@ class PointCloud:
         num_neighbors : int, optional
             Number of neighbors for smoothing length computation.
         backend : str, optional
-            Backend to use for computations ('numpy' or 'taichi').
+            Backend to use for computations ('numpy' or 'quadrants').
         kwargs : dict
             Additional keyword arguments for backend initialization.
 

@@ -9,12 +9,12 @@ import numpy as np
 import pytest
 
 from smudgy import PointCloud
-from smudgy.backend.taichi import deposition as tdep
+from smudgy.backend.quadrants import deposition as tdep
 
 SEED = 7
 
 
-def _cloud(dim, n=2000, boxsize=1.0, backend="taichi"):
+def _cloud(dim, n=2000, boxsize=1.0, backend="quadrants"):
     rng = np.random.default_rng(SEED)
     pos = rng.uniform(0.0, 1.0, size=(n, dim))
     w = rng.uniform(0.5, 1.5, size=n)
@@ -22,7 +22,7 @@ def _cloud(dim, n=2000, boxsize=1.0, backend="taichi"):
     return pc, pos, w
 
 
-@pytest.mark.parametrize("backend", ["numpy", "taichi"])
+@pytest.mark.parametrize("backend", ["numpy", "quadrants"])
 @pytest.mark.parametrize("dim", [1, 2, 3])
 @pytest.mark.parametrize("kernel_name", ["ngp", "cic", "tsc"])
 def test_fields_none_is_weights_grid(backend, dim, kernel_name):

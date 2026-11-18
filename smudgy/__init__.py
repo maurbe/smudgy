@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .backend.taichi.kernels import (
+from .backend.quadrants.kernels import (
     compute_total_integral_separable,
     compute_total_integral_spherical,
     get_separable_kernel_values_1D,

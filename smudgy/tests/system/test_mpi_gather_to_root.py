@@ -50,7 +50,7 @@ def _run_pipeline_under_mpi(out_path, periodic):
 
     pc = PointCloud(
         positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
-        verbose=False, backend="taichi", arch="cpu",
+        verbose=False, backend="quadrants", arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=10, structure="isotropic")
     pc.find_neighbors()
     pc.compute_smoothing()
@@ -159,7 +159,7 @@ def _run_zero_local_rows_under_mpi(out_path):
 
     pc = PointCloud(
         positions=positions.copy(), weights=weights.copy(), boxsize=None,
-        verbose=False, backend="taichi", arch="cpu",
+        verbose=False, backend="quadrants", arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=2, structure="isotropic")
     pc.find_neighbors()
     pc.compute_smoothing()

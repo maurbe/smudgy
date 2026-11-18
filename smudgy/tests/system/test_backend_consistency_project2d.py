@@ -5,7 +5,7 @@ import pytest
 
 import smudgy as sm
 from smudgy.backend.numpy.tensor_utils import project_2d as project_2d_numpy
-from smudgy.backend.taichi.tensor_utils import project_2d as project_2d_taichi
+from smudgy.backend.quadrants.tensor_utils import project_2d as project_2d_taichi
 
 PLANES = [(0, 1), (0, 2), (1, 2)]
 
