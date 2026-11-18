@@ -55,7 +55,8 @@ def test_backend_consistency_isotropic(dim, shape):
     """Test consistency between backends for smoothing lengths."""
     data = _generate_dataset(dim, shape)
     s_numpy, s_qd = (
-        _smoothing(b, data, "isotropic").smoothing_lengths for b in ("numpy", "quadrants")
+        _smoothing(b, data, "isotropic").smoothing_lengths
+        for b in ("numpy", "quadrants")
     )
     assert s_numpy.shape == s_qd.shape
     np.testing.assert_allclose(s_numpy, s_qd, rtol=1e-4, atol=1e-6)

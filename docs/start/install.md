@@ -75,7 +75,7 @@ python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
 
 ## GPU support
 
-The default `taichi` backend runs on the GPU if one is available (CUDA, Metal or Vulkan) and falls back to the CPU otherwise. No additional installation is required beyond the GPU drivers; see {doc}`backends <../wiki/backend>` for how to choose the architecture explicitly.
+The default `quadrants` backend runs on the GPU if one is available (CUDA, Metal or Vulkan) and falls back to the CPU otherwise. No additional installation is required beyond the GPU drivers; see {doc}`backends <../wiki/backend>` for how to choose the architecture explicitly.
 
 ## Running the Test Suite
 

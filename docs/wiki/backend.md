@@ -8,10 +8,10 @@
 
 | Backend | Description |
 |---------|-------------|
-| `"taichi"` (default) | High-performance backend supporting multi-core CPUs and GPUs. Supports all operations and is recommended for all workloads. |
+| `"quadrants"` (default) | High-performance backend supporting multi-core CPUs and GPUs. Supports all operations and is recommended for all workloads. |
 | `"numpy"` | Vectorized reference implementation based on NumPy, used for testing and cross-validation. Supports interpolation and fixed-grid deposition (`adaptive=False`) only. |
 
-Taichi is a required dependency of `smudgy` in either case.
+Quadrants is a required dependency of `smudgy` in either case.
 
 The backend can be selected when constructing a {py:class}`~smudgy.pointcloud.PointCloud`:
 
@@ -20,7 +20,7 @@ import smudgy as sm
 
 pc = sm.PointCloud(
     positions,
-    backend="taichi",
+    backend="quadrants",
 )
 ```
 
@@ -31,13 +31,13 @@ pc.set_backend("numpy")
 ```
 
 The default backend is implemented using the
-[Taichi programming language](https://www.taichi-lang.org/),
-allowing `smudgy` to automatically exploit parallel hardware while exposing a simple NumPy-like interface. Unlike explicit parallel programming, no threading or GPU kernels have to be written by the user -- the Taichi backend takes care of this automatically.
+[Quadrants programming language](https://github.com/Genesis-Embodied-AI/quadrants),
+allowing `smudgy` to automatically exploit parallel hardware while exposing a simple NumPy-like interface. Unlike explicit parallel programming, no threading or GPU kernels have to be written by the user -- the Quadrants backend takes care of this automatically.
 
-When using the `"taichi"` backend, an execution target (accelerator) can also be selected via the `arch` keyword: `"cpu"`, `"gpu"`, `"cuda"`, `"vulkan"` or `"metal"`. If no `arch` is given, `smudgy` keeps the already active Taichi runtime, or initializes it with `"gpu"` on first use (Taichi falls back to the CPU if no supported GPU is found). Any other keyword argument is forwarded to `ti.init`.
+When using the `"quadrants"` backend, an execution target (accelerator) can also be selected via the `arch` keyword: `"cpu"`, `"gpu"`, `"cuda"`, `"vulkan"` or `"metal"`. If no `arch` is given, `smudgy` keeps the already active Quadrants runtime, or initializes it with `"gpu"` on first use (Quadrants falls back to the CPU if no supported GPU is found). Any other keyword argument is forwarded to `ti.init`.
 
 :::{caution}
-The Taichi runtime is shared by all {py:class}`~smudgy.pointcloud.PointCloud` instances of a Python process. Switching the architecture of a running runtime (e.g. `"gpu"` → `"cpu"`) requires `force=True` and recompiles all kernels, so it is best to choose `arch` once, at the start of a script.
+The Quadrants runtime is shared by all {py:class}`~smudgy.pointcloud.PointCloud` instances of a Python process. Switching the architecture of a running runtime (e.g. `"gpu"` → `"cpu"`) requires `force=True` and recompiles all kernels, so it is best to choose `arch` once, at the start of a script.
 :::
 
 ### CPU (multi-threaded)
@@ -45,18 +45,18 @@ The Taichi runtime is shared by all {py:class}`~smudgy.pointcloud.PointCloud` in
 ```python
 pc = sm.PointCloud(
     positions,
-    backend="taichi",
+    backend="quadrants",
     arch="cpu",
 ) 
 # or
-pc.set_backend("taichi", arch="cpu", force=True)
+pc.set_backend("quadrants", arch="cpu", force=True)
 ```
 
-Taichi automatically distributes work across all available CPU cores using a shared-memory parallel execution model. If desired, the number of threads can be limited:
+Quadrants automatically distributes work across all available CPU cores using a shared-memory parallel execution model. If desired, the number of threads can be limited:
 
 ```python
 pc.set_backend(
-    "taichi",
+    "quadrants",
     arch="cpu",
     cpu_max_num_threads=8,
 )
@@ -68,12 +68,12 @@ If a supported GPU is available, simply use
 
 ```python
 pc.set_backend(
-    "taichi",
+    "quadrants",
     arch="gpu",
 )
 ```
 
-Taichi automatically selects the best supported GPU backend available on your system (CUDA, Metal, Vulkan, etc.). No code changes are required -- the same `smudgy` API executes on either CPU or GPU.
+Quadrants automatically selects the best supported GPU backend available on your system (CUDA, Metal, Vulkan, etc.). No code changes are required -- the same `smudgy` API executes on either CPU or GPU.
 
 ---
 
@@ -87,7 +87,7 @@ Most operations in `smudgy` consist of performing the same computation independe
 
 can all be computed independently for large numbers of elements.
 
-Internally, the Taichi backend expresses these operations as parallel loops. Instead of executing
+Internally, the Quadrants backend expresses these operations as parallel loops. Instead of executing
 
 ```text
 particle 1
@@ -96,7 +96,7 @@ particle 3
 ...
 ```
 
-sequentially, Taichi distributes the iterations across all available hardware resources.
+sequentially, Quadrants distributes the iterations across all available hardware resources.
 
 On a multi-core CPU, iterations are divided among worker threads:
 
@@ -115,7 +115,7 @@ This data-parallel execution model is particularly well suited for interpolation
 
 ## Distributed parallelization with MPI
 
-While Taichi efficiently utilizes the resources of a *single* machine, many scientific datasets are simply too large to fit into the memory of a single computer or to be processed efficiently on one machine alone. For these cases, `smudgy` distributes the computations across many independent MPI processes (*ranks*) using
+While Quadrants efficiently utilizes the resources of a *single* machine, many scientific datasets are simply too large to fit into the memory of a single computer or to be processed efficiently on one machine alone. For these cases, `smudgy` distributes the computations across many independent MPI processes (*ranks*) using
 [`mpi4py`](https://mpi4py.github.io/).
 These ranks may reside on different CPU sockets, on multiple machines, or on different nodes of an HPC cluster.
 
@@ -144,7 +144,7 @@ Query positions passed to {py:meth}`~smudgy.pointcloud.PointCloud.interpolate` o
 
 ### 3. Local computation
 
-Each rank then independently performs the requested operation on its own particles (plus ghosts), parallelized within the rank by the Taichi backend. For instance, when depositing particles onto a grid, every rank deposits its own particles onto a **local grid**.
+Each rank then independently performs the requested operation on its own particles (plus ghosts), parallelized within the rank by the Quadrants backend. For instance, when depositing particles onto a grid, every rank deposits its own particles onto a **local grid**.
 
 ### 4. Collecting the results
 
@@ -180,24 +180,24 @@ On a single rank, the decomposition, ghost exchange and gathers are skipped (the
 
 ---
 
-## Combining Taichi and MPI
+## Combining Quadrants and MPI
 
-Taichi and MPI parallelize computations at different levels and therefore complement each other naturally. MPI distributes the work across many machines, while Taichi efficiently parallelizes the computation *within* each machine. This hybrid approach enables `smudgy` to scale from a laptop with a few CPU cores to large HPC systems comprising hundreds of nodes, as shown conceptually by the graph below:
+Quadrants and MPI parallelize computations at different levels and therefore complement each other naturally. MPI distributes the work across many machines, while Quadrants efficiently parallelizes the computation *within* each machine. This hybrid approach enables `smudgy` to scale from a laptop with a few CPU cores to large HPC systems comprising hundreds of nodes, as shown conceptually by the graph below:
 
 ```text
 HPC cluster
 │
 ├── Node 0
 │     ├── MPI Rank 0
-│     │      └── Taichi → all CPU cores / GPU
+│     │      └── Quadrants → all CPU cores / GPU
 │     └── MPI Rank 1
-│            └── Taichi → all CPU cores / GPU
+│            └── Quadrants → all CPU cores / GPU
 │
 ├── Node 1
 │     ├── MPI Rank 2
-│     │      └── Taichi → all CPU cores / GPU
+│     │      └── Quadrants → all CPU cores / GPU
 │     └── MPI Rank 3
-│            └── Taichi → all CPU cores / GPU
+│            └── Quadrants → all CPU cores / GPU
 │
 └── ...
 ```

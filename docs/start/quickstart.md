@@ -4,7 +4,7 @@ Welcome to the `smudgy` documentation!
 
 `smudgy` is a high-performance Python package for smoothing, interpolation, and grid deposition of point-cloud data -- lightning fast, scalable and memory-efficient.
 
-Whether you’re working on a laptop or an HPC cluster, `smudgy` is built to make efficient use of your hardware. It leverages the [taichi](https://www.taichi-lang.org/) programming language for automatic CPU and GPU parallelization, and can seamlessly scale to multiple nodes using MPI through [mpi4py](https://mpi4py.github.io/mpi4py/stable/html/index.html).
+Whether you’re working on a laptop or an HPC cluster, `smudgy` is built to make efficient use of your hardware. It leverages the [quadrants](https://github.com/Genesis-Embodied-AI/quadrants) programming language for automatic CPU and GPU parallelization, and can seamlessly scale to multiple nodes using MPI through [mpi4py](https://mpi4py.github.io/mpi4py/stable/html/index.html).
 
 A typical workflow may look like this:
 
@@ -23,7 +23,7 @@ pc = sm.PointCloud(
     positions=positions,
     weights=masses,
     boxsize=boxsize,
-    backend="taichi",
+    backend="quadrants",
     arch="gpu",
 )
 pc.add_fields("velocity", velocity)

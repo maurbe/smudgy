@@ -22,7 +22,9 @@ import quadrants as qd
 # Adjust these imports to your package layout.
 # ---------------------------------------------------------------------------
 from smudgy.backend.numpy.kernels import KERNEL_CLASSES, get_kernel
-from smudgy.backend.quadrants import init as quadrants_init  # noqa: F401 (kept for reference)
+from smudgy.backend.quadrants import (
+    init as quadrants_init,
+)  # noqa: F401 (kept for reference)
 from smudgy.backend.quadrants.kernels import (
     SEPARABLE_KERNELS,
     SPHERICAL_KERNELS,
@@ -68,14 +70,18 @@ class TestKernelRegistryConsistency:
         numpy_names = set(KERNEL_CLASSES.keys())
         qd_names = set(SEPARABLE_KERNELS.keys()) | set(SPHERICAL_KERNELS.keys())
         missing = numpy_names - qd_names
-        assert not missing, f"Kernel names in numpy but not quadrants: {sorted(missing)}"
+        assert (
+            not missing
+        ), f"Kernel names in numpy but not quadrants: {sorted(missing)}"
 
     def test_quadrants_kernel_names_covered_by_numpy(self):
         """Every quadrants kernel name must exist on the numpy side."""
         numpy_names = set(KERNEL_CLASSES.keys())
         qd_names = set(SEPARABLE_KERNELS.keys()) | set(SPHERICAL_KERNELS.keys())
         missing = qd_names - numpy_names
-        assert not missing, f"Kernel names in quadrants but not numpy: {sorted(missing)}"
+        assert (
+            not missing
+        ), f"Kernel names in quadrants but not numpy: {sorted(missing)}"
 
     # def test_no_kernel_registered_as_both_separable_and_spherical(self):
     #    overlap = set(SEPARABLE_KERNELS.keys()) & set(SPHERICAL_KERNELS.keys())

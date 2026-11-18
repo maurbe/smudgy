@@ -16,7 +16,7 @@ pc = sm.PointCloud(positions=positions, weights=weights, boxsize=boxsize)
 pc = sm.PointCloud(..., boxsize=[1.0, 2.0, 0.5]) # for a 3D periodic box
 ```
 
-Additional keyword arguments configure the backend, e.g. `arch="cpu"` to run the Taichi kernels on the CPU instead of the default GPU (see {doc}`backends <backend>`).
+Additional keyword arguments configure the backend, e.g. `arch="cpu"` to run the Quadrants kernels on the CPU instead of the default GPU (see {doc}`backends <backend>`).
 
 :::{note}
 When running on several MPI ranks, `positions` and `weights` are only read on rank 0, and the point cloud is split across the ranks at construction. `pc.positions` and `pc.weights` then hold only the current rank's share of the particles, and all per-particle results stay distributed until they are explicitly collected (see {ref}`collecting results <collecting-results>`). On a single rank, everything behaves as if the arrays were global, in their original order. See {doc}`backends <backend>` for details.

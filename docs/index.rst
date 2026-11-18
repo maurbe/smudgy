@@ -39,5 +39,5 @@
     :caption: Backends
     :maxdepth: 2
 
-    api/backend_taichi
+    api/backend_quadrants
     api/backend_numpy
