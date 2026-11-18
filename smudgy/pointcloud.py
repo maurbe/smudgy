@@ -65,7 +65,7 @@ class PointCloud:
             ``"cpu"``, ``"gpu"``, ``"cuda"``, ``"vulkan"``, ``"metal"``;
             ``"gpu"`` on first initialization if omitted), ``force=True`` to
             re-initialize an already running runtime, or any other
-            ``ti.init`` keyword argument (e.g. ``cpu_max_num_threads``).
+            ``qd.init`` keyword argument (e.g. ``cpu_max_num_threads``).
         """
         # Initialize MPI environment
         self.verbose = verbose

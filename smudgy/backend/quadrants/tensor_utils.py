@@ -1,7 +1,7 @@
 """Utilities for tensor operations in Taichi backend."""
 
 import numpy as np
-import quadrants as ti
+import quadrants as qd
 
 from .smoothing import _sym_eig_jacobi
 
@@ -11,34 +11,34 @@ E3 = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 BASIS_VECTORS = [E1, E2, E3]
 
 
-@ti.kernel
+@qd.kernel
 def _project_2d_kernel(
-    h_tensor: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, 3, 3)
-    e1: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    e2: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (3,)
-    h2d_out: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, 2, 2)
-    eigvals_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, 2)
-    eigvecs_out: ti.types.ndarray(dtype=ti.f32, ndim=3),  # (N, 2, 2)
+    h_tensor: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 3, 3)
+    e1: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (3,)
+    e2: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (3,)
+    h2d_out: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 2, 2)
+    eigvals_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 2)
+    eigvecs_out: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 2, 2)
 ):
-    P = ti.Matrix.zero(ti.f32, 2, 3)
-    for j in ti.static(range(3)):
+    P = qd.Matrix.zero(qd.f32, 2, 3)
+    for j in qd.static(range(3)):
         P[0, j] = e1[j]
         P[1, j] = e2[j]
 
     for n in range(h_tensor.shape[0]):
-        H = ti.Matrix.zero(ti.f32, 3, 3)
-        for a in ti.static(range(3)):
-            for b in ti.static(range(3)):
+        H = qd.Matrix.zero(qd.f32, 3, 3)
+        for a in qd.static(range(3)):
+            for b in qd.static(range(3)):
                 H[a, b] = h_tensor[n, a, b]
 
         h2d = (P @ H.inverse() @ P.transpose()).inverse()
         h2d = 0.5 * (h2d + h2d.transpose())  # symmetric up to f32 round-off
 
-        # Not ti.sym_eig: it returns non-orthogonal, often wrong eigenvectors
+        # Not qd.sym_eig: it returns non-orthogonal, often wrong eigenvectors
         # (and NaNs) for 2x2 matrices -- see _sym_eig_jacobi. A single Jacobi
         # rotation diagonalises a 2x2 exactly. Rescale to a unit-order
         # magnitude band first, then undo the scale on the eigenvalues.
-        alpha = 1.0 / ti.max(ti.abs(h2d.trace()), 1e-30)
+        alpha = 1.0 / qd.max(qd.abs(h2d.trace()), 1e-30)
         eigvals, eigvecs = _sym_eig_jacobi(alpha * h2d, 2, 1)
         eigvals = eigvals / alpha
 
@@ -46,28 +46,28 @@ def _project_2d_kernel(
         # Jacobi gives no ordering guarantee: sort ascending, matching np.linalg.eigh
         if eigvals[0] > eigvals[1]:
             eigvals[0], eigvals[1] = eigvals[1], eigvals[0]
-            for a in ti.static(range(2)):
+            for a in qd.static(range(2)):
                 eigvecs[a, 0], eigvecs[a, 1] = eigvecs[a, 1], eigvecs[a, 0]
 
         # Eigenvector orientation convention:
         # Numpy and Taichi have no convention about the sign of the eigenvectors,
         # impose a consistent sign convention for comparison with Taichi backend
         # (largest-magnitude component of each eigenvector is positive).
-        for col in ti.static(range(2)):
+        for col in qd.static(range(2)):
             max_abs = 0.0
             sign = 1.0
-            for row in ti.static(range(2)):
+            for row in qd.static(range(2)):
                 v = eigvecs[row, col]
-                if ti.abs(v) > max_abs:
-                    max_abs = ti.abs(v)
+                if qd.abs(v) > max_abs:
+                    max_abs = qd.abs(v)
                     sign = 1.0 if v >= 0.0 else -1.0
-            for row in ti.static(range(2)):
+            for row in qd.static(range(2)):
                 eigvecs[row, col] *= sign
         # ==========================================================================================
 
-        for a in ti.static(range(2)):
+        for a in qd.static(range(2)):
             eigvals_out[n, a] = eigvals[a]
-            for b in ti.static(range(2)):
+            for b in qd.static(range(2)):
                 h2d_out[n, a, b] = h2d[a, b]
                 eigvecs_out[n, a, b] = eigvecs[a, b]
 

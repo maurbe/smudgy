@@ -16,7 +16,7 @@ assumption and flagged it with a comment -- please double check those spots.
 
 import numpy as np
 import pytest
-import quadrants as ti
+import quadrants as qd
 
 # ---------------------------------------------------------------------------
 # Adjust these imports to your package layout.
@@ -30,11 +30,11 @@ from smudgy.backend.quadrants.kernels import (
     create_spherical_kernel,
 )
 
-# ti.init() must run before any @ti.kernel below is *defined* (decorated),
+# qd.init() must run before any @qd.kernel below is *defined* (decorated),
 # not just before it's called -- calling the project wrapper here can be too
 # late/a no-op depending on its implementation, so initialize taichi directly
 # and unconditionally as the very first thing in this module.
-ti.init(arch=ti.cpu, default_fp=ti.f32)
+qd.init(arch=qd.cpu, default_fp=qd.f32)
 
 DIMS = (1, 2, 3)
 ATOL = 1e-5

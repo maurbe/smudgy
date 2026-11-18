@@ -1,9 +1,9 @@
 """Double-precision ``erf`` for Taichi (port of the fdlibm algorithm).
 
-Accurate to about 1 ulp in ``ti.f64``; Taichi itself provides no ``erf``.
+Accurate to about 1 ulp in ``qd.f64``; Taichi itself provides no ``erf``.
 """
 
-import quadrants as ti
+import quadrants as qd
 
 # --- coefficients (fdlibm s_erf.c) ---
 _erx = 8.45062911510467529297e-01
@@ -84,10 +84,10 @@ _sb1, _sb2, _sb3, _sb4, _sb5, _sb6, _sb7 = (
 _INV_035 = 1.0 / 0.35  # ~2.857142857142857
 
 
-@ti.func
-def erf_precise(x: ti.f64) -> ti.f64:
-    """erf(x), fdlibm rational-approximation algorithm, ti.f64 in/out."""
-    ax = ti.abs(x)
+@qd.func
+def erf_precise(x: qd.f64) -> qd.f64:
+    """erf(x), fdlibm rational-approximation algorithm, qd.f64 in/out."""
+    ax = qd.abs(x)
     result = 0.0
     if ax < 0.84375:
         z = x * x
@@ -135,29 +135,29 @@ def erf_precise(x: ti.f64) -> ti.f64:
                 + s
                 * (_sb2 + s * (_sb3 + s * (_sb4 + s * (_sb5 + s * (_sb6 + s * _sb7)))))
             )
-        r = ti.exp(-ax * ax - 0.5625 + R / S) / ax
+        r = qd.exp(-ax * ax - 0.5625 + R / S) / ax
         result = (1.0 - r) if x >= 0 else (r - 1.0)
     else:
         result = 1.0 if x >= 0 else -1.0
     return result
 
 
-@ti.func
-def erf_precise_f32(x: ti.f32) -> ti.f32:
+@qd.func
+def erf_precise_f32(x: qd.f32) -> qd.f32:
     """Convenience wrapper: compute internally in f64, return f32.
     Use this if your fields are f32 but you need better-than-1e-7 erf.
     """
-    return ti.cast(erf_precise(ti.cast(x, ti.f64)), ti.f32)
+    return qd.cast(erf_precise(qd.cast(x, qd.f64)), qd.f32)
 
 
 # --- sanity check against Python's math.erf ---
 if __name__ == "__main__":
     import math
 
-    ti.init(arch=ti.cpu, default_fp=ti.f64)
+    qd.init(arch=qd.cpu, default_fp=qd.f64)
 
-    @ti.kernel
-    def check() -> ti.f64:
+    @qd.kernel
+    def check() -> qd.f64:
         max_err = 0.0
         n = 200000
         for i in range(n):
@@ -168,8 +168,8 @@ if __name__ == "__main__":
 
     xs = [-8.0 + 16.0 * i / 199999 for i in range(200000)]
 
-    @ti.kernel
-    def eval_at(x: ti.f64) -> ti.f64:
+    @qd.kernel
+    def eval_at(x: qd.f64) -> qd.f64:
         return erf_precise(x)
 
     max_abs_err = 0.0

@@ -1,14 +1,14 @@
-import quadrants as ti
+import quadrants as qd
 
 _initialized = False
 _current_config = None
 
 _ARCH_MAP = {
-    "cpu": ti.cpu,
-    "gpu": ti.gpu,
-    "cuda": ti.cuda,
-    "vulkan": ti.vulkan,
-    "metal": ti.metal,
+    "cpu": qd.cpu,
+    "gpu": qd.gpu,
+    "cuda": qd.cuda,
+    "vulkan": qd.vulkan,
+    "metal": qd.metal,
 }
 
 
@@ -25,7 +25,7 @@ def init(arch=None, force=False, **kwargs):
         Re-initialize the runtime even if it is already running, e.g. to switch
         the architecture. Switching mid-process recompiles all kernels.
     **kwargs
-        Further keyword arguments passed to ``ti.init``.
+        Further keyword arguments passed to ``qd.init``.
     """
     global _initialized, _current_config
 
@@ -43,7 +43,7 @@ def init(arch=None, force=False, **kwargs):
     if _initialized and not force and _current_config == config:
         return
 
-    ti.init(arch=_ARCH_MAP[arch], **kwargs)
+    qd.init(arch=_ARCH_MAP[arch], **kwargs)
     _initialized = True
     _current_config = config
 

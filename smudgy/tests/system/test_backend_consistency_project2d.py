@@ -24,7 +24,7 @@ def _random_tensors(n, gap, scale, seed=0):
     """Randomly oriented SPD tensors with two axes differing by a relative `gap`.
 
     Small gaps make many 2D projections nearly isotropic, the regime where
-    ti.sym_eig used to return wrong eigenvectors.
+    qd.sym_eig used to return wrong eigenvectors.
     """
     rng = np.random.default_rng(seed)
     Q, _ = np.linalg.qr(rng.normal(size=(n, 3, 3)))

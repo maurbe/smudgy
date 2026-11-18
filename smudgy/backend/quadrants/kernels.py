@@ -11,31 +11,31 @@ from functools import lru_cache
 from math import pi
 
 import numpy as np
-import quadrants as ti
+import quadrants as qd
 
 
 # =============================================================================
 # Helper functions for projections onto canonical coordinates
 # Used for density computation and interpolation workflow (deposit does it internally)
 # =============================================================================
-@ti.func
+@qd.func
 def prepare_isotropic_inputs(
-    r_vec, h: ti.f32, dim: ti.template(), sigma_val: ti.f32, eps: ti.f32
+    r_vec, h: qd.f32, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
     r_mag = r_vec.norm()
     q = r_mag / (h + eps)
     scale = sigma_val / (h**dim)
 
-    grad_q = ti.Vector.zero(ti.f32, dim)
+    grad_q = qd.Vector.zero(qd.f32, dim)
     if r_mag > 0.0:
         grad_q = r_vec / ((r_mag + eps) * (h + eps))
 
     return q, grad_q, scale
 
 
-@ti.func
+@qd.func
 def prepare_covariant_inputs(
-    r_vec, H, dim: ti.template(), sigma_val: ti.f32, eps: ti.f32
+    r_vec, H, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
     H_inv = H.inverse()
     det_H = H.determinant()
@@ -44,7 +44,7 @@ def prepare_covariant_inputs(
     q = xi.norm()
     scale = sigma_val / det_H
 
-    grad_q = ti.Vector.zero(ti.f32, dim)
+    grad_q = qd.Vector.zero(qd.f32, dim)
     if q > 0.0:
         grad_q = (H_inv.transpose() @ xi) / (q + eps)
 
@@ -54,15 +54,15 @@ def prepare_covariant_inputs(
 # =============================================================================
 # Shared low-level helpers
 # =============================================================================
-@ti.func
-def _erf(x: ti.f32) -> ti.f32:
+@qd.func
+def _erf(x: qd.f32) -> qd.f32:
     """Abramowitz & Stegun 7.1.26 approximation, max abs error ~1.5e-7.
     Taichi has no built-in erf, needed for the Gaussian kernels' F(q).
     """
     sign = 1.0
     if x < 0.0:
         sign = -1.0
-    ax = ti.abs(x)
+    ax = qd.abs(x)
     a1 = 0.254829592
     a2 = -0.284496736
     a3 = 1.421413741
@@ -70,14 +70,14 @@ def _erf(x: ti.f32) -> ti.f32:
     a5 = 1.061405429
     p = 0.3275911
     t = 1.0 / (1.0 + p * ax)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * ti.exp(-ax * ax)
+    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * qd.exp(-ax * ax)
     return sign * y
 
 
-@ti.func
+@qd.func
 def _spherical_evaluate_integral_default(
-    F_fn: ti.template(), support: ti.f32, dim: ti.template(), q1: ti.f32, q2_in: ti.f32
-) -> ti.f32:
+    F_fn: qd.template(), support: qd.f32, dim: qd.template(), q1: qd.f32, q2_in: qd.f32
+) -> qd.f32:
     """Default SphericalKernel::evaluate_integral (used by kernels that don't
     override it: Tophat, Lucy, Gaussian, WendlandC2/C4/C6).
     """
@@ -93,14 +93,14 @@ def _spherical_evaluate_integral_default(
     return result
 
 
-@ti.func
+@qd.func
 def _separable_integrate_1d(
-    F_1d_fn: ti.template(),
-    support: ti.f32,
-    dim: ti.template(),
-    q0_in: ti.f32,
-    q1_in: ti.f32,
-) -> ti.f32:
+    F_1d_fn: qd.template(),
+    support: qd.f32,
+    dim: qd.template(),
+    q0_in: qd.f32,
+    q1_in: qd.f32,
+) -> qd.f32:
     """SeparableKernel::integrate_1d -- 1D integral between two bounds,
     handling the kernel's even symmetry (evaluated via F_1d on |q|).
     """
@@ -108,8 +108,8 @@ def _separable_integrate_1d(
     q0 = q0_in
     q1 = q1_in
     if q1 > q0:
-        q0 = ti.max(q0, -support)
-        q1 = ti.min(q1, support)
+        q0 = qd.max(q0, -support)
+        q1 = qd.min(q1, support)
         if q0 >= 0.0:
             result = F_1d_fn(q1, dim) - F_1d_fn(q0, dim)
         elif q1 <= 0.0:
@@ -126,24 +126,24 @@ def _separable_integrate_1d(
 TOPHAT_RECT_SUPPORT = 0.5
 
 
-@ti.func
-def tophat_sep_evaluate_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.abs(q_in)
+@qd.func
+def tophat_sep_evaluate_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.abs(q_in)
     result = 0.0
     if q <= TOPHAT_RECT_SUPPORT:
         result = 1.0
     return result
 
 
-@ti.func
-def tophat_sep_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def tophat_sep_sigma(dim: qd.template()) -> qd.f32:
     return 1.0
 
 
-@ti.func
-def tophat_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, TOPHAT_RECT_SUPPORT)
+@qd.func
+def tophat_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, TOPHAT_RECT_SUPPORT)
     return q
 
 
@@ -151,24 +151,24 @@ def tophat_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
 TSC_RECT_SUPPORT = 1.5
 
 
-@ti.func
-def tsc_sep_evaluate_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q_abs = ti.abs(q_in)
+@qd.func
+def tsc_sep_evaluate_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q_abs = qd.abs(q_in)
     result = 0.0
     if q_abs < TSC_RECT_SUPPORT:
         result = 1.0 - q_abs / TSC_RECT_SUPPORT
     return result
 
 
-@ti.func
-def tsc_sep_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def tsc_sep_sigma(dim: qd.template()) -> qd.f32:
     return 1.0 / (TSC_RECT_SUPPORT**dim)
 
 
-@ti.func
-def tsc_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, TSC_RECT_SUPPORT)
+@qd.func
+def tsc_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, TSC_RECT_SUPPORT)
     return q - (q * q) / (2.0 * TSC_RECT_SUPPORT)
 
 
@@ -176,32 +176,32 @@ def tsc_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
 GAUSSIAN_RECT_SUPPORT = 3.0
 
 
-@ti.func
-def gaussian_sep_evaluate_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.abs(q_in)
+@qd.func
+def gaussian_sep_evaluate_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.abs(q_in)
     result = 0.0
     if q < GAUSSIAN_RECT_SUPPORT:
-        result = ti.exp(-q * q)
+        result = qd.exp(-q * q)
     return result
 
 
-@ti.func
-def gaussian_sep_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def gaussian_sep_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
-        result = 1.0 / ti.sqrt(pi)
-    elif ti.static(dim == 2):
+    if qd.static(dim == 1):
+        result = 1.0 / qd.sqrt(pi)
+    elif qd.static(dim == 2):
         result = 1.0 / pi
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 1.0 / (pi**1.5)
     return result
 
 
-@ti.func
-def gaussian_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, GAUSSIAN_RECT_SUPPORT)
-    return 0.5 * ti.sqrt(pi) * _erf(q)
+@qd.func
+def gaussian_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, GAUSSIAN_RECT_SUPPORT)
+    return 0.5 * qd.sqrt(pi) * _erf(q)
 
 
 # =============================================================================
@@ -211,47 +211,47 @@ def gaussian_sep_F_1d(q_in: ti.f32, dim: ti.template()) -> ti.f32:
 TOPHAT_SUPPORT = 0.5
 
 
-@ti.func
-def tophat_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def tophat_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q <= TOPHAT_SUPPORT:
         result = 1.0
     return result
 
 
-@ti.func
-def tophat_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def tophat_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 1.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 4.0 / pi
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 6.0 / pi
     return result
 
 
-@ti.func
-def tophat_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, TOPHAT_SUPPORT)
+@qd.func
+def tophat_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, TOPHAT_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = q
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 0.5 * q * q
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = (1.0 / 3.0) * q * q * q
     return result
 
 
-@ti.func
-def tophat_evaluate_integral(q1: ti.f32, q2: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def tophat_evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
     return _spherical_evaluate_integral_default(tophat_F, TOPHAT_SUPPORT, dim, q1, q2)
 
 
-@ti.func
-def tophat_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def tophat_gradient(q: qd.f32, grad_q, dim: qd.template()):
     return 0.0 * grad_q
 
 
@@ -259,55 +259,55 @@ def tophat_gradient(q: ti.f32, grad_q, dim: ti.template()):
 TSC_SUPPORT = 1.5
 
 
-@ti.func
-def tsc_evaluate(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.abs(q_in)
+@qd.func
+def tsc_evaluate(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.abs(q_in)
     result = 0.0
     if q < TSC_SUPPORT:
         result = 1.0 - q / TSC_SUPPORT
     return result
 
 
-@ti.func
-def tsc_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def tsc_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 1.0 / TSC_SUPPORT
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 3.0 / (pi * TSC_SUPPORT * TSC_SUPPORT)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 3.0 / (pi * TSC_SUPPORT * TSC_SUPPORT * TSC_SUPPORT)
     return result
 
 
-@ti.func
-def tsc_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, TSC_SUPPORT)
+@qd.func
+def tsc_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, TSC_SUPPORT)
     h = TSC_SUPPORT
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = q - (q * q) / (2.0 * h)
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 0.5 * q * q - (q * q * q) / (3.0 * h)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = (1.0 / 3.0) * q * q * q - (q * q * q * q) / (4.0 * h)
     return result
 
 
-@ti.func
-def tsc_evaluate_integral(q1_in: ti.f32, q2_in: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def tsc_evaluate_integral(q1_in: qd.f32, q2_in: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if not (q2_in <= 0.0 or q1_in >= TSC_SUPPORT):
-        q1 = ti.max(0.0, q1_in)
-        q2 = ti.min(TSC_SUPPORT, q2_in)
+        q1 = qd.max(0.0, q1_in)
+        q2 = qd.min(TSC_SUPPORT, q2_in)
         result = tsc_F(q2, dim) - tsc_F(q1, dim)
     return result
 
 
-@ti.func
-def tsc_gradient(q: ti.f32, grad_q, dim: ti.template()):
-    q = ti.abs(q)
+@qd.func
+def tsc_gradient(q: qd.f32, grad_q, dim: qd.template()):
+    q = qd.abs(q)
     dWdq = 0.0
     if q <= TSC_SUPPORT:
         dWdq = -(1.0 / TSC_SUPPORT)
@@ -318,52 +318,52 @@ def tsc_gradient(q: ti.f32, grad_q, dim: ti.template()):
 GAUSSIAN_SUPPORT = 3.0
 
 
-@ti.func
-def gaussian_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def gaussian_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q < GAUSSIAN_SUPPORT:
-        result = ti.exp(-q * q)
+        result = qd.exp(-q * q)
     return result
 
 
-@ti.func
-def gaussian_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def gaussian_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
-        result = 1.0 / ti.sqrt(pi)
-    elif ti.static(dim == 2):
+    if qd.static(dim == 1):
+        result = 1.0 / qd.sqrt(pi)
+    elif qd.static(dim == 2):
         result = 1.0 / pi
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 1.0 / (pi**1.5)
     return result
 
 
-@ti.func
-def gaussian_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, GAUSSIAN_SUPPORT)
+@qd.func
+def gaussian_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, GAUSSIAN_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
-        result = 0.5 * ti.sqrt(pi) * _erf(q)
-    elif ti.static(dim == 2):
-        result = -0.5 * ti.exp(-q * q)
-    elif ti.static(dim == 3):
-        result = 0.25 * (ti.sqrt(pi) * _erf(q) - 2.0 * q * ti.exp(-q * q))
+    if qd.static(dim == 1):
+        result = 0.5 * qd.sqrt(pi) * _erf(q)
+    elif qd.static(dim == 2):
+        result = -0.5 * qd.exp(-q * q)
+    elif qd.static(dim == 3):
+        result = 0.25 * (qd.sqrt(pi) * _erf(q) - 2.0 * q * qd.exp(-q * q))
     return result
 
 
-@ti.func
-def gaussian_evaluate_integral(q1: ti.f32, q2: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def gaussian_evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
     return _spherical_evaluate_integral_default(
         gaussian_F, GAUSSIAN_SUPPORT, dim, q1, q2
     )
 
 
-@ti.func
-def gaussian_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def gaussian_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= GAUSSIAN_SUPPORT:
-        dWdq = -2.0 * q * ti.exp(-(q * q))
+        dWdq = -2.0 * q * qd.exp(-(q * q))
     return dWdq * grad_q
 
 
@@ -371,36 +371,36 @@ def gaussian_gradient(q: ti.f32, grad_q, dim: ti.template()):
 LUCY_SUPPORT = 1.0
 
 
-@ti.func
-def lucy_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def lucy_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q <= LUCY_SUPPORT:
         result = (1.0 + 3.0 * q) * (1.0 - q) ** 3
     return result
 
 
-@ti.func
-def lucy_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def lucy_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 5.0 / 4.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 5.0 / pi
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 105.0 / (16.0 * pi)
     return result
 
 
-@ti.func
-def lucy_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, LUCY_SUPPORT)
+@qd.func
+def lucy_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, LUCY_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = q - 2.0 * q**3 + 2.0 * q**4 - 0.6 * q**5
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 0.5 * q**2 - 1.5 * q**4 + 1.6 * q**5 - 0.5 * q**6
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = (
             (1.0 / 3.0) * q**3
             - (6.0 / 5.0) * q**5
@@ -410,13 +410,13 @@ def lucy_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
-def lucy_evaluate_integral(q1: ti.f32, q2: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def lucy_evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
     return _spherical_evaluate_integral_default(lucy_F, LUCY_SUPPORT, dim, q1, q2)
 
 
-@ti.func
-def lucy_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def lucy_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= LUCY_SUPPORT:
         dWdq = -12.0 * q * (1.0 - q) ** 2
@@ -429,8 +429,8 @@ CUBIC_SPLINE_NODE_1 = 0.5
 CUBIC_SPLINE_EPS = 1e-6
 
 
-@ti.func
-def cubic_spline_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def cubic_spline_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q <= CUBIC_SPLINE_NODE_1:
         result = 1.0 - 6.0 * q * q + 6.0 * q * q * q
@@ -440,34 +440,34 @@ def cubic_spline_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
-def cubic_spline_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def cubic_spline_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 4.0 / 3.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 40.0 / (7.0 * pi)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 8.0 / pi
     return result
 
 
-@ti.func
-def cubic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, CUBIC_SPLINE_SUPPORT)
+@qd.func
+def cubic_spline_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, CUBIC_SPLINE_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         if q <= CUBIC_SPLINE_NODE_1:
             result = q - 2.0 * q**3 + 1.5 * q**4
         else:
             result = 0.375 - 0.5 * (1.0 - q) ** 4
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         if q <= CUBIC_SPLINE_NODE_1:
             result = 0.5 * q**2 - 1.5 * q**4 + 1.2 * q**5
         else:
             result = 0.0875 - 0.5 * (1.0 - q) ** 4 + 0.4 * (1.0 - q) ** 5
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         if q <= CUBIC_SPLINE_NODE_1:
             result = q**3 / 3.0 - 1.2 * q**5 + q**6
         else:
@@ -480,12 +480,12 @@ def cubic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
+@qd.func
 def cubic_spline_evaluate_integral(
-    q1_in: ti.f32, q2_in: ti.f32, dim: ti.template()
-) -> ti.f32:
-    q2 = ti.min(q2_in, CUBIC_SPLINE_SUPPORT)
-    q1 = ti.max(q1_in, 0.0)
+    q1_in: qd.f32, q2_in: qd.f32, dim: qd.template()
+) -> qd.f32:
+    q2 = qd.min(q2_in, CUBIC_SPLINE_SUPPORT)
+    q1 = qd.max(q1_in, 0.0)
     result = 0.0
     if q1 <= CUBIC_SPLINE_NODE_1 and CUBIC_SPLINE_NODE_1 < q2:
         result = (
@@ -499,8 +499,8 @@ def cubic_spline_evaluate_integral(
     return result
 
 
-@ti.func
-def cubic_spline_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def cubic_spline_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= CUBIC_SPLINE_NODE_1:
         dWdq = -6.0 * q * (2.0 - 3.0 * q)
@@ -516,8 +516,8 @@ QUINTIC_SPLINE_NODE_2 = 2.0
 QUINTIC_SPLINE_EPS = 1e-6
 
 
-@ti.func
-def quintic_spline_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def quintic_spline_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q < QUINTIC_SPLINE_SUPPORT:
         f = 3.0 - q
@@ -535,25 +535,25 @@ def quintic_spline_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
-def quintic_spline_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def quintic_spline_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 1.0 / 120.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 7.0 / (478.0 * pi)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 1.0 / (120.0 * pi)
     return result
 
 
-@ti.func
-def quintic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, QUINTIC_SPLINE_SUPPORT)
+@qd.func
+def quintic_spline_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, QUINTIC_SPLINE_SUPPORT)
     result = 0.0
 
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         if q <= QUINTIC_SPLINE_NODE_1:
             result = 66.0 * q - 20.0 * q**3 + 6.0 * q**5 - (5.0 / 3.0) * q**6
         elif q <= QUINTIC_SPLINE_NODE_2:
@@ -568,7 +568,7 @@ def quintic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
         else:
             result = -(1.0 / 6.0) * (3.0 - q) ** 6
 
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         if q <= QUINTIC_SPLINE_NODE_1:
             result = q**2 * (33.0 - 15.0 * q**2 + 5.0 * q**4 - (10.0 / 7.0) * q**5)
         elif q <= QUINTIC_SPLINE_NODE_2:
@@ -585,7 +585,7 @@ def quintic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
                 121.5 - 135.0 * q + 67.5 * q**2 - 18.0 * q**3 + 2.5 * q**4 - q**5 / 7.0
             )
 
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         if q <= QUINTIC_SPLINE_NODE_1:
             result = q**3 * (22.0 - 12.0 * q**2 + (30.0 / 7.0) * q**4 - 1.25 * q**5)
         elif q <= QUINTIC_SPLINE_NODE_2:
@@ -610,12 +610,12 @@ def quintic_spline_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
+@qd.func
 def quintic_spline_evaluate_integral(
-    q1_in: ti.f32, q2_in: ti.f32, dim: ti.template()
-) -> ti.f32:
-    q2 = ti.min(q2_in, QUINTIC_SPLINE_SUPPORT)
-    q1 = ti.max(q1_in, 0.0)
+    q1_in: qd.f32, q2_in: qd.f32, dim: qd.template()
+) -> qd.f32:
+    q2 = qd.min(q2_in, QUINTIC_SPLINE_SUPPORT)
+    q1 = qd.max(q1_in, 0.0)
     result = 0.0
 
     if q1 <= QUINTIC_SPLINE_NODE_1 and QUINTIC_SPLINE_NODE_2 < q2:
@@ -651,8 +651,8 @@ def quintic_spline_evaluate_integral(
     return result
 
 
-@ti.func
-def quintic_spline_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def quintic_spline_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= 1.0:
         dWdq = -5.0 * (3.0 - q) ** 4 + 30.0 * (2.0 - q) ** 4 - 75.0 * (1.0 - q) ** 4
@@ -667,42 +667,42 @@ def quintic_spline_gradient(q: ti.f32, grad_q, dim: ti.template()):
 WENDLAND_C2_SUPPORT = 2.0
 
 
-@ti.func
-def wendland_c2_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c2_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q < WENDLAND_C2_SUPPORT:
         z = 1.0 - 0.5 * q
-        if ti.static(dim == 1):
+        if qd.static(dim == 1):
             result = z**3 * (1.5 * q + 1.0)
         else:
             result = z**4 * (2.0 * q + 1.0)
     return result
 
 
-@ti.func
-def wendland_c2_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c2_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 5.0 / 8.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 7.0 / (4.0 * pi)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 21.0 / (16.0 * pi)
     return result
 
 
-@ti.func
-def wendland_c2_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, WENDLAND_C2_SUPPORT)
+@qd.func
+def wendland_c2_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, WENDLAND_C2_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = q - 0.5 * q**3 + 0.25 * q**4 - (3.0 / 80.0) * q**5
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = (q**2 / 16.0) * (
             8.0 - 10.0 * q**2 + 8.0 * q**3 - 2.5 * q**4 + (2.0 / 7.0) * q**5
         )
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = (q**3 / 16.0) * (
             16.0 / 3.0
             - 8.0 * q**2
@@ -713,19 +713,19 @@ def wendland_c2_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
-def wendland_c2_evaluate_integral(q1: ti.f32, q2: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c2_evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
     return _spherical_evaluate_integral_default(
         wendland_c2_F, WENDLAND_C2_SUPPORT, dim, q1, q2
     )
 
 
-@ti.func
-def wendland_c2_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def wendland_c2_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= WENDLAND_C2_SUPPORT:
         z = 1.0 - 0.5 * q
-        if ti.static(dim == 1):
+        if qd.static(dim == 1):
             dWdq = -1.5 * z * z * (1.5 * q + 1.0) + 1.5 * z**3
         else:
             dWdq = -2.0 * z**3 * (2.0 * q + 1.0) + 2.0 * z**4
@@ -736,36 +736,36 @@ def wendland_c2_gradient(q: ti.f32, grad_q, dim: ti.template()):
 WENDLAND_C4_SUPPORT = 2.0
 
 
-@ti.func
-def wendland_c4_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c4_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q < WENDLAND_C4_SUPPORT:
         z = 1.0 - 0.5 * q
-        if ti.static(dim == 1):
+        if qd.static(dim == 1):
             result = z**5 * (2.0 * q * q + 2.5 * q + 1.0)
         else:
             result = z**6 * ((35.0 / 12.0) * q * q + 3.0 * q + 1.0)
     return result
 
 
-@ti.func
-def wendland_c4_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c4_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 3.0 / 4.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 9.0 / (4.0 * pi)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 495.0 / (256.0 * pi)
     return result
 
 
-@ti.func
-def wendland_c4_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, WENDLAND_C4_SUPPORT)
+@qd.func
+def wendland_c4_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, WENDLAND_C4_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = (q / 64.0) * (
             64.0
             - (112.0 / 3.0) * q**2
@@ -774,7 +774,7 @@ def wendland_c4_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
             + 5.0 * q**6
             - 0.5 * q**7
         )
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = (q**2 / 768.0) * (
             384.0
             - 448.0 * q**2
@@ -784,7 +784,7 @@ def wendland_c4_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
             - (128.0 / 3.0) * q**7
             + 3.5 * q**8
         )
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = (q**3 / 768.0) * (
             256.0
             - (1792.0 / 5.0) * q**2
@@ -797,20 +797,20 @@ def wendland_c4_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
-def wendland_c4_evaluate_integral(q1: ti.f32, q2: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c4_evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
     return _spherical_evaluate_integral_default(
         wendland_c4_F, WENDLAND_C4_SUPPORT, dim, q1, q2
     )
 
 
-@ti.func
-def wendland_c4_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def wendland_c4_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= WENDLAND_C4_SUPPORT:
         z = 1.0 - 0.5 * q
         f, df, g, dg = 0.0, 0.0, 0.0, 0.0
-        if ti.static(dim == 1):
+        if qd.static(dim == 1):
             f = z**5
             df = -2.5 * z**4
             g = 2.0 * q * q + 2.5 * q + 1.0
@@ -828,36 +828,36 @@ def wendland_c4_gradient(q: ti.f32, grad_q, dim: ti.template()):
 WENDLAND_C6_SUPPORT = 2.0
 
 
-@ti.func
-def wendland_c6_evaluate(q: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c6_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
     if q < WENDLAND_C6_SUPPORT:
         z = 1.0 - 0.5 * q
-        if ti.static(dim == 1):
+        if qd.static(dim == 1):
             result = z**7 * ((21.0 / 8.0) * q**3 + (19.0 / 4.0) * q**2 + 3.5 * q + 1.0)
         else:
             result = z**8 * (4.0 * q**3 + 6.25 * q**2 + 4.0 * q + 1.0)
     return result
 
 
-@ti.func
-def wendland_c6_sigma(dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c6_sigma(dim: qd.template()) -> qd.f32:
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = 55.0 / 64.0
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = 39.0 / (14.0 * pi)
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = 1365.0 / (512.0 * pi)
     return result
 
 
-@ti.func
-def wendland_c6_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
-    q = ti.max(q_in, 0.0)
-    q = ti.min(q, WENDLAND_C6_SUPPORT)
+@qd.func
+def wendland_c6_F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+    q = qd.max(q_in, 0.0)
+    q = qd.min(q, WENDLAND_C6_SUPPORT)
     result = 0.0
-    if ti.static(dim == 1):
+    if qd.static(dim == 1):
         result = (1.0 / 1024.0) * (
             1024.0 * q
             - 768.0 * q**3
@@ -868,7 +868,7 @@ def wendland_c6_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
             + (128.0 / 5.0) * q**10
             - (21.0 / 11.0) * q**11
         )
-    elif ti.static(dim == 2):
+    elif qd.static(dim == 2):
         result = (
             0.5
             * q**2
@@ -884,7 +884,7 @@ def wendland_c6_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
                 + (1.0 / 416.0) * q**11
             )
         )
-    elif ti.static(dim == 3):
+    elif qd.static(dim == 3):
         result = q**3 * (
             1.0 / 3.0
             - (11.0 / 20.0) * q**2
@@ -899,20 +899,20 @@ def wendland_c6_F(q_in: ti.f32, dim: ti.template()) -> ti.f32:
     return result
 
 
-@ti.func
-def wendland_c6_evaluate_integral(q1: ti.f32, q2: ti.f32, dim: ti.template()) -> ti.f32:
+@qd.func
+def wendland_c6_evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
     return _spherical_evaluate_integral_default(
         wendland_c6_F, WENDLAND_C6_SUPPORT, dim, q1, q2
     )
 
 
-@ti.func
-def wendland_c6_gradient(q: ti.f32, grad_q, dim: ti.template()):
+@qd.func
+def wendland_c6_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
     if q <= WENDLAND_C6_SUPPORT:
         z = 1.0 - 0.5 * q
         f, df, g, dg = 0.0, 0.0, 0.0, 0.0
-        if ti.static(dim == 1):
+        if qd.static(dim == 1):
             f = z**7
             df = -3.5 * z**6
             g = (21.0 / 8.0) * q**3 + (19.0 / 4.0) * q * q + 3.5 * q + 1.0
@@ -946,9 +946,9 @@ class SeparableKernelSpec:
 
     """
 
-    evaluate_1d: Callable  # ti.func(q, dim) -> f32
-    F_1d: Callable  # ti.func(q, dim) -> f32
-    sigma: Callable  # ti.func(dim) -> f32
+    evaluate_1d: Callable  # qd.func(q, dim) -> f32
+    F_1d: Callable  # qd.func(q, dim) -> f32
+    sigma: Callable  # qd.func(dim) -> f32
     support: float
 
 
@@ -973,11 +973,11 @@ class SphericalKernelSpec:
 
     """
 
-    evaluate: Callable  # ti.func(q, dim) -> f32
-    F: Callable  # ti.func(q, dim) -> f32
-    sigma: Callable  # ti.func(dim) -> f32
-    evaluate_integral: Callable  # ti.func(q1, q2, dim) -> f32
-    gradient: Callable  # ti.func(q, grad_q, dim) -> ti.Vector(dim)  [dW/dq * grad_q]
+    evaluate: Callable  # qd.func(q, dim) -> f32
+    F: Callable  # qd.func(q, dim) -> f32
+    sigma: Callable  # qd.func(dim) -> f32
+    evaluate_integral: Callable  # qd.func(q1, q2, dim) -> f32
+    gradient: Callable  # qd.func(q, grad_q, dim) -> qd.Vector(dim)  [dW/dq * grad_q]
     support: float
 
 
@@ -1131,8 +1131,8 @@ def create_spherical_kernel(name: str) -> SphericalKernelSpec:
 # =============================================================================
 # Sample grid kernels and wrapper
 # =============================================================================
-# One ti.kernel per dimension, mirroring the dim==1/2/3 branches in the C++.
-# `evaluate_integral_fn` and `sigma_fn` are passed as ti.template() so the
+# One qd.kernel per dimension, mirroring the dim==1/2/3 branches in the C++.
+# `evaluate_integral_fn` and `sigma_fn` are passed as qd.template() so the
 # chosen kernel's math is fully inlined -- no virtual call, no runtime
 # dispatch on which kernel this is.
 
@@ -1282,14 +1282,14 @@ def _build_shell_layout_3d(
 # --------------------------------------------------------------------------
 
 
-@ti.kernel
+@qd.kernel
 def _compute_radial_integrals(
-    evaluate_integral_fn: ti.template(),
-    dim: ti.template(),
-    n_q: ti.i32,
-    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    radial_integral_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    evaluate_integral_fn: qd.template(),
+    dim: qd.template(),
+    n_q: qd.i32,
+    shell_q0: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    radial_integral_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     for iq in range(n_q):
         radial_integral_out[iq] = evaluate_integral_fn(shell_q0[iq], shell_q1[iq], dim)
@@ -1301,20 +1301,20 @@ def _compute_radial_integrals(
 # --------------------------------------------------------------------------
 
 
-@ti.kernel
+@qd.kernel
 def _build_kernel_sample_grid_1d(
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    n_pts: ti.i32,
-    shell_id_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
-    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    radial_integral_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    n_points_per_shell_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
-    sign_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 1)
-    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    sigma_fn: qd.template(),
+    dim: qd.template(),
+    n_pts: qd.i32,
+    shell_id_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
+    shell_q0: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    radial_integral_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    n_points_per_shell_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
+    sign_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 1)
+    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    integrals_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     sig = sigma_fn(dim)
     for i in range(n_pts):
@@ -1330,24 +1330,24 @@ def _build_kernel_sample_grid_1d(
         # this shell's points (spherically symmetric -> every point in a
         # shell carries an equal fraction of that shell's mass).
         integrals_out[i] = (
-            sig * 2.0 * radial_integral_in[iq] / ti.f32(n_points_per_shell_in[iq])
+            sig * 2.0 * radial_integral_in[iq] / qd.f32(n_points_per_shell_in[iq])
         )
 
 
-@ti.kernel
+@qd.kernel
 def _build_kernel_sample_grid_2d(
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    n_pts: ti.i32,
-    shell_id_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
-    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    radial_integral_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    n_points_per_shell_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
-    theta_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 2)
-    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    sigma_fn: qd.template(),
+    dim: qd.template(),
+    n_pts: qd.i32,
+    shell_id_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
+    shell_q0: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    radial_integral_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    n_points_per_shell_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
+    theta_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 2)
+    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    integrals_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     sig = sigma_fn(dim)
     for i in range(n_pts):
@@ -1356,8 +1356,8 @@ def _build_kernel_sample_grid_2d(
         q = 0.5 * (q0 + q1)
         theta = theta_in[i]
 
-        coords_out[i, 0] = q * ti.cos(theta)
-        coords_out[i, 1] = q * ti.sin(theta)
+        coords_out[i, 0] = q * qd.cos(theta)
+        coords_out[i, 1] = q * qd.sin(theta)
         q_out[i] = q
         # evaluate_integral_fn is a pure radial integral; the angular
         # measure for a full 2D shell (circle) is 2*pi.
@@ -1365,24 +1365,24 @@ def _build_kernel_sample_grid_2d(
             sig
             * (2.0 * pi)
             * radial_integral_in[iq]
-            / ti.f32(n_points_per_shell_in[iq])
+            / qd.f32(n_points_per_shell_in[iq])
         )
 
 
-@ti.kernel
+@qd.kernel
 def _build_kernel_sample_grid_3d(
-    sigma_fn: ti.template(),
-    dim: ti.template(),
-    n_pts: ti.i32,
-    shell_id_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
-    shell_q0: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    shell_q1: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    radial_integral_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    n_points_per_shell_in: ti.types.ndarray(dtype=ti.i32, ndim=1),
-    dirs_in: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 3) unit vectors
-    coords_out: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (n_pts, 3)
-    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    integrals_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    sigma_fn: qd.template(),
+    dim: qd.template(),
+    n_pts: qd.i32,
+    shell_id_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
+    shell_q0: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    radial_integral_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    n_points_per_shell_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
+    dirs_in: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 3) unit vectors
+    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 3)
+    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    integrals_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     sig = sigma_fn(dim)
     for i in range(n_pts):
@@ -1400,7 +1400,7 @@ def _build_kernel_sample_grid_3d(
             sig
             * (4.0 * pi)
             * radial_integral_in[iq]
-            / ti.f32(n_points_per_shell_in[iq])
+            / qd.f32(n_points_per_shell_in[iq])
         )
 
 
@@ -1581,16 +1581,16 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
     _quadrants_init(arch="cpu")
     kspec = create_separable_kernel(kernel_name)
 
-    @ti.kernel
+    @qd.kernel
     def _compute(
-        F_1d_fn: ti.template(), support: ti.f32, dim_: ti.template()
-    ) -> ti.f32:
+        F_1d_fn: qd.template(), support: qd.f32, dim_: qd.template()
+    ) -> qd.f32:
         return _separable_integrate_1d(F_1d_fn, support, dim_, -support, support)
 
     single_axis_integral = _compute(kspec.F_1d, kspec.support, dim)
 
-    @ti.kernel
-    def _sigma(sigma_fn: ti.template(), dim_: ti.template()) -> ti.f32:
+    @qd.kernel
+    def _sigma(sigma_fn: qd.template(), dim_: qd.template()) -> qd.f32:
         return sigma_fn(dim_)
 
     sigma = _sigma(kspec.sigma, dim)
@@ -1624,40 +1624,40 @@ def compute_total_integral_spherical(
     return float(np.sum(grid["integrals"]))
 
 
-@ti.kernel
+@qd.kernel
 def _sample_spherical_1d(
-    evaluate_fn: ti.template(),
-    sigma_fn: ti.template(),
-    support: ti.f32,
-    dim: ti.template(),
-    num_samples: ti.i32,
-    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    values_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    evaluate_fn: qd.template(),
+    sigma_fn: qd.template(),
+    support: qd.f32,
+    dim: qd.template(),
+    num_samples: qd.i32,
+    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    values_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     dq = 2.0 * support / num_samples
     sig = sigma_fn(dim)
     for i in range(num_samples):
         q_current = -support + i * dq
-        value = sig * evaluate_fn(ti.abs(q_current), dim)
+        value = sig * evaluate_fn(qd.abs(q_current), dim)
         q_out[i] = q_current
         values_out[i] = value
 
 
-@ti.kernel
+@qd.kernel
 def _sample_separable_1d(
-    evaluate_1d_fn: ti.template(),
-    sigma_fn: ti.template(),
-    support: ti.f32,
-    dim: ti.template(),
-    num_samples: ti.i32,
-    q_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    values_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
+    evaluate_1d_fn: qd.template(),
+    sigma_fn: qd.template(),
+    support: qd.f32,
+    dim: qd.template(),
+    num_samples: qd.i32,
+    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    values_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     dq = 2.0 * support / num_samples
     sig = sigma_fn(dim)
     for i in range(num_samples):
         q_current = -support + i * dq
-        value = sig * evaluate_1d_fn(ti.abs(q_current), dim)
+        value = sig * evaluate_1d_fn(qd.abs(q_current), dim)
         q_out[i] = q_current
         values_out[i] = value
 

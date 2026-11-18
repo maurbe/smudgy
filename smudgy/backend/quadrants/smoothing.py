@@ -1,7 +1,7 @@
 """Smoothing module for smudgy, providing functions to compute smoothing lengths and anisotropic smoothing tensors using Taichi."""
 
 import numpy as np
-import quadrants as ti
+import quadrants as qd
 
 _EPS = 1e-7
 
@@ -28,63 +28,63 @@ def compute_hsml(nn_dists: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(nn_dists[:, -1], dtype=np.float32)
 
 
-@ti.func
+@qd.func
 def _coordinate_difference_with_pbc(
-    d: ti.f32, box: ti.f32, periodic: ti.template()
-) -> ti.f32:
+    d: qd.f32, box: qd.f32, periodic: qd.template()
+) -> qd.f32:
     r = d
-    if ti.static(periodic):
+    if qd.static(periodic):
         half = 0.5 * box
         shifted = r + half
-        wrapped = shifted - box * ti.floor(shifted / box)  # folds into [0, box)
+        wrapped = shifted - box * qd.floor(shifted / box)  # folds into [0, box)
         r = wrapped - half
     return r
 
 
-@ti.func
+@qd.func
 def _neighbor_offset(
-    query_positions: ti.template(),
+    query_positions: qd.template(),
     q,
-    positions: ti.template(),
+    positions: qd.template(),
     j,
-    boxsize: ti.template(),
-    dim: ti.template(),
-    periodic: ti.template(),
+    boxsize: qd.template(),
+    dim: qd.template(),
+    periodic: qd.template(),
 ):
     """x_j - x_q, wrapped to the minimum image if `periodic`."""
-    d = ti.Vector.zero(ti.f32, dim)
-    for a in ti.static(range(dim)):
+    d = qd.Vector.zero(qd.f32, dim)
+    for a in qd.static(range(dim)):
         d[a] = _coordinate_difference_with_pbc(
             positions[j, a] - query_positions[q, a], boxsize[a], periodic
         )
     return d
 
 
-@ti.func
-def _sym_eig_jacobi(A, dim: ti.template(), sweeps: ti.template()):
+@qd.func
+def _sym_eig_jacobi(A, dim: qd.template(), sweeps: qd.template()):
     """Eigendecomposition of a small symmetric matrix by cyclic Jacobi rotations.
 
-    Used instead of ti.sym_eig, which returns non-orthogonal eigenvectors that
+    Used instead of qd.sym_eig, which returns non-orthogonal eigenvectors that
     can be off by tens of degrees for nearly degenerate matrices, i.e. for
     near-isotropic neighbourhoods. Jacobi's V is orthonormal by construction,
     one rotation diagonalises a 2x2 exactly, and a 3x3 converges to f32
     precision in a few sweeps. Returns (eigvals, V), unordered, with
     A = V diag(eigvals) V^T.
     """
-    V = ti.Matrix.identity(ti.f32, dim)
+    V = qd.Matrix.identity(qd.f32, dim)
     for _ in range(sweeps):
-        for p in ti.static(range(dim)):
-            for r in ti.static(range(p + 1, dim)):
+        for p in qd.static(range(dim)):
+            for r in qd.static(range(p + 1, dim)):
                 apr = A[p, r]
                 if apr != 0.0:
                     # rotation angle that zeroes A[p, r] (Golub & Van Loan, sym.schur2)
                     tau = (A[r, r] - A[p, p]) / (2.0 * apr)
-                    t = 1.0 / (ti.abs(tau) + ti.sqrt(1.0 + tau * tau))
+                    t = 1.0 / (qd.abs(tau) + qd.sqrt(1.0 + tau * tau))
                     if tau < 0.0:
                         t = -t
-                    c = 1.0 / ti.sqrt(1.0 + t * t)
+                    c = 1.0 / qd.sqrt(1.0 + t * t)
                     s = t * c
-                    J = ti.Matrix.identity(ti.f32, dim)
+                    J = qd.Matrix.identity(qd.f32, dim)
                     J[p, p] = c
                     J[r, r] = c
                     J[p, r] = s
@@ -93,34 +93,34 @@ def _sym_eig_jacobi(A, dim: ti.template(), sweeps: ti.template()):
                     A[p, r] = 0.0
                     A[r, p] = 0.0
                     V = V @ J
-    eigvals = ti.Vector.zero(ti.f32, dim)
-    for a in ti.static(range(dim)):
+    eigvals = qd.Vector.zero(qd.f32, dim)
+    for a in qd.static(range(dim)):
         eigvals[a] = A[a, a]
     return eigvals, V
 
 
-@ti.kernel
+@qd.kernel
 def _compute_hmat_kernel(
-    query_positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (N, D)
-    positions: ti.types.ndarray(dtype=ti.f32, ndim=2),  # (Nc, D)
-    weights: ti.types.ndarray(dtype=ti.f32, ndim=1),  # (Nc,)
-    nn_inds: ti.types.ndarray(dtype=ti.i32, ndim=2),  # (N, K), indexes positions
-    boxsize: ti.types.ndarray(dtype=ti.f32, ndim=1),
-    hsml: ti.types.ndarray(dtype=ti.f32, ndim=1),  # only read if volume_preserving
-    periodic: ti.template(),
-    dim: ti.template(),
-    volume_preserving: ti.template(),
-    eps: ti.f32,
-    ratio_max: ti.f32,
-    min_axis: ti.f32,  # 0.0 disables
-    H_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
-    eigvals_out: ti.types.ndarray(dtype=ti.f32, ndim=2),
-    eigvecs_out: ti.types.ndarray(dtype=ti.f32, ndim=3),
+    query_positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
+    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nc, D)
+    weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (Nc,)
+    nn_inds: qd.types.ndarray(dtype=qd.i32, ndim=2),  # (N, K), indexes positions
+    boxsize: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    hsml: qd.types.ndarray(dtype=qd.f32, ndim=1),  # only read if volume_preserving
+    periodic: qd.template(),
+    dim: qd.template(),
+    volume_preserving: qd.template(),
+    eps: qd.f32,
+    ratio_max: qd.f32,
+    min_axis: qd.f32,  # 0.0 disables
+    H_out: qd.types.ndarray(dtype=qd.f32, ndim=3),
+    eigvals_out: qd.types.ndarray(dtype=qd.f32, ndim=2),
+    eigvecs_out: qd.types.ndarray(dtype=qd.f32, ndim=3),
 ):
     N, K = nn_inds.shape
     for q in range(N):
         # --- second-moment tensor about the query (Marinho eq. 37) ------------
-        Sigma = ti.Matrix.zero(ti.f32, dim, dim)
+        Sigma = qd.Matrix.zero(qd.f32, dim, dim)
         wsum = 0.0
         for k in range(K):
             j = nn_inds[q, k]
@@ -129,8 +129,8 @@ def _compute_hmat_kernel(
             Sigma += w * d.outer_product(d)
             wsum += w
         Sigma /= wsum
-        trace = ti.max(Sigma.trace(), 1e-30)
-        Sigma += eps * trace * ti.Matrix.identity(ti.f32, dim)
+        trace = qd.max(Sigma.trace(), 1e-30)
+        Sigma += eps * trace * qd.Matrix.identity(qd.f32, dim)
 
         # Rescale to a unit-order magnitude band before the eigendecomposition
         # (Sigma's entries are tiny for unit-scale point clouds), then undo the
@@ -138,7 +138,7 @@ def _compute_hmat_kernel(
         # rescaling of Sigma. 1x1 needs no rotations: zero sweeps.
         alpha = 10.0 / trace
         eigvals, eigvecs = _sym_eig_jacobi(
-            alpha * Sigma, dim, ti.static(0 if dim == 1 else 6)
+            alpha * Sigma, dim, qd.static(0 if dim == 1 else 6)
         )
         eigvals = eigvals / alpha
 
@@ -146,11 +146,11 @@ def _compute_hmat_kernel(
         # Jacobi gives no ordering guarantee. Sort descending explicitly, matching the numpy
         # backend, so that index 0 is the largest principal component -- the
         # axis-ratio clamp below depends on it.
-        for i in ti.static(range(dim)):
-            for j in ti.static(range(i + 1, dim)):
+        for i in qd.static(range(dim)):
+            for j in qd.static(range(i + 1, dim)):
                 if eigvals[i] < eigvals[j]:
                     eigvals[i], eigvals[j] = eigvals[j], eigvals[i]
-                    for a in ti.static(range(dim)):
+                    for a in qd.static(range(dim)):
                         eigvecs[a, i], eigvecs[a, j] = eigvecs[a, j], eigvecs[a, i]
 
         # Eigenvector orientation convention:
@@ -158,24 +158,24 @@ def _compute_hmat_kernel(
         # impose a consistent sign convention for comparison with the numpy backend
         # (largest-magnitude component of each eigenvector is positive). H itself is
         # invariant under column sign flips; this only affects eigvecs_out.
-        for col in ti.static(range(dim)):
+        for col in qd.static(range(dim)):
             max_abs = 0.0
             sign = 1.0
-            for row in ti.static(range(dim)):
+            for row in qd.static(range(dim)):
                 v = eigvecs[row, col]
-                if ti.abs(v) > max_abs:
-                    max_abs = ti.abs(v)
+                if qd.abs(v) > max_abs:
+                    max_abs = qd.abs(v)
                     sign = 1.0 if v >= 0.0 else -1.0
-            for row in ti.static(range(dim)):
+            for row in qd.static(range(dim)):
                 eigvecs[row, col] *= sign
         # ==========================================================================================
 
         # --- shape: principal components, with an axis-ratio clamp ---------------
-        sigma = ti.Vector.zero(ti.f32, dim)
-        for a in ti.static(range(dim)):
-            sigma[a] = ti.sqrt(ti.max(eigvals[a], 0.0))
-        for a in ti.static(range(dim)):
-            sigma[a] = ti.max(sigma[a], sigma[0] / ratio_max)
+        sigma = qd.Vector.zero(qd.f32, dim)
+        for a in qd.static(range(dim)):
+            sigma[a] = qd.sqrt(qd.max(eigvals[a], 0.0))
+        for a in qd.static(range(dim)):
+            sigma[a] = qd.max(sigma[a], sigma[0] / ratio_max)
 
         # --- scale: enclosing-hull condition, Marinho (2021) eq. 39 -------------
         # zeta_max = largest Mahalanobis distance among the K neighbours, using
@@ -186,40 +186,40 @@ def _compute_hmat_kernel(
                 query_positions, q, positions, nn_inds[q, k], boxsize, dim, periodic
             )
             maha2 = 0.0
-            for j in ti.static(range(dim)):
+            for j in qd.static(range(dim)):
                 proj = 0.0
-                for a in ti.static(range(dim)):
+                for a in qd.static(range(dim)):
                     proj += d[a] * eigvecs[a, j]
-                maha2 += proj * proj / ti.max(sigma[j] * sigma[j], 1e-37)
-            maha2_max = ti.max(maha2_max, maha2)
-        zeta_max = ti.sqrt(maha2_max)
+                maha2 += proj * proj / qd.max(sigma[j] * sigma[j], 1e-37)
+            maha2_max = qd.max(maha2_max, maha2)
+        zeta_max = qd.sqrt(maha2_max)
 
-        axes = ti.Vector.zero(ti.f32, dim)
-        for a in ti.static(range(dim)):
+        axes = qd.Vector.zero(qd.f32, dim)
+        for a in qd.static(range(dim)):
             axes[a] = zeta_max * sigma[a]  # eq. 44: h_1, h_2, h_3
 
-        if ti.static(volume_preserving):  # det H = hsml^dim
+        if qd.static(volume_preserving):  # det H = hsml^dim
             det = 1.0
-            for a in ti.static(range(dim)):
+            for a in qd.static(range(dim)):
                 det *= axes[a]
-            scale = hsml[q] / ti.pow(ti.max(det, 1e-30), 1.0 / dim)
-            for a in ti.static(range(dim)):
+            scale = hsml[q] / qd.pow(qd.max(det, 1e-30), 1.0 / dim)
+            for a in qd.static(range(dim)):
                 axes[a] *= scale
 
         if min_axis > 0.0:  # only ever enlarges axes
-            for a in ti.static(range(dim)):
-                axes[a] = ti.max(axes[a], min_axis)
+            for a in qd.static(range(dim)):
+                axes[a] = qd.max(axes[a], min_axis)
 
-        for a in ti.static(range(dim)):
+        for a in qd.static(range(dim)):
             eigvals_out[q, a] = axes[a]
 
-        Lam = ti.Matrix.zero(ti.f32, dim, dim)
-        for a in ti.static(range(dim)):
+        Lam = qd.Matrix.zero(qd.f32, dim, dim)
+        for a in qd.static(range(dim)):
             Lam[a, a] = axes[a]
         H = eigvecs @ Lam @ eigvecs.transpose()
 
-        for a in ti.static(range(dim)):
-            for b in ti.static(range(dim)):
+        for a in qd.static(range(dim)):
+            for b in qd.static(range(dim)):
                 H_out[q, a, b] = H[a, b]
                 eigvecs_out[q, a, b] = eigvecs[a, b]
 
