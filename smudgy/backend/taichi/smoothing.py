@@ -1,7 +1,7 @@
 """Smoothing module for smudgy, providing functions to compute smoothing lengths and anisotropic smoothing tensors using Taichi."""
 
 import numpy as np
-import taichi as ti
+import quadrants as ti
 
 _EPS = 1e-7
 

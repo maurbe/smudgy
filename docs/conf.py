@@ -33,13 +33,13 @@ napoleon_numpy_docstring = True
 
 autodoc_member_order = "bysource"
 autodoc_mock_imports = [
-    # mpi4py and taichi are heavy/native dependencies that are prone to
+    # mpi4py and quadrants are heavy/native dependencies that are prone to
     # failing to import (missing system MPI runtime, no GPU/display, etc.)
     # in RTD's minimal build container. Mocking them means autodoc never
     # needs a real, working import of them just to read docstrings/signatures.
     "mpi4py",
     "mpi4py.MPI",
-    "taichi",
+    "quadrants",
 ]
 
 nb_execution_mode = "off"

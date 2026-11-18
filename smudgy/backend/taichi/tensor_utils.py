@@ -1,7 +1,7 @@
 """Utilities for tensor operations in Taichi backend."""
 
 import numpy as np
-import taichi as ti
+import quadrants as ti
 
 from .smoothing import _sym_eig_jacobi
 

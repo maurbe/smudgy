@@ -1,5 +1,5 @@
 import numpy as np
-import taichi as ti
+import quadrants as ti
 
 from .kernels import (
     create_spherical_kernel,

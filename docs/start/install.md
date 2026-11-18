@@ -1,6 +1,6 @@
 # Installation
 
-You can install `smudgy` in several ways. `smudgy` depends on [Taichi](https://www.taichi-lang.org/) and on [mpi4py](https://mpi4py.github.io/), which requires an MPI library on your system, so make sure MPI is installed first (see the {ref}`mpi-support` section below).
+You can install `smudgy` in several ways. `smudgy` depends on [Quadrants](https://github.com/Genesis-Embodied-AI/quadrants) and on [mpi4py](https://mpi4py.github.io/), which requires an MPI library on your system, so make sure MPI is installed first (see the {ref}`mpi-support` section below).
 
 1. Install from PyPI (recommended)
 

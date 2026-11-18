@@ -3,7 +3,7 @@
 Accurate to about 1 ulp in ``ti.f64``; Taichi itself provides no ``erf``.
 """
 
-import taichi as ti
+import quadrants as ti
 
 # --- coefficients (fdlibm s_erf.c) ---
 _erx = 8.45062911510467529297e-01

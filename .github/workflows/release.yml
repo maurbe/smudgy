@@ -27,7 +27,7 @@ jobs:
       # ------------------------------------------------------
       # Build wheel + sdist
       # ------------------------------------------------------
-      # smudgy is pure Python (Taichi is a runtime dependency, not
+      # smudgy is pure Python (Quadrants is a runtime dependency, not
       # compiled here), so a plain build is used instead of cibuildwheel,
       # which refuses to run when no platform wheel is produced.
       - name: Build distributions

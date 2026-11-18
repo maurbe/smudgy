@@ -11,7 +11,7 @@ from functools import lru_cache
 from math import pi
 
 import numpy as np
-import taichi as ti
+import quadrants as ti
 
 
 # =============================================================================

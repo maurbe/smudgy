@@ -1,4 +1,4 @@
-import taichi as ti
+import quadrants as ti
 
 _initialized = False
 _current_config = None

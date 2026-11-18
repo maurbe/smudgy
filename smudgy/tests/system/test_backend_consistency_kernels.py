@@ -16,7 +16,7 @@ assumption and flagged it with a comment -- please double check those spots.
 
 import numpy as np
 import pytest
-import taichi as ti
+import quadrants as ti
 
 # ---------------------------------------------------------------------------
 # Adjust these imports to your package layout.

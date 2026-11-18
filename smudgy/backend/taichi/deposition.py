@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-import taichi as ti
+import quadrants as ti
 
 from .kernels import (
     _separable_integrate_1d,
