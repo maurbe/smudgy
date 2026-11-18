@@ -1,4 +1,4 @@
-"""Tests backend consistency for deposit() across Numpy CPU and Taichi CPU."""
+"""Tests backend consistency for deposit() across Numpy CPU and Quadrants CPU."""
 
 import numpy as np
 import pytest
@@ -52,11 +52,11 @@ def test_backend_consistency(dim, kernel_name):
     f_numpy, w_numpy = pc.deposit(**kwargs)
 
     pc.set_backend(backend="quadrants", arch="cpu")
-    f_taichi, w_taichi = pc.deposit(**kwargs)
+    f_qd, w_qd = pc.deposit(**kwargs)
 
-    assert f_numpy.shape == f_taichi.shape
-    np.testing.assert_allclose(f_numpy, f_taichi, rtol=1e-5, atol=1e-6)
+    assert f_numpy.shape == f_qd.shape
+    np.testing.assert_allclose(f_numpy, f_qd, rtol=1e-5, atol=1e-6)
 
-    assert w_numpy.shape == w_taichi.shape
+    assert w_numpy.shape == w_qd.shape
     np.testing.assert_allclose(w_numpy.sum(), weights.sum(), rtol=1e-5, atol=1e-6)
-    np.testing.assert_allclose(w_taichi.sum(), weights.sum(), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(w_qd.sum(), weights.sum(), rtol=1e-5, atol=1e-6)

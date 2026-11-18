@@ -1,4 +1,4 @@
-"""Tests backend consistency for interpolate() across Numpy CPU and Taichi CPU.
+"""Tests backend consistency for interpolate() across Numpy CPU and Quadrants CPU.
 
 Covers all documented interpolation modes ('field', 'gradient', 'divergence',
 'curl') for 2D/3D and both 'isotropic'/'covariant' structures. This also
@@ -37,24 +37,24 @@ def _generate_dataset(dim: int, seed: int):
     return {"positions": positions, "weights": weights, "boxsize": boxsize}
 
 
-def _assert_backends_agree(f_numpy, f_taichi, rtol, atol, max_outlier_frac=0.01):
+def _assert_backends_agree(f_numpy, f_qd, rtol, atol, max_outlier_frac=0.01):
     """Elementwise np.isclose, but tolerating a small fraction of outliers.
 
     Now that decomposition/ghost-exchange is unconditional, a covariant
     structure's smoothing tensor eigendecomposition occasionally lands a
     handful of particles (typically <0.5%) right at a near-degenerate
-    eigenvalue split, where numpy and taichi's (equally valid) eigenvector
+    eigenvalue split, where numpy and quadrants' (equally valid) eigenvector
     choices genuinely diverge -- an inherent ambiguity of eigendecomposition
     for near-equal eigenvalues, not a correctness bug. A strict elementwise
     assert_allclose would flag this; a real systematic bug would instead show
     up as most/all elements disagreeing, which this still catches.
     """
-    close = np.isclose(f_numpy, f_taichi, rtol=rtol, atol=atol)
+    close = np.isclose(f_numpy, f_qd, rtol=rtol, atol=atol)
     mismatch_frac = 1.0 - np.mean(close)
     assert mismatch_frac <= max_outlier_frac, (
         f"{mismatch_frac:.2%} of elements exceed rtol={rtol}/atol={atol} "
         f"(allowed up to {max_outlier_frac:.2%}) -- max abs diff "
-        f"{np.max(np.abs(f_numpy - f_taichi))}"
+        f"{np.max(np.abs(f_numpy - f_qd))}"
     )
 
 
@@ -97,7 +97,7 @@ def _run_backend(backend, dim, structure, mode, kernel_name, data, query_positio
 @pytest.mark.parametrize("structure", STRUCTURES)
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 def test_backend_consistency(dim, structure, mode, kernel_name):
-    """Test numpy/taichi consistency for interpolate() across all modes."""
+    """Test numpy/quadrants consistency for interpolate() across all modes."""
     data = _generate_dataset(dim, seed=42)
     query_positions = _generate_dataset(dim, seed=43)["positions"]
 
@@ -107,18 +107,18 @@ def test_backend_consistency(dim, structure, mode, kernel_name):
             backend, dim, structure, mode, kernel_name, data, query_positions
         )
 
-    f_numpy, f_taichi = results["numpy"], results["quadrants"]
+    f_numpy, f_qd = results["numpy"], results["quadrants"]
 
-    assert f_numpy.shape == f_taichi.shape
+    assert f_numpy.shape == f_qd.shape
     assert np.all(np.isfinite(f_numpy)), "numpy backend produced non-finite values"
-    assert np.all(np.isfinite(f_taichi)), "taichi backend produced non-finite values"
+    assert np.all(np.isfinite(f_qd)), "quadrants backend produced non-finite values"
 
     # Strive for sub-1% level agreement. atol is looser than the field/
     # divergence/curl modes need because gradient mode (derivative-like,
     # amplifies float32 rounding differences between backends) occasionally
     # produces slightly larger absolute deviations at individual points,
     # especially for covariant 3D with wide-support kernels (wendland_c4/c6).
-    _assert_backends_agree(f_numpy, f_taichi, rtol=1e-2, atol=5e-3)
+    _assert_backends_agree(f_numpy, f_qd, rtol=1e-2, atol=5e-3)
 
 
 @pytest.mark.parametrize("dim", DIMS)
@@ -134,9 +134,9 @@ def test_backend_consistency_at_particle_positions(dim, structure, kernel_name):
             backend, dim, structure, "field", kernel_name, data, query_positions=None
         )
 
-    f_numpy, f_taichi = results["numpy"], results["quadrants"]
-    assert f_numpy.shape == f_taichi.shape
-    np.testing.assert_allclose(f_numpy, f_taichi, rtol=1e-2, atol=1e-3)
+    f_numpy, f_qd = results["numpy"], results["quadrants"]
+    assert f_numpy.shape == f_qd.shape
+    np.testing.assert_allclose(f_numpy, f_qd, rtol=1e-2, atol=1e-3)
 
 
 if __name__ == "__main__":

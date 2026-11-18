@@ -1,13 +1,13 @@
-"""Tests for kernels.py: registry consistency + numpy/taichi numerical agreement.
+"""Tests for kernels.py: registry consistency + numpy/quadrants numerical agreement.
 
 1) Registry consistency: the set of kernel names registered in the numpy
    backend (``KERNEL_CLASSES``) must match the set(s) registered in the
-   taichi backend (``SEPARABLE_KERNELS`` / ``SPHERICAL_KERNELS``), including
+   quadrants backend (``SEPARABLE_KERNELS`` / ``SPHERICAL_KERNELS``), including
    the exact strings used to look them up.
 
 2) Numerical agreement: for every registered kernel, evaluate value and
    gradient on a 1D grid of canonical coordinates ``q`` and check that numpy
-   and taichi agree within float32 tolerance.
+   and quadrants agree within float32 tolerance.
 
 Adjust the imports below to match your package layout. Where exact registry
 names/attributes weren't available to me, I've made the most reasonable
@@ -32,7 +32,7 @@ from smudgy.backend.quadrants.kernels import (
 
 # qd.init() must run before any @qd.kernel below is *defined* (decorated),
 # not just before it's called -- calling the project wrapper here can be too
-# late/a no-op depending on its implementation, so initialize taichi directly
+# late/a no-op depending on its implementation, so initialize quadrants directly
 # and unconditionally as the very first thing in this module.
 qd.init(arch=qd.cpu, default_fp=qd.f32)
 
@@ -57,31 +57,31 @@ class TestKernelRegistryConsistency:
     def test_numpy_registry_nonempty(self):
         assert len(KERNEL_CLASSES) > 0
 
-    def test_taichi_registries_nonempty(self):
+    def test_quadrants_registries_nonempty(self):
         assert len(SEPARABLE_KERNELS) > 0
         assert len(SPHERICAL_KERNELS) > 0
 
-    def test_numpy_kernel_names_covered_by_taichi(self):
-        """Every numpy kernel name must be resolvable on the taichi side,
+    def test_numpy_kernel_names_covered_by_quadrants(self):
+        """Every numpy kernel name must be resolvable on the quadrants side,
         either as a separable or a spherical kernel.
         """
         numpy_names = set(KERNEL_CLASSES.keys())
-        taichi_names = set(SEPARABLE_KERNELS.keys()) | set(SPHERICAL_KERNELS.keys())
-        missing = numpy_names - taichi_names
-        assert not missing, f"Kernel names in numpy but not taichi: {sorted(missing)}"
+        qd_names = set(SEPARABLE_KERNELS.keys()) | set(SPHERICAL_KERNELS.keys())
+        missing = numpy_names - qd_names
+        assert not missing, f"Kernel names in numpy but not quadrants: {sorted(missing)}"
 
-    def test_taichi_kernel_names_covered_by_numpy(self):
-        """Every taichi kernel name must exist on the numpy side."""
+    def test_quadrants_kernel_names_covered_by_numpy(self):
+        """Every quadrants kernel name must exist on the numpy side."""
         numpy_names = set(KERNEL_CLASSES.keys())
-        taichi_names = set(SEPARABLE_KERNELS.keys()) | set(SPHERICAL_KERNELS.keys())
-        missing = taichi_names - numpy_names
-        assert not missing, f"Kernel names in taichi but not numpy: {sorted(missing)}"
+        qd_names = set(SEPARABLE_KERNELS.keys()) | set(SPHERICAL_KERNELS.keys())
+        missing = qd_names - numpy_names
+        assert not missing, f"Kernel names in quadrants but not numpy: {sorted(missing)}"
 
     # def test_no_kernel_registered_as_both_separable_and_spherical(self):
     #    overlap = set(SEPARABLE_KERNELS.keys()) & set(SPHERICAL_KERNELS.keys())
     #    assert (
     #        not overlap
-    #    ), f"Kernel names registered in both taichi dicts: {sorted(overlap)}"
+    #    ), f"Kernel names registered in both quadrants dicts: {sorted(overlap)}"
 
     @pytest.mark.parametrize("name", sorted(KERNEL_CLASSES.keys()))
     def test_numpy_get_kernel_succeeds_for_all_dims(self, name):
@@ -90,12 +90,12 @@ class TestKernelRegistryConsistency:
             assert kernel is not None
 
     @pytest.mark.parametrize("name", sorted(SEPARABLE_KERNELS.keys()))
-    def test_taichi_create_separable_kernel_succeeds(self, name):
+    def test_quadrants_create_separable_kernel_succeeds(self, name):
         spec = create_separable_kernel(name)
         assert spec.support > 0
 
     @pytest.mark.parametrize("name", sorted(SPHERICAL_KERNELS.keys()))
-    def test_taichi_create_spherical_kernel_succeeds(self, name):
+    def test_quadrants_create_spherical_kernel_succeeds(self, name):
         spec = create_spherical_kernel(name)
         assert spec.support > 0
 
@@ -103,11 +103,11 @@ class TestKernelRegistryConsistency:
         with pytest.raises(ValueError):
             get_kernel("not_a_real_kernel", dim=3)
 
-    def test_unknown_kernel_name_raises_on_taichi_separable(self):
+    def test_unknown_kernel_name_raises_on_quadrants_separable(self):
         with pytest.raises(ValueError):
             create_separable_kernel("not_a_real_kernel")
 
-    def test_unknown_kernel_name_raises_on_taichi_spherical(self):
+    def test_unknown_kernel_name_raises_on_quadrants_spherical(self):
         with pytest.raises(ValueError):
             create_spherical_kernel("not_a_real_kernel")
 

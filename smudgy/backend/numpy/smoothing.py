@@ -128,7 +128,7 @@ def compute_hmat(
 
     # --- scale: the enclosing-hull condition (eq. 39) ------------------------
     # lam_clamped is only zero when Sigma is (all neighbours at the query);
-    # zeta_max = 0 then, i.e. H = 0, matching the Taichi backend.
+    # zeta_max = 0 then, i.e. H = 0, matching the Quadrants backend.
     inv_lam = np.divide(
         1.0, lam_clamped, out=np.zeros_like(lam_clamped), where=lam_clamped > 0
     )

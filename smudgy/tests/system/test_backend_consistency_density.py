@@ -1,4 +1,4 @@
-"""Tests backend consistency for density computation across Numpy CPU and Taichi CPU."""
+"""Tests backend consistency for density computation across Numpy CPU and Quadrants CPU."""
 
 import numpy as np
 import pytest
@@ -51,11 +51,11 @@ def test_backend_consistency(dim, structure):
             dens = pc.smoothing.density_covariant
             density_objects.append(dens)
 
-    s_numpy, s_taichi = density_objects
-    assert s_numpy.shape == s_taichi.shape
+    s_numpy, s_qd = density_objects
+    assert s_numpy.shape == s_qd.shape
     # rtol loosened from 1e-4: now that this pipeline always goes through
     # ghost-exchange (mandatory decomposition), the two backends can sum
     # neighbor contributions in a very slightly different order for a
     # handful of particles -- the same benign tie-breaking noise documented
     # throughout this project's own test suite, not a correctness issue.
-    np.testing.assert_allclose(s_numpy, s_taichi, rtol=1e-3, atol=1e-6)
+    np.testing.assert_allclose(s_numpy, s_qd, rtol=1e-3, atol=1e-6)

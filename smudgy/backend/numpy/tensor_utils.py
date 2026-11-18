@@ -46,8 +46,8 @@ def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
     eigvals, eigvecs = np.linalg.eigh(h_tensor_2d)
 
     # Eigenvector orientation convention:
-    # Numpy and Taichi have no convention about the sign of the eigenvectors,
-    # impose a consistent sign convention for comparison with Taichi backend
+    # Numpy and Quadrants have no convention about the sign of the eigenvectors,
+    # impose a consistent sign convention for comparison with Quadrants backend
     # (largest-magnitude component of each eigenvector is positive).
     eigvecs = _fix_eigvec_sign(eigvecs)
 

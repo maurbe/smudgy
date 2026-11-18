@@ -1,11 +1,11 @@
-"""Tests backend consistency for project_2d() across Numpy CPU and Taichi CPU."""
+"""Tests backend consistency for project_2d() across Numpy CPU and Quadrants CPU."""
 
 import numpy as np
 import pytest
 
 import smudgy as sm
 from smudgy.backend.numpy.tensor_utils import project_2d as project_2d_numpy
-from smudgy.backend.quadrants.tensor_utils import project_2d as project_2d_taichi
+from smudgy.backend.quadrants.tensor_utils import project_2d as project_2d_qd
 
 PLANES = [(0, 1), (0, 2), (1, 2)]
 
@@ -36,33 +36,33 @@ def _random_tensors(n, gap, scale, seed=0):
 
 def _assert_projections_agree(H_tensor, plane=(0, 1)):
     H_2d_np, evals_np, evecs_np = project_2d_numpy(H_tensor, plane)
-    H_2d_ti, evals_ti, evecs_ti = project_2d_taichi(H_tensor, plane)
+    H_2d_qd, evals_qd, evecs_qd = project_2d_qd(H_tensor, plane)
 
-    assert H_2d_np.shape == H_2d_ti.shape == (len(H_tensor), 2, 2)
-    assert evals_np.shape == evals_ti.shape
-    assert evecs_np.shape == evecs_ti.shape
-    assert np.all(np.isfinite(evals_ti)) and np.all(np.isfinite(evecs_ti))
+    assert H_2d_np.shape == H_2d_qd.shape == (len(H_tensor), 2, 2)
+    assert evals_np.shape == evals_qd.shape
+    assert evecs_np.shape == evecs_qd.shape
+    assert np.all(np.isfinite(evals_qd)) and np.all(np.isfinite(evecs_qd))
 
     # entries relative to each tensor's largest eigenvalue
     scale = evals_np[:, -1:, np.newaxis]
     np.testing.assert_array_less(
-        np.abs(H_2d_np - H_2d_ti), np.broadcast_to(1e-4 * scale, H_2d_np.shape)
+        np.abs(H_2d_np - H_2d_qd), np.broadcast_to(1e-4 * scale, H_2d_np.shape)
     )
-    np.testing.assert_allclose(evals_np, evals_ti, rtol=1e-4)
+    np.testing.assert_allclose(evals_np, evals_qd, rtol=1e-4)
 
-    # the taichi eigensystem is orthonormal and reproduces its own tensor
-    eye = np.broadcast_to(np.eye(2), evecs_ti.shape)
-    np.testing.assert_allclose(np.swapaxes(evecs_ti, 1, 2) @ evecs_ti, eye, atol=1e-5)
-    recon = np.einsum("nij,nj,nkj->nik", evecs_ti, evals_ti, evecs_ti)
+    # the quadrants eigensystem is orthonormal and reproduces its own tensor
+    eye = np.broadcast_to(np.eye(2), evecs_qd.shape)
+    np.testing.assert_allclose(np.swapaxes(evecs_qd, 1, 2) @ evecs_qd, eye, atol=1e-5)
+    recon = np.einsum("nij,nj,nkj->nik", evecs_qd, evals_qd, evecs_qd)
     np.testing.assert_array_less(
-        np.abs(recon - H_2d_ti), np.broadcast_to(1e-5 * scale, H_2d_ti.shape)
+        np.abs(recon - H_2d_qd), np.broadcast_to(1e-5 * scale, H_2d_qd.shape)
     )
 
     # eigenvectors are only unique where the two eigenvalues are well separated
     gap = (evals_np[:, 1] - evals_np[:, 0]) / evals_np[:, 1]
     separated = gap > 1e-2
     np.testing.assert_array_less(
-        np.abs(evecs_np - evecs_ti).max(axis=(1, 2))[separated], 1e-3
+        np.abs(evecs_np - evecs_qd).max(axis=(1, 2))[separated], 1e-3
     )
 
 

@@ -136,7 +136,7 @@ def _density_kernel(
 def density(
     *, kernel_name, dim, query_positions, positions, weights, nn_inds, h, boxsize, structure
 ):
-    """Compute SPH densities (Taichi backend).
+    """Compute SPH densities (Quadrants backend).
 
     Parameters
     ----------
@@ -360,7 +360,7 @@ def interpolate(
     mode,
     structure,
 ):
-    """Interpolate fields at query positions (Taichi backend).
+    """Interpolate fields at query positions (Quadrants backend).
 
     Parameters
     ----------

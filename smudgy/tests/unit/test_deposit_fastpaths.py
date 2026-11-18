@@ -2,14 +2,14 @@
 
 Covers `PointCloud.deposit(fields=None)` (mass-only deposition), the
 `extent` particle selection, the local-buffer sample branch of the
-isotropic/covariant taichi kernels, and 1D covariant == 1D isotropic.
+isotropic/covariant quadrants kernels, and 1D covariant == 1D isotropic.
 """
 
 import numpy as np
 import pytest
 
 from smudgy import PointCloud
-from smudgy.backend.quadrants import deposition as tdep
+from smudgy.backend.quadrants import deposition as qdep
 
 SEED = 7
 
@@ -66,7 +66,7 @@ def test_extent_selects_inside_particles(dim, kernel_name):
 
     p32 = pc.decomposition.local_positions
     inside = np.all((p32 >= lo) & (p32 <= hi), axis=1)
-    ref_f, ref_w = tdep.deposit(p32[inside] - np.float32(lo), w[inside, None], w[inside],
+    ref_f, ref_w = qdep.deposit(p32[inside] - np.float32(lo), w[inside, None], w[inside],
                                 np.full(dim, hi - lo, np.float32), [10] * dim, adaptive=False,
                                 kernel_name=kernel_name, periodic=False)
     np.testing.assert_allclose(wg, ref_w, rtol=1e-5, atol=1e-6)
@@ -88,11 +88,11 @@ def test_sample_buffer_matches_direct(structure, dim, periodic):
     h = (rng.uniform(0.2, 3.9, n) / g / 2).astype(np.float32)  # eta < eta_crit=4
     common = (pos, fld, w, box, (g,) * dim, periodic, "cubic_spline")
     if structure == "isotropic":
-        prep = tdep._prepare_isotropic(*common, h, "midpoint", 4.0)
+        prep = qdep._prepare_isotropic(*common, h, "midpoint", 4.0)
     else:
         vecs = np.linalg.qr(rng.normal(size=(n, dim, dim)))[0].astype(np.float32)
         vals = (h[:, None] * rng.uniform(0.3, 1.0, (n, dim))).astype(np.float32)
-        prep = tdep._prepare_covariant(*common, vecs, vals, "midpoint", 4.0)
+        prep = qdep._prepare_covariant(*common, vecs, vals, "midpoint", 4.0)
     assert prep.sample_buffer > 1
 
     prep.kernel(*prep.args)
@@ -127,8 +127,8 @@ def test_covariant_1d_equals_isotropic_1d(kernel_name, method, periodic):
     h = (rng.uniform(0.2, 8.0, n) / g / 2).astype(np.float32)  # both branches
     sign = rng.choice([-1.0, 1.0], n).astype(np.float32)
     kw = dict(adaptive=True, kernel_name=kernel_name, periodic=periodic, integration_method=method)
-    fi, wi = tdep.deposit(pos, fld, w, box, (g,), structure="isotropic", particle_hsml=h, **kw)
-    fc, wc = tdep.deposit(pos, fld, w, box, (g,), structure="covariant",
+    fi, wi = qdep.deposit(pos, fld, w, box, (g,), structure="isotropic", particle_hsml=h, **kw)
+    fc, wc = qdep.deposit(pos, fld, w, box, (g,), structure="covariant",
                           particle_hmat_eigvecs=sign[:, None, None],
                           particle_hmat_eigvals=h[:, None], **kw)
     np.testing.assert_allclose(wc, wi, rtol=1e-5, atol=1e-6 * wi.max())

@@ -4,9 +4,9 @@ Focus: input/output shape & type consistency of the frontend entry points
 (``__init__``, ``global_setup``, ``compute_smoothing``, ``compute_density``,
 ``interpolate``, ``deposit``, plus the small field-management helpers).
 
-Heavy backend computation (``execution._dispatch``, taichi init, kd-tree
+Heavy backend computation (``execution._dispatch``, quadrants init, kd-tree
 queries) is monkeypatched with lightweight fakes so these tests run fast and
-without a working taichi/MPI environment. They check *contracts* (shapes,
+without a working quadrants/MPI environment. They check *contracts* (shapes,
 dtypes, raised exceptions) rather than numerical correctness -- numerical
 correctness and cross-backend agreement belong in separate test modules.
 
@@ -27,11 +27,11 @@ from smudgy.pointcloud import INTERPOLATION_MODES, STRUCTURES, PointCloud
 
 
 # =============================================================================
-# Fixtures: fake backend so tests don't depend on taichi/MPI/kd-tree internals
+# Fixtures: fake backend so tests don't depend on quadrants/MPI/kd-tree internals
 # =============================================================================
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch):
-    """Stub out execution._dispatch and taichi init.
+    """Stub out execution._dispatch and quadrants init.
 
     Returns shapes consistent with what real backends would produce, so the
     PointCloud-level shape/type contracts can be tested in isolation. The

@@ -63,7 +63,7 @@ def _sample_buffer_size(eta_crit, dim):
     at most ceil(eta_crit) + 1 cells per axis. Particles that don't fit
     (elongated covariant ellipsoids, anisotropic cells) fall back to direct
     per-sample deposition. Capped so the local buffer (B**dim floats) stays
-    small; a compile-time constant so Taichi can keep it in registers/stack.
+    small; a compile-time constant so Quadrants can keep it in registers/stack.
     """
     b = int(np.ceil(eta_crit)) + 1
     return max(1, min(b, {1: 64, 2: 16, 3: 6}[dim]))
@@ -79,7 +79,7 @@ def _as_float32(array):
 def _round_up_stencil(n, bucket=8):
     """Round the stencil size up to the nearest multiple of `bucket`.
     Keeps MAX_STENCIL (a qd.template() arg) taking only a handful of
-    distinct values across a run, so Taichi reuses one compiled kernel
+    distinct values across a run, so Quadrants reuses one compiled kernel
     per bucket instead of JIT-recompiling every time smoothing lengths
     drift by a tiny amount between timesteps.
     """
@@ -2193,7 +2193,7 @@ class KernelPreparation:
     args: tuple  # exact positional args for `kernel`
 
     # -------------------------------------------------------------------
-    # Output arrays (also embedded in `args`; kept here too since Taichi
+    # Output arrays (also embedded in `args`; kept here too since Quadrants
     # fills ndarrays in place -- these are the objects to hand back)
     # -------------------------------------------------------------------
     grid_fields: np.ndarray

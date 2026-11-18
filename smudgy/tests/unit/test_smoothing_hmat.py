@@ -9,9 +9,9 @@ import pytest
 from scipy.spatial import cKDTree
 
 from smudgy.backend.numpy import smoothing as np_smoothing
-from smudgy.backend.quadrants import smoothing as ti_smoothing
+from smudgy.backend.quadrants import smoothing as qd_smoothing
 
-BACKENDS = {"numpy": np_smoothing, "quadrants": ti_smoothing}
+BACKENDS = {"numpy": np_smoothing, "quadrants": qd_smoothing}
 
 
 @pytest.fixture(params=list(BACKENDS))
@@ -230,7 +230,7 @@ def test_eigendecomposition_invariants(backend, dim):
 
 
 # =============================================================================
-# Numpy vs Taichi
+# Numpy vs Quadrants
 # =============================================================================
 
 
@@ -265,7 +265,7 @@ def _knn_cloud(dim, thickness, periodic, n=3000, k=16):
 @pytest.mark.parametrize("periodic", [False, True])
 @pytest.mark.parametrize("volume_preserving", [False, True])
 def test_backends_agree(dim, thickness, periodic, volume_preserving):
-    """Numpy and Taichi agree on H, its axes and (separated) eigenvectors."""
+    """Numpy and Quadrants agree on H, its axes and (separated) eigenvectors."""
     x, idx, w, boxsize, hsml = _knn_cloud(dim, thickness, periodic)
     kwargs = dict(
         query_positions=x,
@@ -277,14 +277,14 @@ def test_backends_agree(dim, thickness, periodic, volume_preserving):
         hsml=hsml if volume_preserving else None,
     )
     H_np, ax_np, V_np = np_smoothing.compute_hmat(**kwargs)
-    H_ti, ax_ti, V_ti = ti_smoothing.compute_hmat(**kwargs)
+    H_qd, ax_qd, V_qd = qd_smoothing.compute_hmat(**kwargs)
 
     # rtol 5e-4: float32 relative coordinates can differ by an ulp between the
     # backends' PBC arithmetic, which the clamped metric amplifies to ~1e-4
-    np.testing.assert_allclose(ax_ti, ax_np, rtol=5e-4)
+    np.testing.assert_allclose(ax_qd, ax_np, rtol=5e-4)
     scale = ax_np[:, :1, np.newaxis]  # largest axis of each tensor
     np.testing.assert_array_less(
-        np.abs(H_ti - H_np), np.broadcast_to(5e-4 * scale + 1e-12, H_np.shape)
+        np.abs(H_qd - H_np), np.broadcast_to(5e-4 * scale + 1e-12, H_np.shape)
     )
 
     # eigenvectors are only unique where their eigenvalue is well separated
@@ -293,7 +293,7 @@ def test_backends_agree(dim, thickness, periodic, volume_preserving):
         sep = np.ones_like(ax_np, dtype=bool)
         sep[:, :-1] &= gaps > 1e-2
         sep[:, 1:] &= gaps > 1e-2
-        diff = np.abs(V_ti - V_np).max(axis=1)
+        diff = np.abs(V_qd - V_np).max(axis=1)
         np.testing.assert_array_less(diff[sep], 1e-3)
     else:
-        np.testing.assert_array_equal(V_ti, V_np)
+        np.testing.assert_array_equal(V_qd, V_np)

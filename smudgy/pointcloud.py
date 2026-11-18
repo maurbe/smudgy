@@ -60,7 +60,7 @@ class PointCloud:
             numpy backend supports interpolation and fixed-grid
             (``adaptive=False``) deposition only.
         **kwargs : dict
-            Forwarded to the Taichi runtime initialization
+            Forwarded to the Quadrants runtime initialization
             (:func:`smudgy.backend.quadrants.init`), e.g. ``arch`` (one of
             ``"cpu"``, ``"gpu"``, ``"cuda"``, ``"vulkan"``, ``"metal"``;
             ``"gpu"`` on first initialization if omitted), ``force=True`` to

@@ -1,4 +1,4 @@
-"""Tests backend consistency for smoothing() across Numpy CPU and Taichi CPU."""
+"""Tests backend consistency for smoothing() across Numpy CPU and Quadrants CPU."""
 
 import numpy as np
 import pytest
@@ -54,11 +54,11 @@ def _smoothing(backend, data, structure, **tensor_options):
 def test_backend_consistency_isotropic(dim, shape):
     """Test consistency between backends for smoothing lengths."""
     data = _generate_dataset(dim, shape)
-    s_numpy, s_taichi = (
+    s_numpy, s_qd = (
         _smoothing(b, data, "isotropic").smoothing_lengths for b in ("numpy", "quadrants")
     )
-    assert s_numpy.shape == s_taichi.shape
-    np.testing.assert_allclose(s_numpy, s_taichi, rtol=1e-4, atol=1e-6)
+    assert s_numpy.shape == s_qd.shape
+    np.testing.assert_allclose(s_numpy, s_qd, rtol=1e-4, atol=1e-6)
 
 
 @pytest.mark.parametrize("dim", DIMS)
@@ -67,32 +67,32 @@ def test_backend_consistency_isotropic(dim, shape):
 def test_backend_consistency_covariant(dim, shape, options):
     """Test consistency between backends for smoothing tensors and their eigensystem."""
     data = _generate_dataset(dim, shape)
-    s_numpy, s_taichi = (
+    s_numpy, s_qd = (
         _smoothing(b, data, "covariant", **TENSOR_OPTIONS[options])
         for b in ("numpy", "quadrants")
     )
 
-    h_numpy, h_taichi = s_numpy.smoothing_tensors, s_taichi.smoothing_tensors
-    l_numpy, l_taichi = (
+    h_numpy, h_qd = s_numpy.smoothing_tensors, s_qd.smoothing_tensors
+    l_numpy, l_qd = (
         s_numpy.smoothing_tensors_eigvals,
-        s_taichi.smoothing_tensors_eigvals,
+        s_qd.smoothing_tensors_eigvals,
     )
-    v_numpy, v_taichi = (
+    v_numpy, v_qd = (
         s_numpy.smoothing_tensors_eigvecs,
-        s_taichi.smoothing_tensors_eigvecs,
+        s_qd.smoothing_tensors_eigvecs,
     )
-    assert h_numpy.shape == h_taichi.shape == (len(data["positions"]), dim, dim)
-    assert l_numpy.shape == l_taichi.shape
-    assert v_numpy.shape == v_taichi.shape
+    assert h_numpy.shape == h_qd.shape == (len(data["positions"]), dim, dim)
+    assert l_numpy.shape == l_qd.shape
+    assert v_numpy.shape == v_qd.shape
 
     # rtol 5e-4: the backends' float32 relative coordinates already differ by
     # an ulp (~1e-5 relative at thin-filament scales), which zeta_max amplifies
     # through the clamped Mahalanobis metric to ~1e-4.
-    np.testing.assert_allclose(l_numpy, l_taichi, rtol=5e-4, atol=1e-7)
+    np.testing.assert_allclose(l_numpy, l_qd, rtol=5e-4, atol=1e-7)
     # H entries relative to each tensor's largest axis: off-diagonal entries
     # are near zero, so a plain rtol would compare float32 noise
     scale = np.broadcast_to(l_numpy[:, :1, np.newaxis], h_numpy.shape)
-    np.testing.assert_array_less(np.abs(h_numpy - h_taichi), 5e-4 * scale + 1e-12)
+    np.testing.assert_array_less(np.abs(h_numpy - h_qd), 5e-4 * scale + 1e-12)
     assert np.all(np.diff(l_numpy, axis=1) <= 0), "eigvals must be descending"
 
     # eigenvectors are only unique where their eigenvalue is well separated
@@ -100,5 +100,5 @@ def test_backend_consistency_covariant(dim, shape, options):
     separated = np.ones_like(l_numpy, dtype=bool)
     separated[:, :-1] &= gaps > 1e-2
     separated[:, 1:] &= gaps > 1e-2
-    v_diff = np.abs(v_numpy - v_taichi).max(axis=1)
+    v_diff = np.abs(v_numpy - v_qd).max(axis=1)
     np.testing.assert_array_less(v_diff[separated], 1e-3)

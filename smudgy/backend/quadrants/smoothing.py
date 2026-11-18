@@ -1,4 +1,4 @@
-"""Smoothing module for smudgy, providing functions to compute smoothing lengths and anisotropic smoothing tensors using Taichi."""
+"""Smoothing module for smudgy, providing functions to compute smoothing lengths and anisotropic smoothing tensors using Quadrants."""
 
 import numpy as np
 import quadrants as qd
@@ -154,7 +154,7 @@ def _compute_hmat_kernel(
                         eigvecs[a, i], eigvecs[a, j] = eigvecs[a, j], eigvecs[a, i]
 
         # Eigenvector orientation convention:
-        # Numpy and Taichi have no convention about the sign of the eigenvectors,
+        # Numpy and Quadrants have no convention about the sign of the eigenvectors,
         # impose a consistent sign convention for comparison with the numpy backend
         # (largest-magnitude component of each eigenvector is positive). H itself is
         # invariant under column sign flips; this only affects eigvecs_out.

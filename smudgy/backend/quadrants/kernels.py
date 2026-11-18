@@ -1,4 +1,4 @@
-"""Taichi implementations of the separable and spherical smoothing kernels.
+"""Quadrants implementations of the separable and spherical smoothing kernels.
 
 Kernels are looked up by name in the ``SEPARABLE_KERNELS`` and
 ``SPHERICAL_KERNELS`` registries; the dimension is a compile-time parameter,
@@ -57,7 +57,7 @@ def prepare_covariant_inputs(
 @qd.func
 def _erf(x: qd.f32) -> qd.f32:
     """Abramowitz & Stegun 7.1.26 approximation, max abs error ~1.5e-7.
-    Taichi has no built-in erf, needed for the Gaussian kernels' F(q).
+    Quadrants has no built-in erf, needed for the Gaussian kernels' F(q).
     """
     sign = 1.0
     if x < 0.0:
@@ -1196,7 +1196,7 @@ def _fibonacci_sphere_points(n: int) -> np.ndarray:
 # --------------------------------------------------------------------------
 # Host-side (numpy) ragged shell-layout builders. These only produce bin
 # boundaries / directions -- no kernel evaluation happens here, so they
-# don't need Taichi scope.
+# don't need Quadrants scope.
 # --------------------------------------------------------------------------
 
 
@@ -1277,7 +1277,7 @@ def _build_shell_layout_3d(
 
 
 # --------------------------------------------------------------------------
-# Taichi kernel: radial integral, computed ONCE per shell (n_q evaluations
+# Quadrants kernel: radial integral, computed ONCE per shell (n_q evaluations
 # total, shared across every direction/angle sampled within that shell).
 # --------------------------------------------------------------------------
 
@@ -1296,7 +1296,7 @@ def _compute_radial_integrals(
 
 
 # --------------------------------------------------------------------------
-# Taichi kernels: populate coords / q / integrals from the precomputed shell
+# Quadrants kernels: populate coords / q / integrals from the precomputed shell
 # layout + radial integrals. No calls to evaluate_integral_fn here.
 # --------------------------------------------------------------------------
 

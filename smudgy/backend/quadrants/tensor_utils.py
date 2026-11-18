@@ -1,4 +1,4 @@
-"""Utilities for tensor operations in Taichi backend."""
+"""Utilities for tensor operations in Quadrants backend."""
 
 import numpy as np
 import quadrants as qd
@@ -50,8 +50,8 @@ def _project_2d_kernel(
                 eigvecs[a, 0], eigvecs[a, 1] = eigvecs[a, 1], eigvecs[a, 0]
 
         # Eigenvector orientation convention:
-        # Numpy and Taichi have no convention about the sign of the eigenvectors,
-        # impose a consistent sign convention for comparison with Taichi backend
+        # Numpy and Quadrants have no convention about the sign of the eigenvectors,
+        # impose a consistent sign convention for comparison with Quadrants backend
         # (largest-magnitude component of each eigenvector is positive).
         for col in qd.static(range(2)):
             max_abs = 0.0

@@ -1,6 +1,6 @@
-"""Double-precision ``erf`` for Taichi (port of the fdlibm algorithm).
+"""Double-precision ``erf`` for Quadrants (port of the fdlibm algorithm).
 
-Accurate to about 1 ulp in ``qd.f64``; Taichi itself provides no ``erf``.
+Accurate to about 1 ulp in ``qd.f64``; Quadrants itself provides no ``erf``.
 """
 
 import quadrants as qd

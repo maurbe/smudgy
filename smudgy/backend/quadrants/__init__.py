@@ -13,7 +13,7 @@ _ARCH_MAP = {
 
 
 def init(arch=None, force=False, **kwargs):
-    """Initialize the Taichi runtime used by smudgy (safe to call repeatedly).
+    """Initialize the Quadrants runtime used by smudgy (safe to call repeatedly).
 
     Parameters
     ----------
@@ -36,7 +36,7 @@ def init(arch=None, force=False, **kwargs):
 
     if arch not in _ARCH_MAP:
         raise ValueError(
-            f"Unknown Taichi arch: {arch!r}. Expected one of {sorted(_ARCH_MAP)}"
+            f"Unknown Quadrants arch: {arch!r}. Expected one of {sorted(_ARCH_MAP)}"
         )
 
     config = {"arch": arch, **kwargs}
@@ -49,5 +49,5 @@ def init(arch=None, force=False, **kwargs):
 
 
 def current_config():
-    """Return the configuration the Taichi runtime was last initialized with."""
+    """Return the configuration the Quadrants runtime was last initialized with."""
     return _current_config
