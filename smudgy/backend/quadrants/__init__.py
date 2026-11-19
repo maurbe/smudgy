@@ -1,3 +1,5 @@
+"""Quadrants runtime set-up for smudgy's Quadrants backend."""
+
 import os
 import warnings
 
@@ -80,11 +82,6 @@ def ensure_initialized(arch="cpu"):
     """
     if not _initialized:
         init(arch=arch)
-
-
-def current_config():
-    """Return the configuration the Quadrants runtime was last initialized with."""
-    return _current_config
 
 
 # Quadrants indexes ndarrays with int32: element offsets wrap above 2**31 - 1,

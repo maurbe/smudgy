@@ -54,20 +54,11 @@ def prepare_isotropic_inputs(
 
 
 @qd.func
-def prepare_covariant_inputs(
-    r_vec, H, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
-):
-    return covariant_inputs_from_inverse(
-        r_vec, H.inverse(), 1.0 / H.determinant(), dim, sigma_val, eps
-    )
-
-
-@qd.func
 def covariant_inputs_from_inverse(
     r_vec, H_inv, inv_det: qd.f32, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
-    """As :func:`prepare_covariant_inputs`, with H^-1 and 1/det(H) precomputed
-    (once per particle instead of once per neighbour pair)."""
+    """Kernel coordinate q = |H^-1 r|, its gradient and the prefactor
+    sigma / det(H), from the precomputed H^-1 and 1/det(H) of one particle."""
     xi = H_inv @ r_vec
     q = xi.norm()
     scale = sigma_val * inv_det
@@ -1230,13 +1221,16 @@ def _compute_radial_integrals(
 
 
 # --------------------------------------------------------------------------
-# Quadrants kernels: populate coords / q / integrals from the precomputed shell
-# layout + radial integrals. No calls to evaluate_integral_fn here.
+# Quadrants kernel: sample coordinates and weights from the shell layout and
+# the radial integrals. `layout` is the per-sample sign (1D), angle (2D) or
+# unit direction (3D); every sample of a shell carries an equal share of the
+# shell's mass sigma * (angular measure) * radial integral.
 # --------------------------------------------------------------------------
+_ANGULAR_MEASURE = {1: 2.0, 2: 2.0 * pi, 3: 4.0 * pi}
 
 
 @qd.kernel
-def _build_kernel_sample_grid_1d(
+def _build_kernel_sample_grid_kernel(
     sigma_fn: qd.template(),
     dim: qd.template(),
     n_pts: qd.i32,
@@ -1245,96 +1239,25 @@ def _build_kernel_sample_grid_1d(
     shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
     radial_integral_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
     n_points_per_shell_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
-    sign_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 1)
-    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    layout: qd.types.ndarray(dtype=qd.f32),
+    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, dim)
     integrals_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     sig = sigma_fn(dim)
+    measure = qd.static(_ANGULAR_MEASURE[dim])
     for i in range(n_pts):
         iq = shell_id_in[i]
-        q0, q1 = shell_q0[iq], shell_q1[iq]
-        q = 0.5 * (q0 + q1)
-
-        coords_out[i, 0] = sign_in[i] * q
-        q_out[i] = q
-        # evaluate_integral_fn is a pure radial integral; the angular
-        # measure for a 1D "shell" (two points, +/-q) is 2. sigma * (2 *
-        # radial_integral) is the shell's total mass, split evenly across
-        # this shell's points (spherically symmetric -> every point in a
-        # shell carries an equal fraction of that shell's mass).
+        q = 0.5 * (shell_q0[iq] + shell_q1[iq])
+        if qd.static(dim == 1):
+            coords_out[i, 0] = layout[i] * q
+        elif qd.static(dim == 2):
+            coords_out[i, 0] = q * qd.cos(layout[i])
+            coords_out[i, 1] = q * qd.sin(layout[i])
+        else:
+            for a in qd.static(range(3)):
+                coords_out[i, a] = q * layout[i, a]
         integrals_out[i] = (
-            sig * 2.0 * radial_integral_in[iq] / qd.f32(n_points_per_shell_in[iq])
-        )
-
-
-@qd.kernel
-def _build_kernel_sample_grid_2d(
-    sigma_fn: qd.template(),
-    dim: qd.template(),
-    n_pts: qd.i32,
-    shell_id_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
-    shell_q0: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    radial_integral_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    n_points_per_shell_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
-    theta_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 2)
-    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    integrals_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
-):
-    sig = sigma_fn(dim)
-    for i in range(n_pts):
-        iq = shell_id_in[i]
-        q0, q1 = shell_q0[iq], shell_q1[iq]
-        q = 0.5 * (q0 + q1)
-        theta = theta_in[i]
-
-        coords_out[i, 0] = q * qd.cos(theta)
-        coords_out[i, 1] = q * qd.sin(theta)
-        q_out[i] = q
-        # evaluate_integral_fn is a pure radial integral; the angular
-        # measure for a full 2D shell (circle) is 2*pi.
-        integrals_out[i] = (
-            sig
-            * (2.0 * pi)
-            * radial_integral_in[iq]
-            / qd.f32(n_points_per_shell_in[iq])
-        )
-
-
-@qd.kernel
-def _build_kernel_sample_grid_3d(
-    sigma_fn: qd.template(),
-    dim: qd.template(),
-    n_pts: qd.i32,
-    shell_id_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
-    shell_q0: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    shell_q1: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    radial_integral_in: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    n_points_per_shell_in: qd.types.ndarray(dtype=qd.i32, ndim=1),
-    dirs_in: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 3) unit vectors
-    coords_out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (n_pts, 3)
-    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    integrals_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
-):
-    sig = sigma_fn(dim)
-    for i in range(n_pts):
-        iq = shell_id_in[i]
-        q0, q1 = shell_q0[iq], shell_q1[iq]
-        q = 0.5 * (q0 + q1)
-
-        coords_out[i, 0] = q * dirs_in[i, 0]
-        coords_out[i, 1] = q * dirs_in[i, 1]
-        coords_out[i, 2] = q * dirs_in[i, 2]
-        q_out[i] = q
-        # evaluate_integral_fn is a pure radial integral; the angular
-        # measure for a full 3D shell (sphere) is 4*pi.
-        integrals_out[i] = (
-            sig
-            * (4.0 * pi)
-            * radial_integral_in[iq]
-            / qd.f32(n_points_per_shell_in[iq])
+            sig * measure * radial_integral_in[iq] / qd.f32(n_points_per_shell_in[iq])
         )
 
 
@@ -1370,9 +1293,8 @@ def build_kernel_sample_grid(
     dict
         Read-only, cached table with keys ``"dim"``, ``"count"`` (number of
         samples), ``"n_q"`` (number of radial shells), ``"coords"`` (sample
-        coordinates in units of ``h``, shape (count, dim)), ``"q"`` (radial
-        distances, shape (count,)) and ``"integrals"`` (integral weight of each
-        sample, summing to unity).
+        coordinates in units of ``h``, shape (count, dim)) and ``"integrals"``
+        (integral weight of each sample, summing to unity).
     """
     return dict(
         _build_kernel_sample_grid_cached(
@@ -1394,100 +1316,40 @@ def _build_kernel_sample_grid_cached(
         raise ValueError("build_kernel_sample_grid supports only dim = 1, 2 or 3")
 
     kspec = create_spherical_kernel(kernel_name)
-    support = kspec.support  # kernel's own cutoff in q = r/h units
+    layout_fn = {1: _build_shell_layout_1d, 2: _build_shell_layout_2d,
+                 3: _build_shell_layout_3d}[dim]
+    n_q, shell_q0, shell_q1, shell_id, layout, n_points_per_shell = layout_fn(
+        kspec.support, eta_crit, nyquist_factor
+    )
+    count = shell_id.shape[0]
+    radial_integral = np.zeros(n_q, dtype=np.float32)
+    _compute_radial_integrals(
+        kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
+    )
 
-    if dim == 1:
-        n_q, shell_q0, shell_q1, shell_id, sign, n_points_per_shell = (
-            _build_shell_layout_1d(support, eta_crit, nyquist_factor)
-        )
-        count = shell_id.shape[0]
-        radial_integral = np.zeros(n_q, dtype=np.float32)
-        _compute_radial_integrals(
-            kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
-        )
+    coords = np.zeros((count, dim), dtype=np.float32)
+    integrals = np.zeros(count, dtype=np.float32)
+    _build_kernel_sample_grid_kernel(
+        kspec.sigma,
+        dim,
+        count,
+        shell_id,
+        shell_q0,
+        shell_q1,
+        radial_integral,
+        n_points_per_shell,
+        layout,
+        coords,
+        integrals,
+    )
 
-        coords = np.zeros((count, 1), dtype=np.float32)
-        q = np.zeros(count, dtype=np.float32)
-        integrals = np.zeros(count, dtype=np.float32)
-        _build_kernel_sample_grid_1d(
-            kspec.sigma,
-            dim,
-            count,
-            shell_id,
-            shell_q0,
-            shell_q1,
-            radial_integral,
-            n_points_per_shell,
-            sign,
-            coords,
-            q,
-            integrals,
-        )
-
-    elif dim == 2:
-        n_q, shell_q0, shell_q1, shell_id, theta, n_points_per_shell = (
-            _build_shell_layout_2d(support, eta_crit, nyquist_factor)
-        )
-        count = shell_id.shape[0]
-        radial_integral = np.zeros(n_q, dtype=np.float32)
-        _compute_radial_integrals(
-            kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
-        )
-
-        coords = np.zeros((count, 2), dtype=np.float32)
-        q = np.zeros(count, dtype=np.float32)
-        integrals = np.zeros(count, dtype=np.float32)
-        _build_kernel_sample_grid_2d(
-            kspec.sigma,
-            dim,
-            count,
-            shell_id,
-            shell_q0,
-            shell_q1,
-            radial_integral,
-            n_points_per_shell,
-            theta,
-            coords,
-            q,
-            integrals,
-        )
-
-    else:  # dim == 3
-        n_q, shell_q0, shell_q1, shell_id, dirs, n_points_per_shell = (
-            _build_shell_layout_3d(support, eta_crit, nyquist_factor)
-        )
-        count = shell_id.shape[0]
-        radial_integral = np.zeros(n_q, dtype=np.float32)
-        _compute_radial_integrals(
-            kspec.evaluate_integral, dim, n_q, shell_q0, shell_q1, radial_integral
-        )
-
-        coords = np.zeros((count, 3), dtype=np.float32)
-        q = np.zeros(count, dtype=np.float32)
-        integrals = np.zeros(count, dtype=np.float32)
-        _build_kernel_sample_grid_3d(
-            kspec.sigma,
-            dim,
-            count,
-            shell_id,
-            shell_q0,
-            shell_q1,
-            radial_integral,
-            n_points_per_shell,
-            dirs,
-            coords,
-            q,
-            integrals,
-        )
-
-    for arr in (coords, q, integrals):
+    for arr in (coords, integrals):
         arr.flags.writeable = False
     return {
         "dim": dim,
         "count": count,
         "n_q": n_q,
         "coords": coords,
-        "q": q,
         "integrals": integrals,
     }
 
@@ -1559,7 +1421,7 @@ def compute_total_integral_spherical(
 
 
 @qd.kernel
-def _sample_spherical_1d(
+def _sample_profile_1d(
     evaluate_fn: qd.template(),
     sigma_fn: qd.template(),
     support: qd.f32,
@@ -1568,32 +1430,13 @@ def _sample_spherical_1d(
     q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
     values_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
+    """sigma * W(|q|) on `num_samples` points spanning [-support, support)."""
     dq = 2.0 * support / num_samples
     sig = sigma_fn(dim)
     for i in range(num_samples):
         q_current = -support + i * dq
-        value = sig * evaluate_fn(qd.abs(q_current), dim)
         q_out[i] = q_current
-        values_out[i] = value
-
-
-@qd.kernel
-def _sample_separable_1d(
-    evaluate_1d_fn: qd.template(),
-    sigma_fn: qd.template(),
-    support: qd.f32,
-    dim: qd.template(),
-    num_samples: qd.i32,
-    q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    values_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
-):
-    dq = 2.0 * support / num_samples
-    sig = sigma_fn(dim)
-    for i in range(num_samples):
-        q_current = -support + i * dq
-        value = sig * evaluate_1d_fn(qd.abs(q_current), dim)
-        q_out[i] = q_current
-        values_out[i] = value
+        values_out[i] = sig * evaluate_fn(qd.abs(q_current), dim)
 
 
 def get_spherical_kernel_values_1D(kernel_name: str):
@@ -1618,7 +1461,7 @@ def get_spherical_kernel_values_1D(kernel_name: str):
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)
     values = np.zeros(num_samples, dtype=np.float32)
-    _sample_spherical_1d(
+    _sample_profile_1d(
         kspec.evaluate, kspec.sigma, kspec.support, 1, num_samples, q, values
     )
     return q, values
@@ -1646,7 +1489,7 @@ def get_separable_kernel_values_1D(kernel_name: str):
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)
     values = np.zeros(num_samples, dtype=np.float32)
-    _sample_separable_1d(
+    _sample_profile_1d(
         kspec.evaluate_1d, kspec.sigma, kspec.support, 1, num_samples, q, values
     )
     return q, values

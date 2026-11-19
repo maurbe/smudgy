@@ -1,4 +1,4 @@
-"""k-d tree neighbour search and periodic coordinate utilities."""
+"""k-d tree neighbour search and periodic coordinate differences."""
 
 from __future__ import annotations
 
@@ -67,32 +67,6 @@ def query_kdtree(
     return tree.query(points, k=k, workers=kdtree_workers())
 
 
-def shift_coordinates(coordinates: npt.ArrayLike) -> FloatArray:
-    """Shift coordinates so the minimum per-axis value is at zero.
-
-    Parameters
-    ----------
-    coordinates
-            Array of shape ``(N, D)`` with particle coordinates.
-
-    Returns
-    -------
-    numpy.ndarray
-            Shifted coordinates with the same shape as ``coordinates``.
-
-    Raises
-    ------
-    AssertionError
-            If the input array is not 2D.
-
-    """
-    coordinates_array = np.asarray(coordinates)
-    assert (
-        coordinates_array.ndim == 2
-    ), "Input coordinates must be a 2D array of shape (N, D)"
-    return coordinates_array - coordinates_array.min(axis=0)
-
-
 def coordinate_difference_with_pbc(
     x: npt.ArrayLike, y: npt.ArrayLike, boxsize: BoxInput
 ) -> FloatArray:
@@ -115,16 +89,14 @@ def coordinate_difference_with_pbc(
 
     Raises
     ------
-    AssertionError
-            If the input coordinate arrays do not have the same spatial dimension.
-            If ``boxsize`` is an array, if it is not 1D or if its length does not match the coordinate dimension.
+    ValueError
+            If the coordinate arrays have different spatial dimensions, or
+            ``boxsize`` is neither a scalar nor of shape ``(D,)``.
 
     """
-    shape_x = x.shape
-    shape_y = y.shape
-    assert (
-        shape_x[-1] == shape_y[-1]
-    ), "Input coordinate arrays must have the same spatial dimension"
+    shape_x = np.shape(x)
+    if shape_x[-1] != np.shape(y)[-1]:
+        raise ValueError("Input coordinate arrays must have the same spatial dimension")
 
     # compute differences
     coordinate_differences = np.asarray(x) - np.asarray(y)
@@ -134,14 +106,11 @@ def coordinate_difference_with_pbc(
         return coordinate_differences
 
     # prepare boxsize array for broadcasting
-    if np.isscalar(boxsize):
-        box_arr = np.array([boxsize] * shape_x[-1])
-    else:
-        assert np.asarray(boxsize).ndim == 1, "'boxsize' must be a scalar or 1D array"
-        assert (
-            len(boxsize) == shape_x[-1]
-        ), "Length of 'boxsize' must match coordinate dimension"
-        box_arr = np.asarray(boxsize)
+    box_arr = np.asarray(boxsize)
+    if box_arr.shape not in ((), (shape_x[-1],)):
+        raise ValueError(
+            f"'boxsize' must be a scalar or have shape ({shape_x[-1]},), got {box_arr.shape}"
+        )
 
     half_box = 0.5 * box_arr
     return (coordinate_differences + half_box) % box_arr - half_box
