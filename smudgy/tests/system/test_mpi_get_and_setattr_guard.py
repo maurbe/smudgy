@@ -25,6 +25,8 @@ import warnings
 import numpy as np
 import pytest
 
+from _mpi_launch import MPIEXEC, mpi_env
+
 
 def _run_get_under_mpi(out_path):
     from mpi4py import MPI
@@ -167,8 +169,9 @@ def _run_under_mpi():
 
 def _mpiexec(n_ranks, args):
     result = subprocess.run(
-        ["mpiexec", "-n", str(n_ranks), sys.executable, __file__, *args],
+        [MPIEXEC, "-n", str(n_ranks), sys.executable, __file__, *args],
         capture_output=True,
+        env=mpi_env(),
         text=True,
     )
     assert result.returncode == 0, result.stderr

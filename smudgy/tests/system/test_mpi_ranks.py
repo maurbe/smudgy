@@ -10,6 +10,8 @@ Run via pytest (the test spawns mpiexec itself):
 import subprocess
 import sys
 
+from _mpi_launch import MPIEXEC, mpi_env
+
 
 def _run_under_mpi():
     from mpi4py import MPI
@@ -22,8 +24,9 @@ def _run_under_mpi():
 
 def test_two_ranks_visible():
     result = subprocess.run(
-        ["mpiexec", "-n", "2", sys.executable, __file__],
+        [MPIEXEC, "-n", "2", sys.executable, __file__],
         capture_output=True,
+        env=mpi_env(),
         text=True,
     )
     assert result.returncode == 0, result.stderr

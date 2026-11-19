@@ -24,6 +24,8 @@ import sys
 import numpy as np
 import pytest
 
+from _mpi_launch import MPIEXEC, mpi_env
+
 
 def _run_pipeline_under_mpi(out_path, periodic):
     from mpi4py import MPI
@@ -191,8 +193,9 @@ def _run_under_mpi():
 def _mpiexec(n_ranks, args, timeout=90):
     try:
         result = subprocess.run(
-            ["mpiexec", "-n", str(n_ranks), sys.executable, __file__, *args],
+            [MPIEXEC, "-n", str(n_ranks), sys.executable, __file__, *args],
             capture_output=True,
+            env=mpi_env(),
             text=True,
             timeout=timeout,
         )
