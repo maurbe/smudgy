@@ -2230,10 +2230,12 @@ def _prepare_separable(
     cell_size_invs = tuple(gridnums[d] / boxsizes[d] for d in range(DIM))
     max_support = min(0.5 * boxsizes[d] / support for d in range(DIM))
 
+    # widest per-axis stencil; an empty particle set (e.g. an MPI rank
+    # without particles inside `extent`) still needs a valid template value
+    h_max = particle_hsml.max(axis=0) if particle_hsml.shape[0] else np.zeros(DIM)
     max_stencil = _round_up_stencil(
         max(
-            int(np.ceil(2 * support * particle_hsml[:, d].max() * cell_size_invs[d]))
-            + 2
+            int(np.ceil(2 * support * h_max[d] * cell_size_invs[d])) + 2
             for d in range(DIM)
         )
     )

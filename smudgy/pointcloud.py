@@ -1,5 +1,6 @@
 """Core PointCloud class for particle-based computations."""
 
+import operator
 import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
@@ -16,6 +17,7 @@ from .backend._common import (  # noqa: F401  (INTERPOLATION_MODES re-exported)
     check_interpolation_mode,
     check_particle_structure,
 )
+from .backend.numpy.tensor_utils import _fix_eigvec_sign
 from .backend.quadrants import init as quadrants_init
 from .decomposition import (
     QueryRouting,
@@ -191,6 +193,7 @@ class PointCloud:
         self.smoothing = SmoothingInfo()
         self.ghosts = GhostInfo()
         self.query_routing = QueryRouting()
+        self._fields = set()  # names added via add_fields
 
         # Verbose output after completed initialization
         if self.verbose and self.rank == 0:
@@ -412,6 +415,10 @@ class PointCloud:
             )
         if local_arr is None:
             raise AttributeError(f"'{name}' has not been computed yet.")
+        if not isinstance(local_arr, np.ndarray):
+            raise TypeError(
+                f"'{name}' is a {type(local_arr).__name__}, not a per-particle array."
+            )
         return self.gather_particles(local_arr, root=root)
 
     def _set_property(self, name: str, value: Any) -> None:
@@ -429,10 +436,7 @@ class PointCloud:
                     f"'kernel_name' must be a string but found {type(value)}"
                 )
         elif name == "num_neighbors":
-            if not isinstance(value, int):
-                raise TypeError(
-                    f"'num_neighbors' must be an int but found {type(value)}"
-                )
+            value = self._as_int(value, "num_neighbors")
             if value <= 0:
                 raise ValueError(
                     f"'num_neighbors' must be a positive integer but found {value}"
@@ -444,7 +448,7 @@ class PointCloud:
 
         setattr(self, name, value)
 
-        if self.verbose:
+        if self.verbose and self.rank == 0:
             message = {
                 "structure": f"[smudgy] Set structure to '{value}'",
                 "kernel_name": f"[smudgy] Set kernel to '{value}'",
@@ -531,6 +535,13 @@ class PointCloud:
             self._combined_cache = cache
         return cache[1]
 
+    def _reset_densities(self) -> None:
+        """Drop density estimates; called whenever the smoothing data changes."""
+        self.smoothing.density_isotropic = None
+        self.smoothing.density_covariant = None
+        self.smoothing.kernel_name = None
+        self.smoothing.density_kernel = {}
+
     def _check_density_computed(self, structure: Structure) -> None:
         """Verify that density has been computed for the requested structure."""
         field = (
@@ -538,7 +549,7 @@ class PointCloud:
             if structure == "isotropic"
             else self.smoothing.density_covariant
         )
-        if field is None:
+        if field is None or structure not in self.smoothing.density_kernel:
             raise AttributeError(
                 f"Particle density has not been computed yet for structure '{structure}'; call 'compute_density' with 'structure={structure}' first."
             )
@@ -553,6 +564,12 @@ class PointCloud:
         if getattr(self.smoothing, attr_map[structure]) is None:
             raise AttributeError(
                 f"Smoothing {attr_map[structure]} has not been computed yet for structure '{structure}'; call 'compute_smoothing' with 'structure={structure}' first."
+            )
+        if not self.smoothing.at_particles:
+            raise ValueError(
+                "The current smoothing data belongs to the query positions of "
+                "the last 'compute_smoothing(query_positions=...)' call; call "
+                "'compute_smoothing()' without query positions first."
             )
 
     def _check_shape(self, arr: npt.NDArray[Any], name: str) -> None:
@@ -584,32 +601,12 @@ class PointCloud:
 
         """
         check_interpolation_mode(mode, self.dim)
-        # map which fields are vector fields
-        field_types = np.array([size > 1 for size in field_sizes], dtype=np.bool_)
-        if mode == "gradient":
-            # Gradients work on both scalars and vectors, but we compute per component
-            pass
-        elif mode == "divergence":
-            # Divergence requires vector fields with exactly D components (spatial dimension)
-            for i, (is_vec, size) in enumerate(zip(field_types, field_sizes)):
-                if not is_vec:
-                    raise ValueError(
-                        f"divergence requires vector fields (≥2 components), but field {i} has {size} component(s)"
-                    )
+        if mode in ("divergence", "curl"):
+            for i, size in enumerate(field_sizes):
                 if size != self.dim:
                     raise ValueError(
-                        f"divergence requires vector fields with {self.dim} components (spatial dimension), but field {i} has {size} component(s)"
-                    )
-        elif mode == "curl":
-            # Curl requires vector fields with exactly D components (spatial dimension)
-            for i, (is_vec, size) in enumerate(zip(field_types, field_sizes)):
-                if not is_vec:
-                    raise ValueError(
-                        f"curl requires vector fields (≥2 components), but field {i} has {size} component(s)"
-                    )
-                if size != self.dim:
-                    raise ValueError(
-                        f"curl requires vector fields with {self.dim} components (spatial dimension), but field {i} has {size} component(s)"
+                        f"{mode} requires vector fields with {self.dim} components "
+                        f"(the spatial dimension), but field {i} has {size} component(s)"
                     )
 
     # =============================================================================
@@ -641,10 +638,22 @@ class PointCloud:
         if num_neighbors is None:
             self._check_property("num_neighbors")
             return self.num_neighbors
-        assert (
-            isinstance(num_neighbors, int) and num_neighbors > 0
-        ), f"'num_neighbors' must be a positive integer but found {num_neighbors}"
+        num_neighbors = self._as_int(num_neighbors, "num_neighbors")
+        if num_neighbors <= 0:
+            raise ValueError(
+                f"'num_neighbors' must be a positive integer but found {num_neighbors}"
+            )
         return num_neighbors
+
+    @staticmethod
+    def _as_int(value: Any, name: str) -> int:
+        """`value` as a Python int; accepts any integer type (e.g. np.int64)."""
+        if isinstance(value, bool):
+            raise TypeError(f"'{name}' must be an int but found {type(value)}")
+        try:
+            return operator.index(value)
+        except TypeError:
+            raise TypeError(f"'{name}' must be an int but found {type(value)}") from None
 
     def _resolve_fields(
         self,
@@ -788,16 +797,16 @@ class PointCloud:
             The current instance for method chaining.
 
         """
-        if structure:
+        if structure is not None:
             self._set_property("structure", structure)
 
-        if kernel_name:
+        if kernel_name is not None:
             self._set_property("kernel_name", kernel_name)
 
-        if num_neighbors:
+        if num_neighbors is not None:
             self._set_property("num_neighbors", num_neighbors)
 
-        if backend:
+        if backend is not None:
             self.set_backend(backend, **kwargs)
 
         return self
@@ -809,6 +818,7 @@ class PointCloud:
         num_neighbors_temp: int,
         structure_temp: Structure,
         tensor_options: dict,
+        at_particles: bool,
     ) -> None:
         """Shared body of `compute_smoothing()`'s two branches: particle
         positions (`ghost_info` is `self.ghosts`, from `find_neighbors()`)
@@ -868,6 +878,8 @@ class PointCloud:
         # the arbitrary-query-position case above).
         self.smoothing.ghost_positions = ghost_info.ghost_positions
         self.smoothing.ghost_weights = ghost_info.ghost_weights
+        self.smoothing.at_particles = at_particles
+        self._reset_densities()
         self._check_neighbors(nn_inds_local, n_valid=combined_positions.shape[0])
 
     def compute_smoothing(
@@ -887,9 +899,9 @@ class PointCloud:
             Positions where smoothing is evaluated, shape (M, D); only read
             on rank 0. If None, uses the particle positions. Note that
             passing query positions *replaces* ``self.smoothing`` with data
-            for those (routed, rank-local) query points; call this method
-            again without ``query_positions`` before :meth:`compute_density`,
-            :meth:`interpolate` or :meth:`deposit`.
+            for those (routed, rank-local) query points; :meth:`compute_density`,
+            :meth:`interpolate` and :meth:`deposit` then raise until this
+            method is called again without ``query_positions``.
         num_neighbors : int, optional
             Number of neighbors for smoothing length computation. Must match
             the value :meth:`find_neighbors` was last called with.
@@ -974,6 +986,7 @@ class PointCloud:
                 num_neighbors_temp,
                 structure_temp,
                 tensor_options,
+                at_particles=True,
             )
             return
 
@@ -1008,6 +1021,7 @@ class PointCloud:
             num_neighbors_temp,
             structure_temp,
             tensor_options,
+            at_particles=False,
         )
 
     def compute_density(
@@ -1047,6 +1061,12 @@ class PointCloud:
         check_particle_structure(st, "density")
         kn = self._resolve_kernel(kernel_name)
         self._check_smoothing_computed(st)
+        if self.smoothing.nn_inds is None:
+            raise ValueError(
+                "No neighbor data for the density estimate: smoothing data set "
+                "via 'set_smoothing' can only be used for 'deposit'. Call "
+                "'compute_smoothing' first."
+            )
 
         if self.verbose and self.rank == 0:
             print(f"[smudgy] Computing density using {st} '{kn}' kernel")
@@ -1085,6 +1105,7 @@ class PointCloud:
         )
 
         self.smoothing.kernel_name = kn
+        self.smoothing.density_kernel[st] = kn
 
         if st == "covariant":
             self.smoothing.density_covariant = density
@@ -1102,31 +1123,39 @@ class PointCloud:
         Parameters
         ----------
         names : str or list of str
-            Name(s) of the field(s) to add.
+            Name(s) of the field(s) to add. Must not collide with an existing
+            PointCloud attribute; re-adding a field overwrites it.
         values : array_like or list of array_like
             Field values in the original particle order, each of shape (N,)
             or (N, num_components) with N the *global* particle count. Only
-            read on rank 0.
+            read on rank 0 (other ranks may pass None).
         """
-        # --- Case 1: multiple fields ---
-        if isinstance(names, (list, tuple)) or isinstance(values, (list, tuple)):
-            if not (
-                isinstance(names, (list, tuple)) and isinstance(values, (list, tuple))
+        # Several fields: decided by `names` alone (identical on every rank);
+        # `values` is only checked on rank 0, where it is read.
+        if isinstance(names, (list, tuple)):
+            error_msg = None
+            if self.rank == 0 and (
+                not isinstance(values, (list, tuple)) or len(values) != len(names)
             ):
-                raise ValueError(
-                    "If passing multiple fields, both 'names' and 'values' must be lists/tuples."
+                error_msg = (
+                    "For several fields, 'values' must be a list/tuple with one "
+                    "array per name."
                 )
-
-            if len(names) != len(values):
-                raise ValueError("'names' and 'values' must have the same length.")
-
-            for name, val in zip(names, values):
-                self.add_fields(name, val)  # recursive call
-
+            error_msg = execution._bcast(self.comm, error_msg)
+            if error_msg is not None:
+                raise ValueError(error_msg)
+            for i, name in enumerate(names):
+                self.add_fields(name, values[i] if self.rank == 0 else None)
             return
 
-        # --- Case 2: single field ---
         name = names
+        if not isinstance(name, str):
+            raise TypeError(f"Field names must be strings, got {type(name).__name__}.")
+        if hasattr(self, name) and name not in self._fields:
+            raise ValueError(
+                f"'{name}' is an existing PointCloud attribute and cannot be "
+                "used as a field name."
+            )
         # caller-supplied field values are only authoritative on rank 0.
         # Shape validated against the GLOBAL count (not self.positions.
         # shape[0], which is local) here, before any scattering -- and the
@@ -1164,6 +1193,7 @@ class PointCloud:
             print(f"Overwriting existing attribute '{name}' on PointCloud instance.")
 
         setattr(self, name, values_local)
+        self._fields.add(name)
 
     def delete_fields(self, names: str | list[str]) -> None:
         """Delete one or multiple custom fields from the PointCloud instance.
@@ -1183,12 +1213,11 @@ class PointCloud:
         # --- Case 2: single field ---
         name = names
 
-        if hasattr(self, name):
+        if name in self._fields:
             delattr(self, name)
-        else:
-            print(
-                f"No attribute named '{name}' found on PointCloud instance to delete."
-            )
+            self._fields.discard(name)
+        elif self.rank == 0:
+            print(f"No field named '{name}' found on PointCloud instance to delete.")
 
     def set_smoothing(
         self,
@@ -1218,30 +1247,53 @@ class PointCloud:
             Smoothing tensors, shape (N_local, D, D).
         smoothing_tensors_eigvals : npt.ArrayLike, optional
             Eigenvalues (principal smoothing lengths) of the smoothing
-            tensors, shape (N_local, D).
+            tensors, shape (N_local, D). Computed from ``smoothing_tensors``
+            if omitted.
         smoothing_tensors_eigvecs : npt.ArrayLike, optional
             Eigenvectors (principal axes, as columns) of the smoothing
-            tensors, shape (N_local, D, D).
+            tensors, shape (N_local, D, D). Computed from
+            ``smoothing_tensors`` if omitted.
+
+        Notes
+        -----
+        Existing density estimates are discarded. The values carry no
+        neighbor lists, so they can be used by :meth:`deposit` but not by
+        :meth:`compute_density`.
 
         """
         if smoothing_lengths is not None:
-            assert structure in (
-                "separable",
-                "isotropic",
-            ), "'structure' must be 'separable' or 'isotropic' when providing 'smoothing_lengths'"
+            if structure not in ("separable", "isotropic"):
+                raise ValueError(
+                    "'structure' must be 'separable' or 'isotropic' when providing "
+                    "'smoothing_lengths'"
+                )
             self._check_shape(np.asarray(smoothing_lengths), "smoothing_lengths")
             self.smoothing.smoothing_lengths = np.asarray(
                 smoothing_lengths, dtype=np.float32
             )
 
         if smoothing_tensors is not None:
-            assert (
-                structure == "covariant"
-            ), "'structure' must be 'covariant' when providing 'smoothing_tensors'"
-            self._check_shape(np.asarray(smoothing_tensors), "smoothing_tensors")
-            self.smoothing.smoothing_tensors = np.asarray(
-                smoothing_tensors, dtype=np.float32
-            )
+            if structure != "covariant":
+                raise ValueError(
+                    "'structure' must be 'covariant' when providing 'smoothing_tensors'"
+                )
+            tensors = np.asarray(smoothing_tensors, dtype=np.float32)
+            self._check_shape(tensors, "smoothing_tensors")
+            if tensors.shape[1:] != (self.dim, self.dim):
+                raise ValueError(
+                    f"'smoothing_tensors' must have shape (N, {self.dim}, {self.dim}), "
+                    f"got {tensors.shape}"
+                )
+            self.smoothing.smoothing_tensors = tensors
+            if smoothing_tensors_eigvals is None or smoothing_tensors_eigvecs is None:
+                # deposition needs the principal axes; same convention as
+                # compute_smoothing (descending, fixed eigenvector sign)
+                vals, vecs = np.linalg.eigh(tensors.astype(np.float64))
+                smoothing_tensors_eigvals = vals[:, ::-1]
+                smoothing_tensors_eigvecs = _fix_eigvec_sign(vecs[:, :, ::-1])
+
+        self.smoothing.at_particles = True
+        self._reset_densities()
 
         if smoothing_tensors_eigvals is not None:
             self._check_shape(
@@ -1259,7 +1311,7 @@ class PointCloud:
                 smoothing_tensors_eigvecs, dtype=np.float32
             )
 
-    def _print_interpolation(self, mode, where, structure):
+    def _print_interpolation(self, mode, where, structure, kernel_name):
         """Verbose rank-0 message shared by both interpolate() branches."""
         if self.verbose and self.rank == 0:
             what = {
@@ -1270,7 +1322,7 @@ class PointCloud:
             }[mode]
             print(
                 f"[smudgy] Interpolating {what} at {where} using {structure} "
-                f"'{self.smoothing.kernel_name}' kernel"
+                f"'{kernel_name}' kernel"
             )
 
     def _prepare_deposition_smoothing(
@@ -1384,7 +1436,7 @@ class PointCloud:
         return execution._dispatch(
             "interpolate",
             backend=self.backend,
-            kernel_name=self.smoothing.kernel_name,
+            kernel_name=self.smoothing.density_kernel[structure_temp],
             dim=self.dim,
             query_positions=query_positions_local,
             positions=combined_positions,
@@ -1507,15 +1559,13 @@ class PointCloud:
         # ----------------------------
         # Setup
         # ----------------------------
-        self._ensure_neighbors_found(self._resolve_num_neighbors())
         check_interpolation_mode(mode, self.dim)
-
-        # check that structure is set either globally or via argument
         structure_temp = self._resolve_structure(structure)
         check_particle_structure(structure_temp, "interpolation")
-
-        # check that density has been computed for the chosen structure
+        # a density implies smoothing data at the particles and their neighbors
         self._check_density_computed(structure_temp)
+        kernel_name = self.smoothing.density_kernel[structure_temp]
+        num_neighbors = self.smoothing.num_neighbors
 
         # cast fields to correct input format and validate their dimensionality for the requested mode
         fields, fields_sizes = self._resolve_fields(fields)
@@ -1538,7 +1588,16 @@ class PointCloud:
         # partition, then solve their K-NN with a generalized ghost
         # exchange).
         if not has_query_positions:
-            self._print_interpolation(mode, "particle positions", structure_temp)
+            if self.ghosts.nn_inds.shape[1] != num_neighbors:
+                raise ValueError(
+                    f"The neighbor lists ({self.ghosts.nn_inds.shape[1]} neighbors, "
+                    "from the last 'find_neighbors' call) do not match the smoothing "
+                    f"data ({num_neighbors} neighbors); call 'compute_smoothing' and "
+                    "'compute_density' again."
+                )
+            self._print_interpolation(
+                mode, "particle positions", structure_temp, kernel_name
+            )
             return self._interpolate_local(
                 self.decomposition.local_positions,
                 self.ghosts,
@@ -1563,14 +1622,14 @@ class PointCloud:
         query_ghosts = exchange_ghosts(
             self.comm,
             self.decomposition,
-            self.smoothing.num_neighbors,
+            num_neighbors,
             self.dim,
             self.periodic,
             self.boxsize,
             target_positions=self.query_routing.local_positions,
         )
 
-        self._print_interpolation(mode, "query positions", structure_temp)
+        self._print_interpolation(mode, "query positions", structure_temp, kernel_name)
         return self._interpolate_local(
             self.query_routing.local_positions,
             query_ghosts,
@@ -1769,22 +1828,23 @@ class PointCloud:
         fields_temp = fields[idx_local]
 
         # if plane_projection is set, collect relevant axes
-        if plane_projection:
-            # cast to array and ensure it's 1D
-            plane_projection = np.atleast_1d(plane_projection).astype(int)
-
-            # assert that given axes are all different
-            assert (
-                plane_projection[0] != plane_projection[1]
-            ), "Plane projection axes must be unique, but found duplicates in {plane_projection}"
-            # assert that given axes are valid indices for the position dimension
-            assert np.all(plane_projection < self.dim) and np.all(
-                plane_projection >= 0
-            ), f"Plane projection axes must be between 0 and {self.dim - 1}, but found {plane_projection}"
+        if plane_projection is not None:
             if self.dim != 3:
                 raise ValueError(
                     f"Plane projection requires 3D positions, but positions are {self.dim}d"
                 )
+            plane_projection = np.asarray(plane_projection)
+            if (
+                plane_projection.shape != (2,)
+                or not np.issubdtype(plane_projection.dtype, np.integer)
+                or plane_projection[0] == plane_projection[1]
+                or np.any((plane_projection < 0) | (plane_projection > 2))
+            ):
+                raise ValueError(
+                    "'plane_projection' must be two distinct axis indices in "
+                    f"[0, 2], got {plane_projection.tolist()}"
+                )
+            plane_projection = [int(a) for a in plane_projection]
 
             # fancy indexing does not work here -> use np.take to select and stack relevant axes
             pos_temp = np.take(pos_temp, plane_projection, axis=1)

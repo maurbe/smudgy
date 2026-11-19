@@ -311,7 +311,7 @@ class TestComputeSmoothing:
         pc = PointCloud(make_positions(rng), verbose=False)
         pc.global_setup(structure="isotropic", num_neighbors=8)
         pc.find_neighbors()
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             pc.compute_smoothing(num_neighbors=-3)
 
     def test_neighbors_out_of_bounds_raises_index_error(self, rng):
@@ -434,7 +434,7 @@ class TestSetSmoothing:
     def test_wrong_structure_raises(self, rng):
         n = 20
         pc = PointCloud(make_positions(rng, n=n), verbose=False)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             pc.set_smoothing(structure="covariant", smoothing_lengths=np.ones(n))
 
     def test_wrong_length_raises(self, rng):

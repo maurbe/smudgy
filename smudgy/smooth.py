@@ -1,6 +1,6 @@
 """SmoothingInfo dataclass to store smoothing-related information."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -31,8 +31,13 @@ class SmoothingInfo:
     tensor_options : dict
         Options used for the smoothing tensors (``ratio_max``, ``min_axis``,
         ``volume_preserving``).
+    at_particles : bool
+        Whether the smoothing data belongs to the particles (True) or to
+        query positions passed to ``compute_smoothing`` (False).
     kernel_name : str
-        Kernel used for the density estimates.
+        Kernel of the most recent density estimate.
+    density_kernel : dict
+        Kernel used for each computed density, keyed by structure.
     density_isotropic : np.ndarray
         Isotropic (and separable) density estimates, shape (N,).
     density_covariant : np.ndarray
@@ -53,7 +58,9 @@ class SmoothingInfo:
     smoothing_tensors_eigvecs: np.ndarray = None
     tensor_options: dict = None
 
+    at_particles: bool = False
     kernel_name: str = None
+    density_kernel: dict = field(default_factory=dict)
     density_isotropic: np.ndarray = None
     density_covariant: np.ndarray = None
     ghost_positions: np.ndarray = None
