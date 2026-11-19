@@ -200,7 +200,7 @@ def test_local_path_matches_single_rank_reference(
     result = np.load(out_path)
 
     for key in ("density", "interp", "fgrid", "wgrid"):
-        assert np.allclose(ref[key], result[key], rtol=1e-3, atol=1e-6), key
+        assert np.allclose(ref[key], result[key], rtol=1e-5, atol=1e-6), key
 
 
 def test_num_neighbors_mismatch_raises_clear_error(tmp_path):

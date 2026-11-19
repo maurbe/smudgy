@@ -28,7 +28,8 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
     boxsize = 1.0
     num_points = int(1e4)
     eps = 1e-6
-    positions = np.random.uniform(eps, boxsize - eps, size=(num_points, dim)).astype(
+    rng = np.random.default_rng(dim)
+    positions = rng.uniform(eps, boxsize - eps, size=(num_points, dim)).astype(
         np.float32
     )
     weights = np.ones(num_points, dtype=np.float32)
@@ -75,5 +76,5 @@ def test_weight_conservation(
     weight_true = np.sum(pc.weights)
     ratio = weight_deposited / weight_true
     assert np.isclose(
-        ratio, 1.0, atol=1e-2
+        ratio, 1.0, atol=4e-3  # measured <= 4e-4 (kernel truncation + quadrature)
     ), f"Weight conservation failed for {kernel_name} in {dim}D"

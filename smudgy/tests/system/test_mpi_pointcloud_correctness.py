@@ -141,16 +141,11 @@ def test_results_match_across_rank_counts(tmp_path):
 
     assert set(single_rank.files) == set(multi_rank.files)
     for key in single_rank.files:
-        # rtol loosened from 1e-5 to 1e-3 (matches this project's own
-        # established tolerance for cross-decomposition comparisons under
-        # periodic boundaries, e.g. test_mpi_local_pipeline.py): different
-        # rank counts partition particles differently, which reorders
-        # floating-point summation and can flip which of several near-
-        # equidistant neighbors a periodic KD-tree picks -- not a bug.
+        # rank counts only reorder float32 sums: measured rtol <= 3e-7
         np.testing.assert_allclose(
             single_rank[key],
             multi_rank[key],
-            rtol=1e-3,
+            rtol=1e-5,
             atol=1e-6,
             err_msg=f"mismatch for {key!r} between 1 and 3 MPI ranks",
         )

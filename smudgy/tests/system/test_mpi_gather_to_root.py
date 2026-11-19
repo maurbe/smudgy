@@ -227,7 +227,7 @@ def test_gather_to_root_matches_single_rank_reference(tmp_path, periodic, n_rank
     assert int(result["none_ness_ok"]) == 1
     for key in ("density", "interp_particles", "interp_query", "fgrid", "wgrid"):
         atol = 1e-5 if key in ("fgrid", "wgrid") else 1e-6
-        assert np.allclose(ref[key], result[key], rtol=1e-3, atol=atol), key
+        assert np.allclose(ref[key], result[key], rtol=1e-5, atol=atol), key
 
 
 def test_negative_cases_raise_clear_errors(tmp_path):
@@ -245,8 +245,8 @@ def test_zero_local_rows_no_deadlock(tmp_path):
 
     ref = np.load(ref_path)
     result = np.load(out_path)
-    assert np.allclose(ref["density"], result["density"], rtol=1e-3, atol=1e-6)
-    assert np.allclose(ref["interp_query"], result["interp_query"], rtol=1e-3, atol=1e-6)
+    assert np.allclose(ref["density"], result["density"], rtol=1e-5, atol=1e-6)
+    assert np.allclose(ref["interp_query"], result["interp_query"], rtol=1e-5, atol=1e-6)
 
 
 if __name__ == "__main__":

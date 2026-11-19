@@ -37,25 +37,21 @@ def _generate_dataset(dim: int, seed: int):
     return {"positions": positions, "weights": weights, "boxsize": boxsize}
 
 
-def _assert_backends_agree(f_numpy, f_qd, rtol, atol, max_outlier_frac=0.01):
-    """Elementwise np.isclose, but tolerating a small fraction of outliers.
+# Max |numpy - quadrants| relative to the field's scale, measured over seeds
+# 42-47, all kernels and modes: isotropic <= 4e-6, covariant <= 2.1e-4
+# (covariant H comes from two different float32 eigensolvers).
+SCALE_TOL = {"isotropic": 5e-5, "covariant": 2e-3}
 
-    Now that decomposition/ghost-exchange is unconditional, a covariant
-    structure's smoothing tensor eigendecomposition occasionally lands a
-    handful of particles (typically <0.5%) right at a near-degenerate
-    eigenvalue split, where numpy and quadrants' (equally valid) eigenvector
-    choices genuinely diverge -- an inherent ambiguity of eigendecomposition
-    for near-equal eigenvalues, not a correctness bug. A strict elementwise
-    assert_allclose would flag this; a real systematic bug would instead show
-    up as most/all elements disagreeing, which this still catches.
+
+def _assert_backends_agree(f_numpy, f_qd, structure):
+    """|f_numpy - f_qd| <= tol * max|f_numpy| everywhere.
+
+    Relative to the field's scale rather than elementwise: divergences/curls
+    of smooth fields are differences of large terms, near zero at many
+    points, where an elementwise rtol only compares float32 noise.
     """
-    close = np.isclose(f_numpy, f_qd, rtol=rtol, atol=atol)
-    mismatch_frac = 1.0 - np.mean(close)
-    assert mismatch_frac <= max_outlier_frac, (
-        f"{mismatch_frac:.2%} of elements exceed rtol={rtol}/atol={atol} "
-        f"(allowed up to {max_outlier_frac:.2%}) -- max abs diff "
-        f"{np.max(np.abs(f_numpy - f_qd))}"
-    )
+    scale = np.abs(f_numpy).max()
+    np.testing.assert_allclose(f_qd, f_numpy, rtol=0, atol=SCALE_TOL[structure] * scale)
 
 
 def _run_backend(backend, dim, structure, mode, kernel_name, data, query_positions):
@@ -113,12 +109,7 @@ def test_backend_consistency(dim, structure, mode, kernel_name):
     assert np.all(np.isfinite(f_numpy)), "numpy backend produced non-finite values"
     assert np.all(np.isfinite(f_qd)), "quadrants backend produced non-finite values"
 
-    # Strive for sub-1% level agreement. atol is looser than the field/
-    # divergence/curl modes need because gradient mode (derivative-like,
-    # amplifies float32 rounding differences between backends) occasionally
-    # produces slightly larger absolute deviations at individual points,
-    # especially for covariant 3D with wide-support kernels (wendland_c4/c6).
-    _assert_backends_agree(f_numpy, f_qd, rtol=1e-2, atol=5e-3)
+    _assert_backends_agree(f_numpy, f_qd, structure)
 
 
 @pytest.mark.parametrize("dim", DIMS)
@@ -136,7 +127,7 @@ def test_backend_consistency_at_particle_positions(dim, structure, kernel_name):
 
     f_numpy, f_qd = results["numpy"], results["quadrants"]
     assert f_numpy.shape == f_qd.shape
-    np.testing.assert_allclose(f_numpy, f_qd, rtol=1e-2, atol=1e-3)
+    _assert_backends_agree(f_numpy, f_qd, structure)
 
 
 if __name__ == "__main__":

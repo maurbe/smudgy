@@ -52,7 +52,7 @@ def _assert_projections_agree(H_tensor, plane=(0, 1)):
     np.testing.assert_array_less(
         np.abs(H_2d_np - H_2d_qd), np.broadcast_to(1e-4 * scale, H_2d_np.shape)
     )
-    np.testing.assert_allclose(evals_np, evals_qd, rtol=1e-4)
+    np.testing.assert_allclose(evals_np, evals_qd, rtol=1e-5)  # measured 6e-7
 
     # the quadrants eigensystem is orthonormal and reproduces its own tensor
     eye = np.broadcast_to(np.eye(2), evecs_qd.shape)

@@ -191,7 +191,7 @@ def test_query_positions_local_path_matches_single_rank_reference(
 
     ref = np.load(ref_path)
     result = np.load(out_path)
-    assert np.allclose(ref["interp"], result["interp"], rtol=1e-3, atol=1e-6)
+    assert np.allclose(ref["interp"], result["interp"], rtol=1e-5, atol=1e-6)
 
 
 def test_zero_query_point_ranks_no_deadlock(tmp_path):
@@ -202,7 +202,7 @@ def test_zero_query_point_ranks_no_deadlock(tmp_path):
 
     ref = np.load(ref_path)
     result = np.load(out_path)
-    assert np.allclose(ref["interp"], result["interp"], rtol=1e-3, atol=1e-6)
+    assert np.allclose(ref["interp"], result["interp"], rtol=1e-5, atol=1e-6)
 
 
 if __name__ == "__main__":

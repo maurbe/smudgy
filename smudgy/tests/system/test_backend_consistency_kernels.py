@@ -36,8 +36,8 @@ from smudgy.backend.quadrants.kernels import (
 ensure_initialized()
 
 DIMS = (1, 2, 3)
-ATOL = 1e-5
-RTOL = 1e-4
+ATOL = 1e-6  # x max|value|; measured quintic gradient 6e-7
+RTOL = 1e-5
 
 # Canonical coordinates to sample. Kernels are typically compact-support,
 # so include values inside, at, and outside the support radius.
@@ -118,3 +118,42 @@ class TestKernelRegistryConsistency:
         any_name = next(iter(KERNEL_CLASSES.keys()))
         with pytest.raises(ValueError):
             get_kernel(any_name, dim=4)
+
+
+# =============================================================================
+# 2) Values, gradients and normalisation: numpy == quadrants
+# =============================================================================
+def _make_eval_kernel(spec, dim):
+    @qd.kernel
+    def _eval(
+        q: qd.types.ndarray(dtype=qd.f32, ndim=1),
+        w: qd.types.ndarray(dtype=qd.f32, ndim=1),
+        dw: qd.types.ndarray(dtype=qd.f32, ndim=1),
+        sigma: qd.types.ndarray(dtype=qd.f32, ndim=1),
+    ):
+        for i in range(q.shape[0]):
+            w[i] = spec.evaluate(q[i], dim)
+            e0 = qd.Vector([1.0 if a == 0 else 0.0 for a in qd.static(range(dim))])
+            dw[i] = spec.gradient(q[i], e0, dim)[0]  # dW/dq along a unit grad_q
+            sigma[i] = spec.sigma(dim)
+
+    return _eval
+
+
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("name", sorted(SPHERICAL_KERNELS.keys()))
+def test_spherical_kernel_values_match(name, dim):
+    """W(q), dW/dq and sigma agree between backends on Q_GRID (incl. the
+    support edge)."""
+    spec = create_spherical_kernel(name)
+    ref = get_kernel(name, dim)
+    q = Q_GRID * np.float32(spec.support)  # Q_GRID is in units of the support
+    w, dw, sigma = (np.zeros_like(q) for _ in range(3))
+    _make_eval_kernel(spec, dim)(q, w, dw, sigma)
+
+    np.testing.assert_allclose(sigma, ref.sigma, rtol=RTOL)
+    # atol relative to the kernel's scale: quintic peaks at ~66, and both
+    # backends evaluate the same float32 polynomials
+    w_ref, dw_ref = ref._kernel_values(q), ref._kernel_gradient_values(q)
+    np.testing.assert_allclose(w, w_ref, rtol=RTOL, atol=ATOL * np.abs(w_ref).max())
+    np.testing.assert_allclose(dw, dw_ref, rtol=RTOL, atol=ATOL * np.abs(dw_ref).max())

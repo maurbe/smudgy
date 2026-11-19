@@ -59,7 +59,8 @@ def test_backend_consistency_isotropic(dim, shape):
         for b in ("numpy", "quadrants")
     )
     assert s_numpy.shape == s_qd.shape
-    np.testing.assert_allclose(s_numpy, s_qd, rtol=1e-4, atol=1e-6)
+    # both read the same K-th neighbour distance: identical
+    np.testing.assert_array_equal(s_numpy, s_qd)
 
 
 @pytest.mark.parametrize("dim", DIMS)

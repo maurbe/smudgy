@@ -21,7 +21,8 @@ def create_uniform_point_cloud(dim: int) -> PointCloud:
     """Create a point cloud with uniformly distributed points and unit weights."""
     boxsize = 1.0
     num_points = int(1e4)
-    positions = np.random.uniform(0, boxsize - 1e-6, size=(num_points, dim)).astype(
+    rng = np.random.default_rng(dim)
+    positions = rng.uniform(0, boxsize - 1e-6, size=(num_points, dim)).astype(
         np.float32
     )
     weights = np.ones(num_points, dtype=np.float32)

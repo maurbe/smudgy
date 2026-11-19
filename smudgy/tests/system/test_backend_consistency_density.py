@@ -53,9 +53,5 @@ def test_backend_consistency(dim, structure):
 
     s_numpy, s_qd = density_objects
     assert s_numpy.shape == s_qd.shape
-    # rtol loosened from 1e-4: now that this pipeline always goes through
-    # ghost-exchange (mandatory decomposition), the two backends can sum
-    # neighbor contributions in a very slightly different order for a
-    # handful of particles -- the same benign tie-breaking noise documented
-    # throughout this project's own test suite, not a correctness issue.
-    np.testing.assert_allclose(s_numpy, s_qd, rtol=1e-3, atol=1e-6)
+    # both backends sum the same nn_inds in k order: measured rtol <= 1.5e-6
+    np.testing.assert_allclose(s_numpy, s_qd, rtol=2e-5, atol=1e-6)
