@@ -71,3 +71,37 @@ def ensure_initialized(arch="cpu"):
 def current_config():
     """Return the configuration the Quadrants runtime was last initialized with."""
     return _current_config
+
+
+# Quadrants indexes ndarrays with int32: element offsets wrap above 2**31 - 1,
+# and the SPIR-V backends (Metal, Vulkan) compute 32-bit *byte* offsets, so
+# 4-byte arrays wrap above 2**30 elements (4 GiB) there -- silently, with
+# wrong results (measured on Metal for nn_inds of shape (19683000, 64)).
+_MAX_ELEMENTS = 2**31 - 1
+_MAX_BYTES_SPIRV = 2**32 - 1
+
+
+def check_index_limits(**arrays):
+    """Raise ValueError if an array (or shape tuple) is too large to index.
+
+    Call before launching a kernel, with the largest arrays it reads or writes,
+    e.g. ``check_index_limits(nn_inds=nn_inds, grid=(*gridnums, F))``.
+    """
+    from quadrants.lang import impl
+
+    spirv = _initialized and impl.current_cfg().arch in (qd.metal, qd.vulkan)
+    for name, a in arrays.items():
+        if isinstance(a, tuple):
+            size, nbytes = 1, 4
+            for s in a:
+                size *= int(s)
+            nbytes *= size
+        else:
+            size, nbytes = a.size, a.nbytes
+        if size > _MAX_ELEMENTS or (spirv and nbytes > _MAX_BYTES_SPIRV):
+            limit = "4 GiB (Metal/Vulkan)" if spirv else f"{_MAX_ELEMENTS} elements"
+            raise ValueError(
+                f"'{name}' has {size} elements ({nbytes} bytes), beyond Quadrants' "
+                f"int32 indexing limit of {limit}. Reduce N, the neighbour count "
+                "or the grid size, or split the work across MPI ranks."
+            )

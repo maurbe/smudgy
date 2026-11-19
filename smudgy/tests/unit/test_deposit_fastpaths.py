@@ -73,6 +73,28 @@ def test_extent_selects_inside_particles(dim, kernel_name):
     np.testing.assert_allclose(fg, ref_f, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize("backend", ["numpy", "quadrants"])
+@pytest.mark.parametrize("extent", [[[0.2, 0.7], [0.1, 0.9]], [[0.0, 1.0], [0.0, 1.0]]])
+def test_extent_ignores_boxsize(backend, extent):
+    """An explicit extent gives the same non-periodic grid whether the cloud
+    has a periodic boxsize or none (even when the extent is the full box)."""
+    kw = dict(fields=None, averaged=False, gridnums=12, extent=extent, adaptive=False,
+              kernel_name="tsc")
+    pc_box, _, _ = _cloud(2, boxsize=1.0, backend=backend)
+    pc_free, _, _ = _cloud(2, boxsize=None, backend=backend)
+    # quadrants: float32 atomic summation order differs (Hilbert order
+    # depends on the domain), so not bit-identical
+    np.testing.assert_allclose(pc_box.deposit(**kw), pc_free.deposit(**kw), rtol=1e-6)
+
+
+@pytest.mark.parametrize("extent", [[[0.0, 1.0]], [[0.5, 0.5], [0.0, 1.0]]])
+def test_extent_validation(extent):
+    pc, _, _ = _cloud(2)
+    with pytest.raises(ValueError):
+        pc.deposit(fields=None, averaged=False, gridnums=8, extent=extent, adaptive=False,
+                   kernel_name="cic")
+
+
 @pytest.mark.parametrize("structure", ["isotropic", "covariant"])
 @pytest.mark.parametrize("dim", [1, 2, 3])
 @pytest.mark.parametrize("periodic", [True, False])
@@ -135,3 +157,18 @@ def test_covariant_1d_equals_isotropic_1d(kernel_name, method, periodic):
                           particle_hmat_eigvals=h[:, None], **kw)
     np.testing.assert_allclose(wc, wi, rtol=1e-5, atol=1e-6 * wi.max())
     np.testing.assert_allclose(fc, fi, rtol=1e-5, atol=1e-6 * np.abs(fi).max())
+
+
+def test_index_limit_guard():
+    """Grids/arrays beyond Quadrants' int32 indexing raise instead of wrapping
+    silently (checked before anything is allocated)."""
+    from smudgy.backend.quadrants import check_index_limits
+
+    check_index_limits(ok=(2**15, 2**15, 1))
+    with pytest.raises(ValueError, match="int32 indexing limit"):
+        check_index_limits(grid=(2**11, 2**11, 2**10))
+    pos = np.zeros((4, 3), np.float32)
+    with pytest.raises(ValueError, match="int32 indexing limit"):
+        qdep.deposit(pos, np.zeros((4, 1), np.float32), np.ones(4, np.float32),
+                     np.ones(3, np.float32), [2048, 2048, 1024], adaptive=False,
+                     kernel_name="cic", periodic=True)

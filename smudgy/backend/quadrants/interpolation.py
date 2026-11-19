@@ -2,8 +2,8 @@ import numpy as np
 import quadrants as qd
 
 from .kernels import (
+    covariant_inputs_from_inverse,
     create_spherical_kernel,
-    prepare_covariant_inputs,
     prepare_isotropic_inputs,
 )
 from .._common import (
@@ -15,6 +15,7 @@ from .._common import (
     normalize_boxsize,
     support_scaled,
 )
+from . import check_index_limits
 from .smoothing import _coordinate_difference_with_pbc
 
 
@@ -49,34 +50,69 @@ def _relative_position(
 def _kernel_inputs(
     r_vec,
     h: qd.template(),
+    inv_det: qd.template(),
     i,
     dim: qd.template(),
     covariant: qd.template(),
     sigma_val: qd.f32,
     eps: qd.f32,
 ):
-    """Kernel coordinates for r_vec, smoothed with h[i] (scalar or D x D tensor)."""
+    """Kernel coordinates for r_vec, smoothed with h[i]: a scalar, or (covariant)
+    the precomputed inverse tensor H^-1 with inv_det[i] = 1 / det(H)."""
     q = 0.0
     grad_q = qd.Vector.zero(qd.f32, dim)
     scale = 0.0
     if qd.static(covariant):
-        H = qd.Matrix(
+        H_inv = qd.Matrix(
             [[h[i, a, b] for b in qd.static(range(dim))] for a in qd.static(range(dim))]
         )
-        q, grad_q, scale = prepare_covariant_inputs(r_vec, H, dim, sigma_val, eps)
+        q, grad_q, scale = covariant_inputs_from_inverse(
+            r_vec, H_inv, inv_det[i], dim, sigma_val, eps
+        )
     else:
         q, grad_q, scale = prepare_isotropic_inputs(r_vec, h[i], dim, sigma_val, eps)
     return q, grad_q, scale
 
 
+@qd.kernel
+def _invert_tensors(
+    dim: qd.template(),
+    h: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, D, D)
+    h_inv: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, D, D)
+    inv_det: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
+):
+    for n in range(h.shape[0]):
+        H = qd.Matrix(
+            [[h[n, a, b] for b in qd.static(range(dim))] for a in qd.static(range(dim))]
+        )
+        Hi = H.inverse()
+        for a in qd.static(range(dim)):
+            for b in qd.static(range(dim)):
+                h_inv[n, a, b] = Hi[a, b]
+        inv_det[n] = 1.0 / H.determinant()
+
+
+def _smoothing_inputs(h, dim, covariant):
+    """(h, inv_det) as the kernels read them: covariant tensors are inverted once
+    per particle here, isotropic h passes through with a dummy inv_det."""
+    if not covariant:
+        return h, np.zeros(1, np.float32)
+    h_inv = np.empty_like(h)
+    inv_det = np.empty(h.shape[0], np.float32)
+    _invert_tensors(dim, h, h_inv, inv_det)
+    return h_inv, inv_det
+
+
 def _common_inputs(query_positions, positions, weights, nn_inds, h, boxsize, dim):
     """Contiguous float32/int32 copies (no-ops if already so) + boxsize/periodic."""
     box, periodic = normalize_boxsize(boxsize, dim)
+    nn_inds = as_i32(nn_inds)
+    check_index_limits(nn_inds=nn_inds)
     return (
         as_f32(query_positions),
         as_f32(positions),
         as_f32(weights),
-        as_i32(nn_inds),
+        nn_inds,
         as_f32(h),
         box,
         periodic,
@@ -99,7 +135,8 @@ def _density_kernel(
     weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (Nc,)
     nn_inds: qd.types.ndarray(dtype=qd.i32, ndim=2),  # (N, K)
     boxsize: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    h: qd.types.ndarray(dtype=qd.f32),  # (N,) or (N, D, D): the query's own h
+    h: qd.types.ndarray(dtype=qd.f32),  # (N,) or (N, D, D) H^-1: the query's own
+    inv_det: qd.types.ndarray(dtype=qd.f32, ndim=1),
     density_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
     N, K = nn_inds.shape
@@ -111,7 +148,7 @@ def _density_kernel(
             r_vec = _relative_position(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
-            q, _, scale = _kernel_inputs(r_vec, h, n, dim, covariant, sigma_val, eps)
+            q, _, scale = _kernel_inputs(r_vec, h, inv_det, n, dim, covariant, sigma_val, eps)
             acc += weights[j] * evaluate_fn(q, dim) * scale
         density_out[n] = acc
 
@@ -143,12 +180,14 @@ def density(
         query_positions, positions, weights, nn_inds, h, boxsize, dim
     )
 
+    covariant = structure == "covariant"
+    h, inv_det = _smoothing_inputs(h, dim, covariant)
     density_out = np.zeros(nn_inds.shape[0], dtype=np.float32)
     _density_kernel(
         kernel.evaluate,
         kernel.sigma,
         dim,
-        structure == "covariant",
+        covariant,
         periodic,
         float(EPS),
         query_positions,
@@ -157,6 +196,7 @@ def density(
         nn_inds,
         box,
         h,
+        inv_det,
         density_out,
     )
     return density_out
@@ -183,6 +223,7 @@ def _field_kernel(
     nn_inds: qd.types.ndarray(dtype=qd.i32, ndim=2),
     boxsize: qd.types.ndarray(dtype=qd.f32, ndim=1),
     h: qd.types.ndarray(dtype=qd.f32),
+    inv_det: qd.types.ndarray(dtype=qd.f32, ndim=1),
     fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nc, F)
     out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
 ):
@@ -195,7 +236,7 @@ def _field_kernel(
             r_vec = _relative_position(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
-            q, _, scale = _kernel_inputs(r_vec, h, j, dim, covariant, sigma_val, eps)
+            q, _, scale = _kernel_inputs(r_vec, h, inv_det, j, dim, covariant, sigma_val, eps)
             w = evaluate_fn(q, dim) * scale * weights[j]
             for f in qd.static(range(F)):
                 acc[f] += fields[j, f] * w
@@ -218,6 +259,7 @@ def _gradient_kernel(
     nn_inds: qd.types.ndarray(dtype=qd.i32, ndim=2),
     boxsize: qd.types.ndarray(dtype=qd.f32, ndim=1),
     h: qd.types.ndarray(dtype=qd.f32),
+    inv_det: qd.types.ndarray(dtype=qd.f32, ndim=1),
     fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nc, F)
     out: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, F, D)
 ):
@@ -231,7 +273,7 @@ def _gradient_kernel(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
             q, grad_q, scale = _kernel_inputs(
-                r_vec, h, j, dim, covariant, sigma_val, eps
+                r_vec, h, inv_det, j, dim, covariant, sigma_val, eps
             )
             grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
             for f in qd.static(range(F)):
@@ -257,6 +299,7 @@ def _divergence_kernel(
     nn_inds: qd.types.ndarray(dtype=qd.i32, ndim=2),
     boxsize: qd.types.ndarray(dtype=qd.f32, ndim=1),
     h: qd.types.ndarray(dtype=qd.f32),
+    inv_det: qd.types.ndarray(dtype=qd.f32, ndim=1),
     fields: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nc, F, D)
     out: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
 ):
@@ -270,7 +313,7 @@ def _divergence_kernel(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
             q, grad_q, scale = _kernel_inputs(
-                r_vec, h, j, dim, covariant, sigma_val, eps
+                r_vec, h, inv_det, j, dim, covariant, sigma_val, eps
             )
             grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
             for f in qd.static(range(F)):
@@ -297,6 +340,7 @@ def _curl_kernel(
     nn_inds: qd.types.ndarray(dtype=qd.i32, ndim=2),
     boxsize: qd.types.ndarray(dtype=qd.f32, ndim=1),
     h: qd.types.ndarray(dtype=qd.f32),
+    inv_det: qd.types.ndarray(dtype=qd.f32, ndim=1),
     fields: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nc, F, D)
     out: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, F, 1 or D)
 ):
@@ -311,7 +355,7 @@ def _curl_kernel(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
             q, grad_q, scale = _kernel_inputs(
-                r_vec, h, j, dim, covariant, sigma_val, eps
+                r_vec, h, inv_det, j, dim, covariant, sigma_val, eps
             )
             grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
             for f in qd.static(range(F)):
@@ -370,10 +414,12 @@ def interpolate(
         query_positions, positions, weights, nn_inds, h, boxsize, dim
     )
     fields = as_f32(fields)
+    check_index_limits(fields=fields, out=(*nn_inds.shape[:1], *fields.shape[1:]))
 
     N = nn_inds.shape[0]
     F = fields.shape[1]
     covariant = structure == "covariant"
+    h, inv_det = _smoothing_inputs(h, dim, covariant)
 
     if mode == "field":
         fn, kernel_fn, out = _field_kernel, kernel.evaluate, np.zeros((N, F), np.float32)
@@ -401,6 +447,7 @@ def interpolate(
         nn_inds,
         box,
         h,
+        inv_det,
         fields,
         out,
     )

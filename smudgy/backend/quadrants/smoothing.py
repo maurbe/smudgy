@@ -4,6 +4,7 @@ import numpy as np
 import quadrants as qd
 
 from .._common import EPS, as_f32, as_i32, check_hmat_args, normalize_boxsize
+from . import check_index_limits
 from .linalg import sym_eig_descending
 
 
@@ -201,6 +202,7 @@ def compute_hmat(
     positions = as_f32(positions)
     weights = as_f32(weights)
     nn_inds = as_i32(nn_inds)
+    check_index_limits(nn_inds=nn_inds)
     box, periodic = normalize_boxsize(boxsize, dim)
     hsml_arr = as_f32(hsml) if volume_preserving else np.zeros(Nq, dtype=np.float32)
 

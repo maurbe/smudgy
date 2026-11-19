@@ -5,6 +5,7 @@ import numpy as np
 import quadrants as qd
 
 from .._common import ADAPTIVE_STRUCTURES, as_f32, check_fixed_grid_kernel
+from . import check_index_limits
 from .kernels import (
     _separable_integrate_1d,
     build_kernel_sample_grid,
@@ -2434,6 +2435,10 @@ def deposit(
     particle_weights = as_f32(particle_weights)
     boxsizes = as_f32(boxsizes)
     dim = particle_positions.shape[-1]
+    check_index_limits(
+        particle_fields=particle_fields,
+        grid_fields=(*gridnums, particle_fields.shape[1]),
+    )
 
     if not adaptive:
         check_fixed_grid_kernel(kernel_name, structure)

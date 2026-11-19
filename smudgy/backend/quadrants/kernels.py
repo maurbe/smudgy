@@ -57,12 +57,20 @@ def prepare_isotropic_inputs(
 def prepare_covariant_inputs(
     r_vec, H, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
-    H_inv = H.inverse()
-    det_H = H.determinant()
+    return covariant_inputs_from_inverse(
+        r_vec, H.inverse(), 1.0 / H.determinant(), dim, sigma_val, eps
+    )
 
+
+@qd.func
+def covariant_inputs_from_inverse(
+    r_vec, H_inv, inv_det: qd.f32, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
+):
+    """As :func:`prepare_covariant_inputs`, with H^-1 and 1/det(H) precomputed
+    (once per particle instead of once per neighbour pair)."""
     xi = H_inv @ r_vec
     q = xi.norm()
-    scale = sigma_val / det_H
+    scale = sigma_val * inv_det
 
     grad_q = qd.Vector.zero(qd.f32, dim)
     if q > 0.0:
