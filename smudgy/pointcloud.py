@@ -510,6 +510,27 @@ class PointCloud:
         """
         return np.concatenate([local_arr, ghost_arr], axis=0)
 
+    def _combined_positions_weights(self, ghost_positions, ghost_weights):
+        """Local+ghost positions and weights, cached per ghost set.
+
+        The same ghost set is typically reused by compute_smoothing,
+        compute_density and every interpolate call, so the two
+        concatenations are done once. The cache holds the ghost arrays
+        themselves, so an identity match cannot be a recycled id.
+        """
+        key = (self.decomposition.local_positions, ghost_positions, ghost_weights)
+        cache = getattr(self, "_combined_cache", None)
+        if cache is None or any(a is not b for a, b in zip(cache[0], key)):
+            combined = (
+                self._combined_local_and_ghost(key[0], ghost_positions),
+                self._combined_local_and_ghost(
+                    self.decomposition.local_weights, ghost_weights
+                ),
+            )
+            cache = (key, combined)
+            self._combined_cache = cache
+        return cache[1]
+
     def _check_density_computed(self, structure: Structure) -> None:
         """Verify that density has been computed for the requested structure."""
         field = (
@@ -798,11 +819,8 @@ class PointCloud:
         """
         nn_inds_local = ghost_info.nn_inds
         nn_dists_local = ghost_info.nn_dists
-        combined_positions = self._combined_local_and_ghost(
-            self.decomposition.local_positions, ghost_info.ghost_positions
-        )
-        combined_weights = self._combined_local_and_ghost(
-            self.decomposition.local_weights, ghost_info.ghost_weights
+        combined_positions, combined_weights = self._combined_positions_weights(
+            ghost_info.ghost_positions, ghost_info.ghost_weights
         )
 
         if structure_temp in ("separable", "isotropic"):
@@ -1044,11 +1062,8 @@ class PointCloud:
         # may have used a different ghost set (an arbitrary-query-position
         # call), see SmoothingInfo's docstring.
         nn_inds_local = self.smoothing.nn_inds
-        combined_positions = self._combined_local_and_ghost(
-            self.decomposition.local_positions, self.smoothing.ghost_positions
-        )
-        combined_weights = self._combined_local_and_ghost(
-            self.decomposition.local_weights, self.smoothing.ghost_weights
+        combined_positions, combined_weights = self._combined_positions_weights(
+            self.smoothing.ghost_positions, self.smoothing.ghost_weights
         )
         density = execution._dispatch(
             "compute_density",
@@ -1330,11 +1345,8 @@ class PointCloud:
         is responsible for knowing how to reassemble it (see `interpolate`).
         """
         nn_inds_local = ghost_info.nn_inds
-        combined_positions = self._combined_local_and_ghost(
-            self.decomposition.local_positions, ghost_info.ghost_positions
-        )
-        combined_weights = self._combined_local_and_ghost(
-            self.decomposition.local_weights, ghost_info.ghost_weights
+        combined_positions, combined_weights = self._combined_positions_weights(
+            ghost_info.ghost_positions, ghost_info.ghost_weights
         )
 
         # fields is already this rank's local slice (add_fields() now

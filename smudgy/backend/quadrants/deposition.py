@@ -1436,7 +1436,7 @@ def _covariant_1d(
     B: qd.template(),
     positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,1)
     quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,F)
-    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,1)
+    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 1, 1)
     hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,1)
     particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),
     sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S,1)
@@ -1457,7 +1457,7 @@ def _covariant_1d(
         x_phys = positions[n, 0]
 
         # always 1 in 1D, but kept for API symmetry
-        e0 = hmat_eigvecs[n, 0]
+        e0 = hmat_eigvecs[n, 0, 0]
 
         eval0 = hmat_eigvals[n, 0]
 
@@ -1599,7 +1599,7 @@ def _covariant_2d(
     B: qd.template(),
     positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,2)
     quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,F)
-    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,4) column-major
+    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 2, 2), columns
     hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,2)
     particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),
     sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S,2)
@@ -1624,11 +1624,11 @@ def _covariant_2d(
         y_phys = positions[n, 1]
 
         # column-major
-        e0x = hmat_eigvecs[n, 0]
-        e0y = hmat_eigvecs[n, 1]
+        e0x = hmat_eigvecs[n, 0, 0]
+        e0y = hmat_eigvecs[n, 1, 0]
 
-        e1x = hmat_eigvecs[n, 2]
-        e1y = hmat_eigvecs[n, 3]
+        e1x = hmat_eigvecs[n, 0, 1]
+        e1y = hmat_eigvecs[n, 1, 1]
 
         eval0 = hmat_eigvals[n, 0]
         eval1 = hmat_eigvals[n, 1]
@@ -1835,7 +1835,7 @@ def _covariant_3d(
     B: qd.template(),
     positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
     quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 9) column-major
+    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 3, 3), columns
     hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
     particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
     sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, 3)
@@ -1863,17 +1863,17 @@ def _covariant_3d(
         z_phys = positions[n, 2]
 
         # column-major: column j is eigenvector j
-        e0x = hmat_eigvecs[n, 0]
-        e0y = hmat_eigvecs[n, 1]
-        e0z = hmat_eigvecs[n, 2]
+        e0x = hmat_eigvecs[n, 0, 0]
+        e0y = hmat_eigvecs[n, 1, 0]
+        e0z = hmat_eigvecs[n, 2, 0]
 
-        e1x = hmat_eigvecs[n, 3]
-        e1y = hmat_eigvecs[n, 4]
-        e1z = hmat_eigvecs[n, 5]
+        e1x = hmat_eigvecs[n, 0, 1]
+        e1y = hmat_eigvecs[n, 1, 1]
+        e1z = hmat_eigvecs[n, 2, 1]
 
-        e2x = hmat_eigvecs[n, 6]
-        e2y = hmat_eigvecs[n, 7]
-        e2z = hmat_eigvecs[n, 8]
+        e2x = hmat_eigvecs[n, 0, 2]
+        e2y = hmat_eigvecs[n, 1, 2]
+        e2z = hmat_eigvecs[n, 2, 2]
 
         eval0 = hmat_eigvals[n, 0]
         eval1 = hmat_eigvals[n, 1]
@@ -2275,7 +2275,16 @@ def _prepare_separable(
     )
 
 
-def _prepare_isotropic(
+_QUADRATURE_TABLES = {
+    1: QUADRATURE_POINTS_1D,
+    2: QUADRATURE_POINTS_2D,
+    3: QUADRATURE_POINTS_3D,
+}
+
+
+def _prepare_radial(
+    structure,  # "isotropic" or "covariant"
+    smoothing_args,  # (hsml,) or (eigvecs (N, D, D), eigvals (N, D))
     particle_positions,
     particle_fields,
     particle_weights,
@@ -2283,24 +2292,23 @@ def _prepare_isotropic(
     gridnums,
     periodic,
     kernel_name,
-    particle_hsml,  # (N,) -- single smoothing length
     integration_method,
     eta_crit,
 ):
-    DIM = particle_positions.shape[1]
-    particle_hsml = as_f32(particle_hsml)
+    """Shared set-up of isotropic and covariant deposition.
 
+    Both use a spherical kernel, the same cell quadrature for resolved
+    particles and the same sample table for unresolved ones; they differ only
+    in the smoothing arrays passed to the kernel.
+    """
+    DIM = particle_positions.shape[1]
     gridnums = tuple(int(n) for n in gridnums)
     boxsizes = tuple(float(b) for b in boxsizes)
 
     kspec = create_spherical_kernel(kernel_name)
     support = kspec.support
 
-    quad_table = {
-        1: QUADRATURE_POINTS_1D,
-        2: QUADRATURE_POINTS_2D,
-        3: QUADRATURE_POINTS_3D,
-    }[DIM]
+    quad_table = _QUADRATURE_TABLES[DIM]
     if integration_method not in quad_table:
         raise ValueError(
             f"Unknown integration method: {integration_method!r}. "
@@ -2310,11 +2318,6 @@ def _prepare_isotropic(
 
     grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
     sample_buffer = _sample_buffer_size(eta_crit, DIM)
-    sample_coords, sample_integrals, num_samples = (
-        grid["coords"],
-        grid["integrals"],
-        grid["count"],
-    )
 
     cell_sizes = tuple(boxsizes[d] / gridnums[d] for d in range(DIM))
     cell_size_invs = tuple(1.0 / c for c in cell_sizes)
@@ -2324,7 +2327,6 @@ def _prepare_isotropic(
     grid_fields = np.zeros((*gridnums, F), dtype=np.float32)
     grid_weights = np.zeros(gridnums, dtype=np.float32)
 
-    kernel = _KERNELS[True][("isotropic", DIM)]
     args = (
         kspec.evaluate,
         kspec.sigma,
@@ -2336,112 +2338,11 @@ def _prepare_isotropic(
         sample_buffer,
         particle_positions,
         particle_fields,
-        particle_hsml,
+        *(as_f32(a) for a in smoothing_args),
         particle_weights,
-        sample_coords,
-        sample_integrals,
-        num_samples,
-        *cell_sizes,
-        *cell_size_invs,
-        max_support,
-        *gridnums,
-        grid_fields,
-        grid_weights,
-    )
-
-    return KernelPreparation(
-        kernel=kernel,
-        args=args,
-        grid_fields=grid_fields,
-        grid_weights=grid_weights,
-        structure="isotropic",
-        kernel_name=kernel_name,
-        support=support,
-        periodic=bool(periodic),
-        cell_sizes=cell_sizes,
-        max_support=float(max_support),
-        num_samples=int(num_samples),
-        eta_crit=float(eta_crit),
-        sample_buffer=int(sample_buffer),
-    )
-
-
-def _prepare_covariant(
-    particle_positions,
-    particle_fields,
-    particle_weights,
-    boxsizes,
-    gridnums,
-    periodic,
-    kernel_name,
-    particle_hmat_eigvecs,  # (N, D, D)
-    particle_hmat_eigvals,  # (N, D)
-    integration_method,
-    eta_crit,
-):
-    DIM = particle_positions.shape[1]
-
-    # qd.kernels read the flattened matrix as [e0x,e0y,e0z, e1x,e1y,e1z, ...]
-    # i.e. column j (eigenvector j) contiguous -- transpose(0, 2, 1) turns
-    # (N, row, col) into (N, col, row) so reshape(-1, D*D) lays out each
-    # column contiguously.
-    particle_hmat_eigvecs = as_f32(
-        particle_hmat_eigvecs.transpose(0, 2, 1).reshape(-1, DIM * DIM)
-    )
-    particle_hmat_eigvals = as_f32(particle_hmat_eigvals)
-
-    gridnums = tuple(int(n) for n in gridnums)
-    boxsizes = tuple(float(b) for b in boxsizes)
-
-    kspec = create_spherical_kernel(kernel_name)
-    support = kspec.support
-
-    quad_table = {
-        1: QUADRATURE_POINTS_1D,
-        2: QUADRATURE_POINTS_2D,
-        3: QUADRATURE_POINTS_3D,
-    }[DIM]
-    if integration_method not in quad_table:
-        raise ValueError(
-            f"Unknown integration method: {integration_method!r}. "
-            f"Available: {sorted(quad_table.keys())}"
-        )
-    quad_points = quad_table[integration_method]
-
-    grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
-    sample_buffer = _sample_buffer_size(eta_crit, DIM)
-    sample_coords, sample_integrals, num_samples = (
         grid["coords"],
         grid["integrals"],
         grid["count"],
-    )
-
-    cell_sizes = tuple(boxsizes[d] / gridnums[d] for d in range(DIM))
-    cell_size_invs = tuple(1.0 / c for c in cell_sizes)
-    max_support = min(0.5 * boxsizes[d] / support for d in range(DIM))
-
-    F = particle_fields.shape[1]
-    grid_fields = np.zeros((*gridnums, F), dtype=np.float32)
-    grid_weights = np.zeros(gridnums, dtype=np.float32)
-
-    kernel = _KERNELS[True][("covariant", DIM)]
-    args = (
-        kspec.evaluate,
-        kspec.sigma,
-        support,
-        DIM,
-        quad_points,
-        bool(periodic),
-        float(eta_crit),
-        sample_buffer,
-        particle_positions,
-        particle_fields,
-        particle_hmat_eigvecs,
-        particle_hmat_eigvals,
-        particle_weights,
-        sample_coords,
-        sample_integrals,
-        num_samples,
         *cell_sizes,
         *cell_size_invs,
         max_support,
@@ -2451,17 +2352,17 @@ def _prepare_covariant(
     )
 
     return KernelPreparation(
-        kernel=kernel,
+        kernel=_KERNELS[True][(structure, DIM)],
         args=args,
         grid_fields=grid_fields,
         grid_weights=grid_weights,
-        structure="covariant",
+        structure=structure,
         kernel_name=kernel_name,
         support=support,
         periodic=bool(periodic),
         cell_sizes=cell_sizes,
         max_support=float(max_support),
-        num_samples=int(num_samples),
+        num_samples=int(grid["count"]),
         eta_crit=float(eta_crit),
         sample_buffer=int(sample_buffer),
     )
@@ -2590,18 +2491,16 @@ def deposit(
 
     if structure == "separable":
         prep = _prepare_separable(**common, particle_hsml=particle_hsml)
-    elif structure == "isotropic":
-        prep = _prepare_isotropic(
-            **common,
-            particle_hsml=particle_hsml,
-            integration_method=integration_method,
-            eta_crit=eta_crit,
+    else:
+        smoothing_args = (
+            (particle_hsml,)
+            if structure == "isotropic"
+            else (particle_hmat_eigvecs, particle_hmat_eigvals)
         )
-    else:  # "covariant"
-        prep = _prepare_covariant(
+        prep = _prepare_radial(
+            structure,
+            smoothing_args,
             **common,
-            particle_hmat_eigvecs=particle_hmat_eigvecs,
-            particle_hmat_eigvals=particle_hmat_eigvals,
             integration_method=integration_method,
             eta_crit=eta_crit,
         )

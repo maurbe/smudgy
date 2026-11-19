@@ -27,7 +27,7 @@ def _ngp_1d(
     gridnums : array_like of length 1
         Number of grid cells for each axis.
     periodic : bool
-        Dummy variable for input consistency with other methods
+        Wrap cells periodically; otherwise positions outside the grid are dropped.
 
     Returns
     -------
@@ -46,7 +46,9 @@ def _ngp_1d(
     F = particle_fields.shape[1]
 
     inv_dx = np.array([Nx], dtype=np.float32) / boxsizes
-    grid_pos = (particle_positions * inv_dx).astype(np.int32)
+    grid_pos = np.floor(particle_positions * inv_dx).astype(np.int32)
+    if periodic:
+        grid_pos = np.mod(grid_pos, [Nx])
 
     x_idx = grid_pos[:, 0]
 
@@ -105,7 +107,7 @@ def _ngp_2d(
     gridnums : array_like of length 2
         Number of grid cells for each axis.
     periodic : bool
-        Dummy variable for input consistency with other methods
+        Wrap cells periodically; otherwise positions outside the grid are dropped.
 
     Returns
     -------
@@ -124,7 +126,9 @@ def _ngp_2d(
     F = particle_fields.shape[1]
 
     inv_dx = np.array([Nx, Ny], dtype=np.float32) / boxsizes
-    grid_pos = (particle_positions * inv_dx).astype(np.int32)
+    grid_pos = np.floor(particle_positions * inv_dx).astype(np.int32)
+    if periodic:
+        grid_pos = np.mod(grid_pos, [Nx, Ny])
 
     x_idx = grid_pos[:, 0]
     y_idx = grid_pos[:, 1]
@@ -185,7 +189,7 @@ def _ngp_3d(
     gridnums : array_like of length 3
         Number of grid cells for each axis.
     periodic : bool
-        Dummy variable for input consistency with other methods
+        Wrap cells periodically; otherwise positions outside the grid are dropped.
 
     Returns
     -------
@@ -204,7 +208,9 @@ def _ngp_3d(
     F = particle_fields.shape[1]
 
     inv_dx = np.array([Nx, Ny, Nz], dtype=np.float32) / boxsizes
-    grid_pos = (particle_positions * inv_dx).astype(np.int32)
+    grid_pos = np.floor(particle_positions * inv_dx).astype(np.int32)
+    if periodic:
+        grid_pos = np.mod(grid_pos, [Nx, Ny, Nz])
 
     x_idx = grid_pos[:, 0]
     y_idx = grid_pos[:, 1]
@@ -307,13 +313,6 @@ def _cic_1d(
 
     if periodic:
         grid_pos = np.mod(grid_pos, [Nx])
-    else:
-        eps = 1e-6
-        grid_pos = np.clip(
-            grid_pos,
-            0.0,
-            [Nx - 1 - eps],
-        )
 
     base = np.floor(grid_pos).astype(np.int32)
     frac = grid_pos - base
@@ -428,13 +427,6 @@ def _cic_2d(
 
     if periodic:
         grid_pos = np.mod(grid_pos, [Nx, Ny])
-    else:
-        eps = 1e-6
-        grid_pos = np.clip(
-            grid_pos,
-            0.0,
-            [Nx - 1 - eps, Ny - 1 - eps],
-        )
 
     base = np.floor(grid_pos).astype(np.int32)
     frac = grid_pos - base
@@ -532,13 +524,6 @@ def _cic_3d(
 
     if periodic:
         grid_pos = np.mod(grid_pos, [Nx, Ny, Nz])
-    else:
-        eps = 1e-6
-        grid_pos = np.clip(
-            grid_pos,
-            0.0,
-            [Nx - 1 - eps, Ny - 1 - eps, Nz - 1 - eps],
-        )
 
     base = np.floor(grid_pos).astype(np.int32)
     frac = grid_pos - base

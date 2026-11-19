@@ -60,3 +60,54 @@ def test_backend_consistency(dim, kernel_name):
     assert w_numpy.shape == w_qd.shape
     np.testing.assert_allclose(w_numpy.sum(), weights.sum(), rtol=1e-5, atol=1e-6)
     np.testing.assert_allclose(w_qd.sum(), weights.sum(), rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
+def test_backend_consistency_non_periodic_edges(dim, kernel_name):
+    """Non-periodic grids drop stencil points outside the grid, in both backends.
+
+    Particles straddle and leave the grid on every side, so the edge cells,
+    and the mass lost off the grid, are compared directly at the backend level.
+    """
+    from smudgy.backend.numpy.deposition import deposit as deposit_np
+    from smudgy.backend.quadrants.deposition import deposit as deposit_qd
+
+    rng = np.random.default_rng(7)
+    n = 5_000
+    positions = rng.uniform(-0.1, 1.1, size=(n, dim)).astype(np.float32)
+    fields = rng.uniform(0, 1, size=(n, 2)).astype(np.float32)
+    weights = rng.uniform(0.5, 1, size=n).astype(np.float32)
+    args = (positions, fields, weights, np.ones(dim, np.float32), [32] * dim)
+
+    f_np, w_np = deposit_np(*args, periodic=False, kernel_name=kernel_name)
+    f_qd, w_qd = deposit_qd(
+        *args, periodic=False, kernel_name=kernel_name, adaptive=False
+    )
+
+    np.testing.assert_allclose(f_np, f_qd, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(w_np, w_qd, rtol=1e-5, atol=1e-5)
+    # mass outside the grid is dropped, not piled into the edge cells
+    assert w_qd.sum() < 0.95 * weights.sum()
+
+
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
+def test_backend_consistency_periodic_wrap(dim, kernel_name):
+    """Periodic grids wrap positions outside [0, L) the same way in both backends."""
+    from smudgy.backend.numpy.deposition import deposit as deposit_np
+    from smudgy.backend.quadrants.deposition import deposit as deposit_qd
+
+    rng = np.random.default_rng(8)
+    n = 5_000
+    positions = rng.uniform(-0.3, 1.3, size=(n, dim)).astype(np.float32)
+    fields = rng.uniform(0, 1, size=(n, 2)).astype(np.float32)
+    weights = rng.uniform(0.5, 1, size=n).astype(np.float32)
+    args = (positions, fields, weights, np.ones(dim, np.float32), [32] * dim)
+
+    f_np, w_np = deposit_np(*args, periodic=True, kernel_name=kernel_name)
+    f_qd, w_qd = deposit_qd(*args, periodic=True, kernel_name=kernel_name, adaptive=False)
+
+    np.testing.assert_allclose(f_np, f_qd, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(w_np, w_qd, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(w_qd.sum(), weights.sum(), rtol=1e-5)

@@ -13,6 +13,26 @@ from math import pi
 import numpy as np
 import quadrants as qd
 
+from ..kernel_table import SEPARABLE, SPHERICAL
+
+
+def _make_sigma(values):
+    """qd.func(dim) -> normalisation constant, from a kernel_table entry."""
+    s1, s2, s3 = values
+
+    @qd.func
+    def sigma(dim: qd.template()) -> qd.f32:
+        result = 0.0
+        if qd.static(dim == 1):
+            result = s1
+        elif qd.static(dim == 2):
+            result = s2
+        else:
+            result = s3
+        return result
+
+    return sigma
+
 
 # =============================================================================
 # Helper functions for projections onto canonical coordinates
@@ -123,7 +143,7 @@ def _separable_integrate_1d(
 # Separable kernels (SeparableKernel subclasses)
 # =============================================================================
 # --- TophatRect ---------------------------------------------------------
-TOPHAT_RECT_SUPPORT = 0.5
+TOPHAT_RECT_SUPPORT = SEPARABLE["tophat"].support
 
 
 @qd.func
@@ -135,9 +155,7 @@ def tophat_sep_evaluate_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def tophat_sep_sigma(dim: qd.template()) -> qd.f32:
-    return 1.0
+tophat_sep_sigma = _make_sigma(SEPARABLE["tophat"].sigma)
 
 
 @qd.func
@@ -148,21 +166,19 @@ def tophat_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
 
 
 # --- TSCRect -------------------------------------------------------------
-TSC_RECT_SUPPORT = 1.5
+TSC_RECT_SUPPORT = SEPARABLE["tsc"].support
 
 
 @qd.func
 def tsc_sep_evaluate_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
     q_abs = qd.abs(q_in)
     result = 0.0
-    if q_abs < TSC_RECT_SUPPORT:
+    if q_abs <= TSC_RECT_SUPPORT:
         result = 1.0 - q_abs / TSC_RECT_SUPPORT
     return result
 
 
-@qd.func
-def tsc_sep_sigma(dim: qd.template()) -> qd.f32:
-    return 1.0 / (TSC_RECT_SUPPORT**dim)
+tsc_sep_sigma = _make_sigma(SEPARABLE["tsc"].sigma)
 
 
 @qd.func
@@ -173,28 +189,19 @@ def tsc_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
 
 
 # --- GaussianRect ----------------------------------------------------------
-GAUSSIAN_RECT_SUPPORT = 3.0
+GAUSSIAN_RECT_SUPPORT = SEPARABLE["gaussian"].support
 
 
 @qd.func
 def gaussian_sep_evaluate_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
     q = qd.abs(q_in)
     result = 0.0
-    if q < GAUSSIAN_RECT_SUPPORT:
+    if q <= GAUSSIAN_RECT_SUPPORT:
         result = qd.exp(-q * q)
     return result
 
 
-@qd.func
-def gaussian_sep_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 1.0 / qd.sqrt(pi)
-    elif qd.static(dim == 2):
-        result = 1.0 / pi
-    elif qd.static(dim == 3):
-        result = 1.0 / (pi**1.5)
-    return result
+gaussian_sep_sigma = _make_sigma(SEPARABLE["gaussian"].sigma)
 
 
 @qd.func
@@ -208,7 +215,7 @@ def gaussian_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
 # Spherical kernels (SphericalKernel subclasses)
 # =============================================================================
 # --- Tophat ----------------------------------------------------------------
-TOPHAT_SUPPORT = 0.5
+TOPHAT_SUPPORT = SPHERICAL["tophat"].support
 
 
 @qd.func
@@ -219,16 +226,7 @@ def tophat_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def tophat_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 1.0
-    elif qd.static(dim == 2):
-        result = 4.0 / pi
-    elif qd.static(dim == 3):
-        result = 6.0 / pi
-    return result
+tophat_sigma = _make_sigma(SPHERICAL["tophat"].sigma)
 
 
 @qd.func
@@ -256,28 +254,19 @@ def tophat_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- TSC ---------------------------------------------------------------
-TSC_SUPPORT = 1.5
+TSC_SUPPORT = SPHERICAL["tsc"].support
 
 
 @qd.func
 def tsc_evaluate(q_in: qd.f32, dim: qd.template()) -> qd.f32:
     q = qd.abs(q_in)
     result = 0.0
-    if q < TSC_SUPPORT:
+    if q <= TSC_SUPPORT:
         result = 1.0 - q / TSC_SUPPORT
     return result
 
 
-@qd.func
-def tsc_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 1.0 / TSC_SUPPORT
-    elif qd.static(dim == 2):
-        result = 3.0 / (pi * TSC_SUPPORT * TSC_SUPPORT)
-    elif qd.static(dim == 3):
-        result = 3.0 / (pi * TSC_SUPPORT * TSC_SUPPORT * TSC_SUPPORT)
-    return result
+tsc_sigma = _make_sigma(SPHERICAL["tsc"].sigma)
 
 
 @qd.func
@@ -315,27 +304,18 @@ def tsc_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- Gaussian ------------------------------------------------------------
-GAUSSIAN_SUPPORT = 3.0
+GAUSSIAN_SUPPORT = SPHERICAL["gaussian"].support
 
 
 @qd.func
 def gaussian_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
-    if q < GAUSSIAN_SUPPORT:
+    if q <= GAUSSIAN_SUPPORT:
         result = qd.exp(-q * q)
     return result
 
 
-@qd.func
-def gaussian_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 1.0 / qd.sqrt(pi)
-    elif qd.static(dim == 2):
-        result = 1.0 / pi
-    elif qd.static(dim == 3):
-        result = 1.0 / (pi**1.5)
-    return result
+gaussian_sigma = _make_sigma(SPHERICAL["gaussian"].sigma)
 
 
 @qd.func
@@ -368,7 +348,7 @@ def gaussian_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- Lucy --------------------------------------------------------------
-LUCY_SUPPORT = 1.0
+LUCY_SUPPORT = SPHERICAL["lucy"].support
 
 
 @qd.func
@@ -379,16 +359,7 @@ def lucy_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def lucy_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 5.0 / 4.0
-    elif qd.static(dim == 2):
-        result = 5.0 / pi
-    elif qd.static(dim == 3):
-        result = 105.0 / (16.0 * pi)
-    return result
+lucy_sigma = _make_sigma(SPHERICAL["lucy"].sigma)
 
 
 @qd.func
@@ -424,7 +395,7 @@ def lucy_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- CubicSpline -----------------------------------------------------------
-CUBIC_SPLINE_SUPPORT = 1.0
+CUBIC_SPLINE_SUPPORT = SPHERICAL["cubic_spline"].support
 CUBIC_SPLINE_NODE_1 = 0.5
 CUBIC_SPLINE_EPS = 1e-6
 
@@ -440,16 +411,7 @@ def cubic_spline_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def cubic_spline_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 4.0 / 3.0
-    elif qd.static(dim == 2):
-        result = 40.0 / (7.0 * pi)
-    elif qd.static(dim == 3):
-        result = 8.0 / pi
-    return result
+cubic_spline_sigma = _make_sigma(SPHERICAL["cubic_spline"].sigma)
 
 
 @qd.func
@@ -510,7 +472,7 @@ def cubic_spline_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- QuinticSpline ---------------------------------------------------------
-QUINTIC_SPLINE_SUPPORT = 3.0
+QUINTIC_SPLINE_SUPPORT = SPHERICAL["quintic_spline"].support
 QUINTIC_SPLINE_NODE_1 = 1.0
 QUINTIC_SPLINE_NODE_2 = 2.0
 QUINTIC_SPLINE_EPS = 1e-6
@@ -519,7 +481,7 @@ QUINTIC_SPLINE_EPS = 1e-6
 @qd.func
 def quintic_spline_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
-    if q < QUINTIC_SPLINE_SUPPORT:
+    if q <= QUINTIC_SPLINE_SUPPORT:
         f = 3.0 - q
         s = 2.0 - q
         t = 1.0 - q
@@ -535,16 +497,7 @@ def quintic_spline_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def quintic_spline_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 1.0 / 120.0
-    elif qd.static(dim == 2):
-        result = 7.0 / (478.0 * pi)
-    elif qd.static(dim == 3):
-        result = 1.0 / (120.0 * pi)
-    return result
+quintic_spline_sigma = _make_sigma(SPHERICAL["quintic_spline"].sigma)
 
 
 @qd.func
@@ -654,23 +607,23 @@ def quintic_spline_evaluate_integral(
 @qd.func
 def quintic_spline_gradient(q: qd.f32, grad_q, dim: qd.template()):
     dWdq = 0.0
-    if q <= 1.0:
+    if q <= QUINTIC_SPLINE_NODE_1:
         dWdq = -5.0 * (3.0 - q) ** 4 + 30.0 * (2.0 - q) ** 4 - 75.0 * (1.0 - q) ** 4
-    elif q <= 2.0:
+    elif q <= QUINTIC_SPLINE_NODE_2:
         dWdq = -5.0 * (3.0 - q) ** 4 + 30.0 * (2.0 - q) ** 4
-    elif q <= 3.0:
+    elif q <= QUINTIC_SPLINE_SUPPORT:
         dWdq = -5.0 * (3.0 - q) ** 4
     return dWdq * grad_q
 
 
 # --- WendlandC2 ------------------------------------------------------------
-WENDLAND_C2_SUPPORT = 2.0
+WENDLAND_C2_SUPPORT = SPHERICAL["wendland_c2"].support
 
 
 @qd.func
 def wendland_c2_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
-    if q < WENDLAND_C2_SUPPORT:
+    if q <= WENDLAND_C2_SUPPORT:
         z = 1.0 - 0.5 * q
         if qd.static(dim == 1):
             result = z**3 * (1.5 * q + 1.0)
@@ -679,16 +632,7 @@ def wendland_c2_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def wendland_c2_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 5.0 / 8.0
-    elif qd.static(dim == 2):
-        result = 7.0 / (4.0 * pi)
-    elif qd.static(dim == 3):
-        result = 21.0 / (16.0 * pi)
-    return result
+wendland_c2_sigma = _make_sigma(SPHERICAL["wendland_c2"].sigma)
 
 
 @qd.func
@@ -733,13 +677,13 @@ def wendland_c2_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- WendlandC4 ------------------------------------------------------------
-WENDLAND_C4_SUPPORT = 2.0
+WENDLAND_C4_SUPPORT = SPHERICAL["wendland_c4"].support
 
 
 @qd.func
 def wendland_c4_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
-    if q < WENDLAND_C4_SUPPORT:
+    if q <= WENDLAND_C4_SUPPORT:
         z = 1.0 - 0.5 * q
         if qd.static(dim == 1):
             result = z**5 * (2.0 * q * q + 2.5 * q + 1.0)
@@ -748,16 +692,7 @@ def wendland_c4_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def wendland_c4_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 3.0 / 4.0
-    elif qd.static(dim == 2):
-        result = 9.0 / (4.0 * pi)
-    elif qd.static(dim == 3):
-        result = 495.0 / (256.0 * pi)
-    return result
+wendland_c4_sigma = _make_sigma(SPHERICAL["wendland_c4"].sigma)
 
 
 @qd.func
@@ -825,13 +760,13 @@ def wendland_c4_gradient(q: qd.f32, grad_q, dim: qd.template()):
 
 
 # --- WendlandC6 ------------------------------------------------------------
-WENDLAND_C6_SUPPORT = 2.0
+WENDLAND_C6_SUPPORT = SPHERICAL["wendland_c6"].support
 
 
 @qd.func
 def wendland_c6_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     result = 0.0
-    if q < WENDLAND_C6_SUPPORT:
+    if q <= WENDLAND_C6_SUPPORT:
         z = 1.0 - 0.5 * q
         if qd.static(dim == 1):
             result = z**7 * ((21.0 / 8.0) * q**3 + (19.0 / 4.0) * q**2 + 3.5 * q + 1.0)
@@ -840,16 +775,7 @@ def wendland_c6_evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
     return result
 
 
-@qd.func
-def wendland_c6_sigma(dim: qd.template()) -> qd.f32:
-    result = 0.0
-    if qd.static(dim == 1):
-        result = 55.0 / 64.0
-    elif qd.static(dim == 2):
-        result = 39.0 / (14.0 * pi)
-    elif qd.static(dim == 3):
-        result = 1365.0 / (512.0 * pi)
-    return result
+wendland_c6_sigma = _make_sigma(SPHERICAL["wendland_c6"].sigma)
 
 
 @qd.func
