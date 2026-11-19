@@ -3,7 +3,7 @@
 import numpy as np
 import quadrants as qd
 
-from .smoothing import _sym_eig_jacobi
+from .linalg import sym_eig_descending
 
 E1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 E2 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
@@ -34,36 +34,8 @@ def _project_2d_kernel(
         h2d = (P @ H.inverse() @ P.transpose()).inverse()
         h2d = 0.5 * (h2d + h2d.transpose())  # symmetric up to f32 round-off
 
-        # Not qd.sym_eig: it returns non-orthogonal, often wrong eigenvectors
-        # (and NaNs) for 2x2 matrices -- see _sym_eig_jacobi. A single Jacobi
-        # rotation diagonalises a 2x2 exactly. Rescale to a unit-order
-        # magnitude band first, then undo the scale on the eigenvalues.
-        alpha = 1.0 / qd.max(qd.abs(h2d.trace()), 1e-30)
-        eigvals, eigvecs = _sym_eig_jacobi(alpha * h2d, 2, 1)
-        eigvals = eigvals / alpha
-
-        # ==========================================================================================
-        # Jacobi gives no ordering guarantee: sort ascending, matching np.linalg.eigh
-        if eigvals[0] > eigvals[1]:
-            eigvals[0], eigvals[1] = eigvals[1], eigvals[0]
-            for a in qd.static(range(2)):
-                eigvecs[a, 0], eigvecs[a, 1] = eigvecs[a, 1], eigvecs[a, 0]
-
-        # Eigenvector orientation convention:
-        # Numpy and Quadrants have no convention about the sign of the eigenvectors,
-        # impose a consistent sign convention for comparison with Quadrants backend
-        # (largest-magnitude component of each eigenvector is positive).
-        for col in qd.static(range(2)):
-            max_abs = 0.0
-            sign = 1.0
-            for row in qd.static(range(2)):
-                v = eigvecs[row, col]
-                if qd.abs(v) > max_abs:
-                    max_abs = qd.abs(v)
-                    sign = 1.0 if v >= 0.0 else -1.0
-            for row in qd.static(range(2)):
-                eigvecs[row, col] *= sign
-        # ==========================================================================================
+        # Descending, same convention as compute_hmat (and the numpy backend).
+        eigvals, eigvecs = sym_eig_descending(h2d, 2)
 
         for a in qd.static(range(2)):
             eigvals_out[n, a] = eigvals[a]

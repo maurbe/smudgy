@@ -24,7 +24,7 @@ def _random_tensors(n, gap, scale, seed=0):
     """Randomly oriented SPD tensors with two axes differing by a relative `gap`.
 
     Small gaps make many 2D projections nearly isotropic, the regime where
-    qd.sym_eig used to return wrong eigenvectors.
+    Taichi's sym_eig returned wrong eigenvectors (regression guard).
     """
     rng = np.random.default_rng(seed)
     Q, _ = np.linalg.qr(rng.normal(size=(n, 3, 3)))
@@ -43,8 +43,12 @@ def _assert_projections_agree(H_tensor, plane=(0, 1)):
     assert evecs_np.shape == evecs_qd.shape
     assert np.all(np.isfinite(evals_qd)) and np.all(np.isfinite(evecs_qd))
 
+    # both backends return eigenvalues in descending order
+    assert np.all(evals_np[:, 0] >= evals_np[:, 1])
+    assert np.all(evals_qd[:, 0] >= evals_qd[:, 1])
+
     # entries relative to each tensor's largest eigenvalue
-    scale = evals_np[:, -1:, np.newaxis]
+    scale = evals_np[:, :1, np.newaxis]
     np.testing.assert_array_less(
         np.abs(H_2d_np - H_2d_qd), np.broadcast_to(1e-4 * scale, H_2d_np.shape)
     )
@@ -59,7 +63,7 @@ def _assert_projections_agree(H_tensor, plane=(0, 1)):
     )
 
     # eigenvectors are only unique where the two eigenvalues are well separated
-    gap = (evals_np[:, 1] - evals_np[:, 0]) / evals_np[:, 1]
+    gap = (evals_np[:, 0] - evals_np[:, 1]) / evals_np[:, 0]
     separated = gap > 1e-2
     np.testing.assert_array_less(
         np.abs(evecs_np - evecs_qd).max(axis=(1, 2))[separated], 1e-3

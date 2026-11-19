@@ -45,10 +45,10 @@ smudgy.backend.quadrants.tensor_utils
    :members:
    :undoc-members:
 
-smudgy.backend.quadrants.math
------------------------------
+smudgy.backend.quadrants.linalg
+-------------------------------
 
-.. automodule:: smudgy.backend.quadrants.math
+.. automodule:: smudgy.backend.quadrants.linalg
    :members:
    :undoc-members:
 

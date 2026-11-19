@@ -3,6 +3,8 @@
 import numpy as np
 import quadrants as qd
 
+from .linalg import sym_eig_descending
+
 _EPS = 1e-7
 
 
@@ -60,45 +62,6 @@ def _neighbor_offset(
     return d
 
 
-@qd.func
-def _sym_eig_jacobi(A, dim: qd.template(), sweeps: qd.template()):
-    """Eigendecomposition of a small symmetric matrix by cyclic Jacobi rotations.
-
-    Used instead of qd.sym_eig, which returns non-orthogonal eigenvectors that
-    can be off by tens of degrees for nearly degenerate matrices, i.e. for
-    near-isotropic neighbourhoods. Jacobi's V is orthonormal by construction,
-    one rotation diagonalises a 2x2 exactly, and a 3x3 converges to f32
-    precision in a few sweeps. Returns (eigvals, V), unordered, with
-    A = V diag(eigvals) V^T.
-    """
-    V = qd.Matrix.identity(qd.f32, dim)
-    for _ in range(sweeps):
-        for p in qd.static(range(dim)):
-            for r in qd.static(range(p + 1, dim)):
-                apr = A[p, r]
-                if apr != 0.0:
-                    # rotation angle that zeroes A[p, r] (Golub & Van Loan, sym.schur2)
-                    tau = (A[r, r] - A[p, p]) / (2.0 * apr)
-                    t = 1.0 / (qd.abs(tau) + qd.sqrt(1.0 + tau * tau))
-                    if tau < 0.0:
-                        t = -t
-                    c = 1.0 / qd.sqrt(1.0 + t * t)
-                    s = t * c
-                    J = qd.Matrix.identity(qd.f32, dim)
-                    J[p, p] = c
-                    J[r, r] = c
-                    J[p, r] = s
-                    J[r, p] = -s
-                    A = J.transpose() @ A @ J
-                    A[p, r] = 0.0
-                    A[r, p] = 0.0
-                    V = V @ J
-    eigvals = qd.Vector.zero(qd.f32, dim)
-    for a in qd.static(range(dim)):
-        eigvals[a] = A[a, a]
-    return eigvals, V
-
-
 @qd.kernel
 def _compute_hmat_kernel(
     query_positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
@@ -132,43 +95,9 @@ def _compute_hmat_kernel(
         trace = qd.max(Sigma.trace(), 1e-30)
         Sigma += eps * trace * qd.Matrix.identity(qd.f32, dim)
 
-        # Rescale to a unit-order magnitude band before the eigendecomposition
-        # (Sigma's entries are tiny for unit-scale point clouds), then undo the
-        # scale on the eigenvalues. H itself is invariant under an overall
-        # rescaling of Sigma. 1x1 needs no rotations: zero sweeps.
-        alpha = 10.0 / trace
-        eigvals, eigvecs = _sym_eig_jacobi(
-            alpha * Sigma, dim, qd.static(0 if dim == 1 else 6)
-        )
-        eigvals = eigvals / alpha
-
-        # ==========================================================================================
-        # Jacobi gives no ordering guarantee. Sort descending explicitly, matching the numpy
-        # backend, so that index 0 is the largest principal component -- the
-        # axis-ratio clamp below depends on it.
-        for i in qd.static(range(dim)):
-            for j in qd.static(range(i + 1, dim)):
-                if eigvals[i] < eigvals[j]:
-                    eigvals[i], eigvals[j] = eigvals[j], eigvals[i]
-                    for a in qd.static(range(dim)):
-                        eigvecs[a, i], eigvecs[a, j] = eigvecs[a, j], eigvecs[a, i]
-
-        # Eigenvector orientation convention:
-        # Numpy and Quadrants have no convention about the sign of the eigenvectors,
-        # impose a consistent sign convention for comparison with the numpy backend
-        # (largest-magnitude component of each eigenvector is positive). H itself is
-        # invariant under column sign flips; this only affects eigvecs_out.
-        for col in qd.static(range(dim)):
-            max_abs = 0.0
-            sign = 1.0
-            for row in qd.static(range(dim)):
-                v = eigvecs[row, col]
-                if qd.abs(v) > max_abs:
-                    max_abs = qd.abs(v)
-                    sign = 1.0 if v >= 0.0 else -1.0
-            for row in qd.static(range(dim)):
-                eigvecs[row, col] *= sign
-        # ==========================================================================================
+        # Descending (index 0 = largest principal component, which the
+        # axis-ratio clamp below relies on), sign convention as in numpy.
+        eigvals, eigvecs = sym_eig_descending(Sigma, dim)
 
         # --- shape: principal components, with an axis-ratio clamp ---------------
         sigma = qd.Vector.zero(qd.f32, dim)

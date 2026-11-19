@@ -43,13 +43,12 @@ def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
     h_tensor_inv = np.linalg.inv(h_tensor)  # (N, D, D)
     temp = P @ h_tensor_inv @ P.T  # (N, 2, 2), batched matmul
     h_tensor_2d = np.linalg.inv(temp)
-    eigvals, eigvecs = np.linalg.eigh(h_tensor_2d)
-
-    # Eigenvector orientation convention:
-    # Numpy and Quadrants have no convention about the sign of the eigenvectors,
-    # impose a consistent sign convention for comparison with Quadrants backend
+    eigvals, eigvecs = np.linalg.eigh(h_tensor_2d)  # ascending
+    # Descending, matching compute_hmat; columns follow the values.
+    eigvals = eigvals[:, ::-1]
+    # Eigenvector sign convention shared with the Quadrants backend
     # (largest-magnitude component of each eigenvector is positive).
-    eigvecs = _fix_eigvec_sign(eigvecs)
+    eigvecs = _fix_eigvec_sign(eigvecs[:, :, ::-1])
 
     return (
         h_tensor_2d.astype(np.float32),
