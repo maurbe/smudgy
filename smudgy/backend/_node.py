@@ -69,7 +69,7 @@ def kdtree_workers():
 
 
 def _cuda_device_count():
-    """Number of CUDA GPUs via ``nvidia-smi -L``; None if unknown."""
+    """Count CUDA GPUs via ``nvidia-smi -L``; None if unknown."""
     exe = shutil.which("nvidia-smi")
     if exe is None:
         return None

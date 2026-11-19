@@ -11,6 +11,8 @@ from typing import NamedTuple
 
 
 class KernelConstants(NamedTuple):
+    """Support radius (units of h) and normalisation in 1, 2 and 3 dimensions."""
+
     support: float
     sigma: tuple[float, float, float]  # 1D, 2D, 3D
 

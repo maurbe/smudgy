@@ -1,11 +1,8 @@
+"""SPH density and interpolation (Quadrants backend)."""
+
 import numpy as np
 import quadrants as qd
 
-from .kernels import (
-    covariant_inputs_from_inverse,
-    create_spherical_kernel,
-    prepare_isotropic_inputs,
-)
 from .._common import (
     EPS,
     as_f32,
@@ -16,6 +13,11 @@ from .._common import (
     support_scaled,
 )
 from . import check_index_limits
+from .kernels import (
+    covariant_inputs_from_inverse,
+    create_spherical_kernel,
+    prepare_isotropic_inputs,
+)
 from .smoothing import _coordinate_difference_with_pbc
 
 
@@ -37,7 +39,7 @@ def _relative_position(
     dim: qd.template(),
     periodic: qd.template(),
 ):
-    """r = x_n - x_j, wrapped to the minimum image if `periodic`."""
+    """Return r = x_n - x_j, wrapped to the minimum image if `periodic`."""
     r = qd.Vector.zero(qd.f32, dim)
     for a in qd.static(range(dim)):
         r[a] = _coordinate_difference_with_pbc(
@@ -57,8 +59,11 @@ def _kernel_inputs(
     sigma_val: qd.f32,
     eps: qd.f32,
 ):
-    """Kernel coordinates for r_vec, smoothed with h[i]: a scalar, or (covariant)
-    the precomputed inverse tensor H^-1 with inv_det[i] = 1 / det(H)."""
+    """Kernel coordinates (q, grad q, prefactor) of r_vec for particle i.
+
+    `h` is a smoothing length per particle or, if covariant, the precomputed
+    inverse tensor H^-1, with inv_det[i] = 1 / det(H).
+    """
     q = 0.0
     grad_q = qd.Vector.zero(qd.f32, dim)
     scale = 0.0
@@ -93,8 +98,11 @@ def _invert_tensors(
 
 
 def _smoothing_inputs(h, dim, covariant):
-    """(h, inv_det) as the kernels read them: covariant tensors are inverted once
-    per particle here, isotropic h passes through with a dummy inv_det."""
+    """Return ``(h, inv_det)`` in the form the kernels read.
+
+    Covariant tensors are inverted once per particle; isotropic h passes
+    through with a dummy inv_det.
+    """
     if not covariant:
         return h, np.zeros(1, np.float32)
     h_inv = np.empty_like(h)

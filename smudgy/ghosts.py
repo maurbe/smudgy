@@ -124,18 +124,12 @@ def _initial_radius(
     n_local, local_min, local_max, num_neighbors, dim,
     domain_min, domain_max, boxsize, periodic, safety_factor=2.0,
 ) -> float:
-    """R_0 = safety_factor * (radius whose D-ball contains num_neighbors
-    points at this rank's own local density).
+    """Return the first search radius of the ghost exchange.
 
-    Falls back to a domain-derived guess for ranks with fewer than 2 local
-    particles (no meaningful local density estimate from 0-1 points).
-    `safety_factor=2.0`: boundary-adjacent particles' local-only density
-    estimate systematically undercounts (their true neighbors are split
-    across the rank boundary -- the whole reason ghosting exists), so the
-    bare density-derived radius would almost always need a growth round;
-    doubling trades a little wasted first-round ghost import for a much
-    better chance of first-round convergence. Tunable, not load-bearing for
-    correctness -- the iterative solver converges from any positive start.
+    It is `safety_factor` times the radius of a ball holding `num_neighbors`
+    particles at this rank's mean particle density. Ranks with fewer than 2 particles use a quarter of the smallest domain
+    extent. The factor 2 lets most particles near the rank boundary converge
+    in the first round; any positive start converges eventually.
     """
     if n_local < 2:
         extent = np.asarray(boxsize) if periodic else (domain_max - domain_min)
@@ -150,17 +144,13 @@ def _select_ghosts_to_send(
     rank, size, wrapped_local, local_weights, local_global_indices,
     all_boxes, boxsize, periodic, dim,
 ):
-    """For THIS rank as sender: decide, for every destination rank a != rank,
-    which of this rank's own local particles fall within a's padded box
-    (accounting for periodic wraparound via `_overlap_shifts`), and package
-    them grouped by destination rank in ascending rank order (matching
-    `execution._alltoallv_rows`'s convention).
+    """Select this rank's particles inside every other rank's padded target box.
 
-    A rank never selects itself as a destination: its own local periodic
-    tree already contains all its own particles, and a local periodic query
-    already finds correct local-to-local wraparound distances among them
-    with no ghosting needed -- re-importing a particle as its own ghost
-    would duplicate it, causing it to appear as its own neighbor.
+    Periodic images are taken into account. Returns the per-destination
+    counts and the selected positions, weights, local and global indices,
+    grouped by destination rank (the layout `execution._alltoallv_rows`
+    expects). A rank never sends to itself: its own tree already holds its
+    particles, periodic images included.
     """
     n_local = wrapped_local.shape[0]
     shifts = _shift_vectors(dim, periodic)
@@ -184,9 +174,7 @@ def _select_ghosts_to_send(
             mask = np.zeros(n_local, dtype=bool)
             for s in hits:
                 offset = s * boxsize if boxsize is not None else 0.0
-                # translate a's requested (padded) region into THIS rank's
-                # own native coordinate frame -- the particle data sent is
-                # always the unmodified native position (see module docstring)
+                # a's padded box in this rank's (unshifted) coordinates
                 region_min, region_max = a_min_padded - offset, a_max_padded - offset
                 mask |= np.all(
                     (wrapped_local >= region_min) & (wrapped_local <= region_max), axis=1
@@ -309,10 +297,7 @@ def exchange_ghosts(
             f"({total_n}); no search radius could ever find that many neighbors."
         )
 
-    # Safety net, usually a no-op: PointCloud.__init__ already wraps
-    # self.positions into [0, boxsize) for periodic clouds, and
-    # decomposition.local_positions is just a reordered/redistributed slice
-    # of that array -- see wrap_periodic's docstring.
+    # PointCloud already wraps its particles; query targets may not be wrapped
     wrapped_local = wrap_periodic(
         decomposition.local_positions, boxsize if periodic else None
     )
@@ -320,10 +305,6 @@ def exchange_ghosts(
     local_global_indices = decomposition.local_global_indices
     boxsize_arr = np.asarray(boxsize) if periodic else None
 
-    # Unlike wrapped_local above, this is NOT usually a no-op when
-    # target_positions is explicitly given: an arbitrary caller-supplied
-    # point set (e.g. interpolation query positions) has no guarantee of
-    # already lying in [0, boxsize) the way self.positions does.
     wrapped_target = (
         wrapped_local
         if target_positions is None
@@ -343,21 +324,8 @@ def exchange_ghosts(
     else:
         local_min = local_max = np.zeros(dim, dtype=np.float64)
 
-    # Deliberately estimated from THIS RANK'S OWN PARTICLE density
-    # (n_local/local_min/local_max), never from n_target/target_min/
-    # target_max: the radius needed to reach num_neighbors *particles* is
-    # governed by how densely packed particles are nearby, which has nothing
-    # to do with how many target points happen to be nearby. Conflating the
-    # two (an earlier version of this code did, using n_target's own count)
-    # systematically mis-estimates the initial guess whenever target_positions
-    # has a different density than the local particles -- e.g. far fewer
-    # query points than particles covering a similar region produces a wildly
-    # inflated first guess (found empirically: tripped the periodic half-box
-    # guard on the very first iteration, before any real ghost-fetching had
-    # even happened, for a query batch ~10x sparser than the local particles
-    # over a similar bounding box). Using particle density instead matches
-    # what `target_positions=None` (particles-as-their-own-target) already
-    # does exactly, since n_target == n_local there.
+    # from the particle density, not the target density: the radius must
+    # reach num_neighbors particles, however many targets there are
     radius = _initial_radius(
         n_local, local_min, local_max, num_neighbors, dim,
         decomposition.domain_min, decomposition.domain_max, boxsize, periodic,
@@ -379,14 +347,8 @@ def exchange_ghosts(
     recv_local_idx = recv_global_idx = None
 
     for _iteration in range(max_iterations):
-        # The raise decision below MUST be identical on every rank: `radius`
-        # is grown independently per rank, so checking it locally and
-        # raising immediately (as an earlier version of this code did) can
-        # trigger on some ranks but not others -- the raising rank(s) would
-        # abort mid-collective-sequence while survivors hang forever waiting
-        # on a peer that will never call the next `allgather`/`Alltoallv`
-        # again. Every rank must agree on whether to raise, via a collective,
-        # before any rank actually raises.
+        # radii grow per rank, so the decision to raise is made collectively
+        # (otherwise the other ranks would hang in the next collective)
         local_violation = radius > radius_cap
         any_violation = comm.allreduce(local_violation, op=MPI.LOR)
         if any_violation:
@@ -415,10 +377,6 @@ def exchange_ghosts(
         recv_source_rank = np.repeat(np.arange(size, dtype=np.int64), recv_counts)
 
         if has_targets:
-            # combined_positions is always this rank's own particles + fetched
-            # ghost particles (never target_positions itself -- a target point
-            # is only ever queried against, not concatenated in as something
-            # that could be returned as someone's neighbor).
             combined_positions = np.concatenate([wrapped_local, recv_positions], axis=0)
             tree = build_kdtree(combined_positions, boxsize=boxsize_arr if periodic else None)
             if nn_inds is None:
@@ -496,11 +454,7 @@ def exchange_ghosts(
         nn_dists=nn_dists,
         radius=radius,
         n_local=n_local,
-        # send_counts/send_lidx already hold the final (converged) iteration's
-        # values here -- _select_ghosts_to_send (called every iteration,
-        # ghosts.py above) recomputes them fresh each round, so by the time
-        # the loop exits they're exactly this rank's export manifest for the
-        # ghost set actually returned above. See push_to_ghosts.
+        # export manifest of the final round, used by push_to_ghosts
         export_local_index=send_lidx,
         export_counts=send_counts,
     )

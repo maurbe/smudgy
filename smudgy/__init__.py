@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from .backend.numpy.kernels import get_kernel
 from .backend.quadrants.kernels import (
     compute_total_integral_separable,
     compute_total_integral_spherical,
     get_separable_kernel_values_1D,
     get_spherical_kernel_values_1D,
 )
-from .backend.numpy.kernels import get_kernel
 from .pointcloud import PointCloud
 
 

@@ -1,3 +1,5 @@
+"""SPH density and interpolation (NumPy reference backend)."""
+
 import numpy as np
 
 from .._common import (

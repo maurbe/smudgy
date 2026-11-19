@@ -108,24 +108,10 @@ def _quantize(
 
     frac = np.where(degenerate, 0.0, rel / safe_extent)
     num_bins = 1 << bits_per_dim
-    # Scale by num_bins (not max_index) so bins are evenly filled -- frac==1.0
-    # (a clipped position exactly at domain_max) is the only case that can
-    # reach num_bins itself, which the final clip pulls back down below it.
-    #
-    # The clip's upper bound is deliberately computed via np.nextafter, not
-    # float(num_bins - 1): for bits_per_dim=64 (dim=1's default -- the only
-    # case wide enough to matter, since 2/3D's 32/21 bits stay well within
-    # float64's exact-integer range), float64 cannot distinguish 2**64 - 1
-    # from 2**64 at all (both round to the same value) -- so float(max_index)
-    # was silently equal to float(num_bins) in that case, and the clip did
-    # nothing: a value of exactly num_bins (2**64) could reach the final
-    # `.astype(np.uint64)` cast, which is out of uint64's representable range
-    # ([0, 2**64 - 1]) and undefined behavior (numpy warns "invalid value
-    # encountered in cast" and the result is not well-defined). nextafter
-    # gives the largest float64 strictly below num_bins regardless of bit
-    # width -- off by a handful of bins out of 2**64 at the very top for the
-    # 64-bit case, utterly negligible for Hilbert-curve bucketing at any
-    # real particle count, and exact for the 32/21-bit cases.
+    # frac == 1 maps to num_bins, which the clip pulls back. The bound is the
+    # largest float64 below num_bins: float(num_bins - 1) equals
+    # float(num_bins) for 64 bits (1D), and casting 2**64 to uint64 is
+    # undefined.
     safe_max = np.nextafter(float(num_bins), 0.0)
     coords = np.clip(np.floor(frac * float(num_bins)), 0.0, safe_max).astype(np.uint64)
     return coords
@@ -136,15 +122,9 @@ def _axes_to_hilbert_transpose(
 ) -> list[npt.NDArray[np.uint64]]:
     """Skilling (2004) AxesToTranspose, vectorized over points.
 
-    `coords`: list of D uint64 arrays, shape (N,), each holding an integer
-    in [0, 2**bits_per_dim). Returns the Hilbert "transpose" representation
-    (same shapes), which `_transpose_to_index` linearizes into a single code.
-
-    The per-dimension loop below (`for i in range(dim)`) has a genuine data
-    dependency on `x[0]` across iterations (matching Skilling's reference
-    algorithm) and so stays a plain Python loop -- but `dim` is only 1-3, and
-    every operation inside is a vectorized numpy op over all N points, so
-    this is cheap regardless of N.
+    `coords`: list of D uint64 arrays of shape (N,) with integers in
+    [0, 2**bits_per_dim). Returns the Hilbert "transpose" representation
+    (same shapes), linearized by `_transpose_to_index`.
     """
     x = [c.copy() for c in coords]
     dim = len(x)
@@ -271,18 +251,7 @@ def hilbert_partition_and_scatter(
     size = comm.Get_size()
 
     if size == 1:
-        # No other rank to partition against -- skip the Hilbert encode/sort/
-        # scatter entirely (expensive: O(N) encode + O(N log N) sort, on the
-        # same order as the neighbor search itself) and hand back this
-        # process's own arrays unchanged, in their original order, as a
-        # single-rank "partition". Gated on `size == 1` rather than
-        # `rank == root`: with one process `comm.Get_rank()` is always 0, so
-        # gating on `rank == root` would (for a caller-supplied `root != 0`)
-        # take the `else` branch below and `comm.bcast` from a rank that
-        # doesn't exist in a 1-process communicator -- this also incidentally
-        # fixes that latent crash, since there is exactly one process and its
-        # `positions`/`weights` are necessarily the real (only) data
-        # regardless of what `root` was asked for.
+        # single rank: no encode/sort/scatter, particles keep input order
         n = positions.shape[0]
         counts = np.array([n], dtype=np.int64)
         local_global_indices = np.arange(n, dtype=np.int64)
@@ -293,11 +262,6 @@ def hilbert_partition_and_scatter(
             counts=counts,
             domain_min=np.asarray(domain_min),
             domain_max=np.asarray(domain_max),
-            # Reuses the general formula (rather than hand-writing
-            # [0, max_uint64]) so this stays byte-for-byte consistent with
-            # what the size>1 path would produce for a single-rank `counts`
-            # by construction: with an empty `codes_sorted`, its `if n > 0`
-            # fill branch never runs, always leaving [0, max_uint64].
             boundary_codes=_partition_boundary_codes(
                 np.empty(0, dtype=np.uint64), counts
             ),
@@ -335,9 +299,6 @@ def hilbert_partition_and_scatter(
         domain_min=np.asarray(domain_min),
         domain_max=np.asarray(domain_max),
         boundary_codes=boundary_codes,
-        # global_indices_sorted IS the sort permutation (order), already
-        # computed above and None on non-root ranks -- kept here rather
-        # than discarded, see DecompositionInfo.root_order's docstring.
         root_order=global_indices_sorted,
     )
 
@@ -345,9 +306,9 @@ def hilbert_partition_and_scatter(
 def _partition_boundary_codes(
     codes_sorted: npt.NDArray[np.uint64], counts: npt.NDArray[np.int64]
 ) -> npt.NDArray[np.uint64]:
-    """Derive the (size+1,) Hilbert-code cut points actually used by a
-    count-based partition of `codes_sorted` (already sorted ascending) into
-    per-rank chunks of size `counts`.
+    """Hilbert-code cut points, shape (size + 1,), of a count-based partition.
+
+    `codes_sorted` (ascending) is split into per-rank chunks of `counts`.
 
     `boundary_codes[i]` is the code of the first element of rank `i`'s chunk;
     `boundary_codes[0]` is always 0 and `boundary_codes[size]` is always the
@@ -400,11 +361,7 @@ def route_query_positions(
     size = comm.Get_size()
 
     if size == 1:
-        # Provably a no-op at size==1: `decomposition.boundary_codes` is
-        # always [0, max_uint64] there (see `hilbert_partition_and_scatter`'s
-        # own size==1 path), so `searchsorted` against it would always
-        # resolve every query point to rank 0 anyway -- skip computing that
-        # and just route everything here directly, in original order.
+        # single rank: every query stays here, in input order
         m = query_positions.shape[0]
         local_global_indices = np.arange(m, dtype=np.int64)
         return QueryRouting(

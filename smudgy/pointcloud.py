@@ -1,4 +1,12 @@
-"""Core PointCloud class for particle-based computations."""
+"""The :class:`PointCloud` class: smoothing, density, interpolation and deposition.
+
+MPI model: the constructor distributes the particles over the ranks of
+``MPI.COMM_WORLD`` (Hilbert-curve domain decomposition). Every method is a
+collective call. Inputs given as full arrays (positions, field values, query
+positions) are read on rank 0 only; per-particle results are rank-local and
+are collected with :meth:`PointCloud.get`, :meth:`PointCloud.gather_particles`
+or :meth:`PointCloud.gather_queries`.
+"""
 
 import operator
 import warnings
@@ -51,7 +59,12 @@ def _input_error(positions, weights, boxsize) -> str | None:
 
 
 class PointCloud:
-    """Point cloud of particles with positions and weights, the central smudgy object."""
+    """Particles with positions and weights, the central smudgy object.
+
+    ``positions``, ``weights``, fields added via :meth:`add_fields` and all
+    per-particle results hold this rank's share of the particles only, in
+    Hilbert order (on a single rank: all particles, in input order).
+    """
 
     def __init__(
         self,
@@ -92,7 +105,6 @@ class PointCloud:
             re-initialize an already running runtime, or any other
             ``qd.init`` keyword argument (e.g. ``cpu_max_num_threads``).
         """
-        # Initialize MPI environment
         self.verbose = verbose
         self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
@@ -100,16 +112,10 @@ class PointCloud:
         if verbose and self.rank == 0:
             print(f'[smudgy] Using {self.size} MPI rank{"s" if self.size > 1 else ""}')
 
-        # Initialize backend (every rank needs its own device/runtime context)
         self.set_backend(backend, **kwargs)
 
-        # Resolve the full arrays (rank 0 only) and the small, cheap-to-
-        # broadcast metadata (dim, periodic, boxsize, and the domain extent
-        # used for Hilbert quantization) -- `positions_full`/`weights_full`
-        # are deliberately local variables, never assigned to `self`, and
-        # scattered away below rather than ever broadcast in full.
-        # Validated on rank 0 (the only rank reading the inputs); the verdict
-        # is broadcast so that every rank raises together.
+        # Inputs are validated on rank 0, the only rank reading them; the
+        # verdict is broadcast so that every rank raises together.
         error_msg = None
         if self.rank == 0:
             positions = np.asarray(positions)
@@ -136,32 +142,18 @@ class PointCloud:
                 periodic_resolved = True
                 boxsize_resolved = np.broadcast_to(np.asarray(boxsize), (dim,)).copy()
 
-                # Wrap into [0, boxsize) canonically, in float32 (the dtype
-                # `self.positions` is stored in): raw input isn't guaranteed
-                # pre-wrapped, and even input that IS within [0, boxsize) in
-                # float64 can round up to exactly (or past) boxsize once cast
-                # to float32 above -- which scipy's periodic cKDTree (used
-                # for the smoothing-length neighbor search) rejects outright
-                # ("some data is outside of the periodic domain").
-                # `boxsize_resolved` isn't itself guaranteed float32 (e.g. a
-                # plain Python float given as `boxsize` stays float64
-                # through `np.asarray`), so it's cast explicitly first --
-                # np.mod would otherwise silently upcast `positions_full` to
-                # float64. The `np.minimum` step closes one more edge case
-                # np.mod alone doesn't fully rule out: for a value extremely
-                # close to a multiple of boxsize, the internal subtraction
-                # can itself round back up to exactly boxsize, so this clips
-                # to the largest float32 strictly below it.
+                # Wrap into [0, boxsize) in float32: the input need not be
+                # wrapped, and values just below boxsize can round up to it
+                # in float32, which scipy's periodic cKDTree rejects. Both
+                # np.mod and the cast can land exactly on boxsize, hence the
+                # clip to the largest float32 below it.
                 boxsize_f32 = boxsize_resolved.astype(np.float32)
                 positions_full = np.mod(positions_full, boxsize_f32)
                 positions_full = np.minimum(
                     positions_full, np.nextafter(boxsize_f32, np.float32(0))
                 ).astype(np.float32)
 
-            # Domain extent for Hilbert quantization, resolved here (against
-            # this rank-0-local array, before it's scattered away) rather
-            # than by a separate post-construction call: periodic -> [0,
-            # boxsize]; non-periodic -> the data's own bounding box.
+            # domain of the Hilbert quantization: the box, or the bounding box
             if periodic_resolved:
                 domain_min = np.zeros(dim, dtype=np.float32)
                 domain_max = boxsize_resolved.astype(np.float32)
@@ -197,11 +189,7 @@ class PointCloud:
             domain_max=domain_max,
             periodic=self.periodic,
         )
-        # Aliases, not copies: self.positions/self.weights ARE
-        # self.decomposition.local_positions/local_weights, so every
-        # existing consumer of self.decomposition.local_* (ghosts.py,
-        # decomposition.py, every prior test) keeps working unchanged, and
-        # self.positions now means "this rank's local slice" everywhere.
+        # aliases of this rank's share, not copies
         self.positions = self.decomposition.local_positions
         self.weights = self.decomposition.local_weights
 
@@ -210,7 +198,6 @@ class PointCloud:
         self.query_routing = QueryRouting()
         self._fields = set()  # names added via add_fields
 
-        # Verbose output after completed initialization
         if self.verbose and self.rank == 0:
             periodic_str = (
                 f"in periodic box of size={self.boxsize}"
@@ -225,19 +212,11 @@ class PointCloud:
             )
 
     def __setattr__(self, name: str, value: Any) -> None:
-        """Plain attribute assignment (`pc.a = b`) is treated as per-rank
-        metadata -- set as-is on this rank only, never scattered. Warns
-        (doesn't block) when that looks like a likely mistake: an `ndarray`
-        whose length equals the *global* particle count, on a run with more
-        than one rank -- the sanctioned way to add a per-particle field is
-        `add_fields`, which validates shape against the global count,
-        Hilbert-reorders, and scatters it into local-sized shares.
+        """Set an attribute on this rank only, without distributing it.
 
-        Scoped to `self.size > 1` only: at `size == 1`, local count == global
-        count, so a bare `pc.a = np.ones(N)` is already a fully valid,
-        correctly-ordered assignment there (indistinguishable, by shape
-        alone, from what `add_fields` itself would produce) -- nothing to
-        warn about.
+        On several ranks, warns if the value looks like a full per-particle
+        array (length = total particle count): such fields must be added with
+        :meth:`add_fields`, which distributes them like the particles.
         """
         if (
             isinstance(value, np.ndarray)
@@ -260,9 +239,6 @@ class PointCloud:
             )
         object.__setattr__(self, name, value)
 
-    # =============================================================================
-    # Set utilities
-    # =============================================================================
     def set_backend(self, backend: str = "quadrants", **kwargs) -> None:
         """Set the computational backend.
 
@@ -315,7 +291,7 @@ class PointCloud:
         Returns
         -------
         PointCloud
-            self, for chaining (mirrors `global_setup`).
+            self, for chaining.
 
         """
         num_neighbors_temp = self._resolve_num_neighbors(num_neighbors)
@@ -386,10 +362,8 @@ class PointCloud:
         local_global_indices = self.query_routing.local_global_indices
         if local_global_indices is None:
             raise AttributeError(
-                "No query-position routing available yet; call 'interpolate' "
-                "with 'query_positions' set (with the local+ghost path active, "
-                "i.e. after 'find_neighbors'/'compute_smoothing') "
-                "first."
+                "No query positions have been routed yet; call 'interpolate' "
+                "or 'compute_smoothing' with 'query_positions' first."
             )
         if local_array.shape[0] != local_global_indices.shape[0]:
             raise ValueError(
@@ -471,9 +445,6 @@ class PointCloud:
             }[name]
             print(message)
 
-    # =============================================================================
-    # Check utilities
-    # =============================================================================
     def _check_property(self, property: str | None = None) -> None:
         """Ensure a global property is set before use."""
         if not hasattr(self, property):
@@ -482,15 +453,7 @@ class PointCloud:
             )
 
     def _check_neighbors(self, nn_inds: npt.NDArray[np.integer], n_valid: int) -> None:
-        """Verify that neighbor indices are within valid bounds.
-
-        `n_valid` is the size of the (local + ghost) combined array `nn_inds`
-        indexes into -- always passed explicitly by the caller, since that
-        combined size depends on how many ghosts were fetched. A rank with
-        zero local rows (N < P, or a query batch that routed none here) has
-        an empty `nn_inds` -- `np.max` on an empty array raises unconditionally,
-        so there is vacuously nothing to check in that case.
-        """
+        """Raise if `nn_inds` points past the `n_valid` local + ghost particles."""
         if nn_inds.size == 0:
             return
         max_idx = np.max(nn_inds)
@@ -500,33 +463,18 @@ class PointCloud:
             )
 
     def _ensure_neighbors_found(self, num_neighbors: int) -> None:
-        """Lazily run `find_neighbors()` on first use, mirroring the pre-
-        decomposition-refactor behavior of building the tree and finding
-        neighbors automatically at the first call that actually needs them,
-        rather than requiring an explicit `find_neighbors()` call first.
+        """Run :meth:`find_neighbors` if no neighbors have been found yet.
 
-        Safe as a collective: `self.ghosts.nn_inds` starts identically `None`
-        on every rank (set once, together, either here or by an explicit
-        `find_neighbors()` call -- never by rank-dependent branching), so
-        every rank reaches the same decision on whether to call
-        `find_neighbors()` here. Relies on particle positions never changing
-        after construction (no re-decomposition/rebalancing is supported) -- once found, ghosts/neighbors remain
-        valid for this `PointCloud`'s lifetime, so this triggers at most once;
-        every call after the first sees `nn_inds` already populated and is a
-        no-op.
+        The condition is identical on every rank, so this is collective-safe.
         """
         if self.ghosts.nn_inds is None:
             self.find_neighbors(num_neighbors=num_neighbors)
 
+    @staticmethod
     def _combined_local_and_ghost(
-        self, local_arr: npt.NDArray[Any], ghost_arr: npt.NDArray[Any]
+        local_arr: npt.NDArray[Any], ghost_arr: npt.NDArray[Any]
     ) -> npt.NDArray[Any]:
-        """Concatenate a rank's local array with its imported ghosts',
-        local rows first -- the ordering `GhostInfo.nn_inds` assumes (a
-        value < n_local indexes `local_arr`, >= n_local indexes `ghost_arr`
-        at `value - n_local`). Named so this invariant lives in one place
-        instead of being repeated by hand at every call site.
-        """
+        """Local rows followed by ghost rows, the order ``nn_inds`` indexes into."""
         return np.concatenate([local_arr, ghost_arr], axis=0)
 
     def _combined_positions_weights(self, ghost_positions, ghost_weights):
@@ -588,8 +536,7 @@ class PointCloud:
             )
 
     def _check_shape(self, arr: npt.NDArray[Any], name: str) -> None:
-        """Ensure the first dimension of an array matches this rank's local
-        particle count (`self.positions` is always local, never full-N)."""
+        """Raise unless `arr` has one row per local particle."""
         if arr.shape[0] != self.positions.shape[0]:
             raise ValueError(
                 f"Length of '{name}' ({arr.shape[0]}) must match number of points ({self.positions.shape[0]})"
@@ -624,9 +571,6 @@ class PointCloud:
                         f"(the spatial dimension), but field {i} has {size} component(s)"
                     )
 
-    # =============================================================================
-    # Resolve utilities
-    # =============================================================================
     def _resolve_structure(self, structure: Structure | None) -> Structure:
         """Resolve the smoothing structure from argument or global state."""
         if structure is None:
@@ -643,9 +587,8 @@ class PointCloud:
         if kernel_name is None:
             self._check_property("kernel_name")
             return self.kernel_name
-        assert isinstance(
-            kernel_name, str
-        ), f"'kernel_name' must be a string but found {type(kernel_name)}"
+        if not isinstance(kernel_name, str):
+            raise TypeError(f"'kernel_name' must be a string but found {type(kernel_name)}")
         return kernel_name
 
     def _resolve_num_neighbors(self, num_neighbors: int | None = None) -> int:
@@ -675,14 +618,11 @@ class PointCloud:
         fields: npt.ArrayLike | str | list[str],
         dtype: npt.DTypeLike | None = None,
     ) -> tuple[npt.NDArray[np.floating], list[int]]:
-        """Resolve fields to a single array and return component counts.
+        """Stack fields into one (n_local, C) array; also return each field's C.
 
-        A field given by name was already decomposed by `add_fields` (local-
-        sized already). A field given directly as an array is *not*
-        decomposed for the caller -- it must already be this rank's local
-        slice (same convention `self.positions` uses), not a full-N array.
-        If `dtype` is given, the result is a C-contiguous array of that
-        dtype, built with a single copy (no extra cast afterwards).
+        Names refer to attributes (fields from :meth:`add_fields`); arrays
+        must already be this rank's share, indexed like ``self.positions``.
+        With `dtype`, the result is C-contiguous of that dtype (one copy).
         """
         if isinstance(fields, (str, np.ndarray)):
             fields = [fields]
@@ -736,7 +676,6 @@ class PointCloud:
         """Resolve averaged flags to one bool per scalar field component."""
         total_components = sum(field_sizes)
 
-        # Single bool -> broadcast everywhere
         if isinstance(averaged, bool):
             return np.full(total_components, averaged, dtype=np.bool_)
 
@@ -745,13 +684,10 @@ class PointCloud:
                 f"'averaged' must be a bool or sequence of bools, found {type(averaged)}"
             )
 
-        # Case 1:
-        # User provided one bool per scalar component already
+        # one flag per component, or one per field
         if len(averaged) == total_components:
             return np.asarray(averaged, dtype=np.bool_)
 
-        # Case 2:
-        # User provided one bool per field -> broadcast components
         if len(averaged) == len(field_sizes):
             resolved = []
             for avg, size in zip(averaged, field_sizes):
@@ -768,6 +704,7 @@ class PointCloud:
     def _resolve_gridnums(
         self, gridnums: int | Sequence[int], dim: int
     ) -> npt.NDArray[np.int_]:
+        """Per-axis cell counts from a scalar or a length-`dim` sequence."""
         gn = np.atleast_1d(gridnums).astype(np.int32)
         if gn.size == 1:
             gn = np.repeat(gn, dim)
@@ -779,12 +716,6 @@ class PointCloud:
             raise ValueError(f"'gridnums' must be positive, got {gn.tolist()}")
         return gn
 
-    # =============================================================================
-    # Tree utilities
-    # =============================================================================
-    # =============================================================================
-    # Preparation / helper methods
-    # =============================================================================
     def global_setup(
         self,
         structure: Structure | None = None,
@@ -837,12 +768,10 @@ class PointCloud:
         tensor_options: dict,
         at_particles: bool,
     ) -> None:
-        """Shared body of `compute_smoothing()`'s two branches: particle
-        positions (`ghost_info` is `self.ghosts`, from `find_neighbors()`)
-        or arbitrary query positions (`ghost_info` is a fresh
-        `exchange_ghosts(..., target_positions=...)` result, routed the same
-        way `interpolate(query_positions=...)` routes them). Stores
-        local-sized results into `self.smoothing.*`.
+        """Compute smoothing at this rank's targets and store it in ``self.smoothing``.
+
+        The targets are the local particles (`ghost_info` = ``self.ghosts``)
+        or routed query positions (`ghost_info` from a query ghost exchange).
         """
         nn_inds_local = ghost_info.nn_inds
         nn_dists_local = ghost_info.nn_dists
@@ -886,16 +815,43 @@ class PointCloud:
             nn_dists_local,
         )
         self.smoothing.num_neighbors = num_neighbors_temp
-        # Aliased (not copied): lets compute_density()/interpolate() rebuild
-        # the same combined [local, ghost] array nn_inds indexes into,
-        # without assuming it was always self.ghosts (see SmoothingInfo's
-        # docstring -- ghost_info here is query_ghosts, not self.ghosts, for
-        # the arbitrary-query-position case above).
+        # the ghost set nn_inds refers to (not necessarily self.ghosts)
         self.smoothing.ghost_positions = ghost_info.ghost_positions
         self.smoothing.ghost_weights = ghost_info.ghost_weights
         self.smoothing.at_particles = at_particles
         self._reset_densities()
         self._check_neighbors(nn_inds_local, n_valid=combined_positions.shape[0])
+
+    def _has_query_positions(self, query_positions) -> bool:
+        """Whether query positions were given, as decided on rank 0 for all ranks."""
+        has_query_positions = query_positions is not None
+        if self.size > 1:
+            has_query_positions = execution._bcast(
+                self.comm, has_query_positions if self.rank == 0 else None
+            )
+        return has_query_positions
+
+    def _route_queries(self, query_positions, num_neighbors: int) -> GhostInfo:
+        """Route query positions to the ranks owning their region.
+
+        The positions are read on rank 0. Stores the routing in
+        ``self.query_routing`` and returns the queries' nearest neighbors.
+        """
+        query_positions_root = (
+            np.asarray(query_positions, dtype=np.float32) if self.rank == 0 else None
+        )
+        self.query_routing = route_query_positions(
+            self.comm, self.decomposition, query_positions_root, self.periodic
+        )
+        return exchange_ghosts(
+            self.comm,
+            self.decomposition,
+            num_neighbors,
+            self.dim,
+            self.periodic,
+            self.boxsize,
+            target_positions=self.query_routing.local_positions,
+        )
 
     def compute_smoothing(
         self,
@@ -906,7 +862,7 @@ class PointCloud:
         min_axis: float | None = None,
         volume_preserving: bool = False,
     ) -> None:
-        """Compute smoothing lengths/tensors for SPH calculations.
+        r"""Compute smoothing lengths/tensors for SPH calculations.
 
         Parameters
         ----------
@@ -936,10 +892,6 @@ class PointCloud:
             the `num_neighbors`-th neighbor): anisotropy in shape only. May
             break the property that the kernel support encloses all neighbors.
 
-        Returns
-        -------
-        None
-
         Notes
         -----
         Results are stored in the ``smoothing`` attribute and are rank-local
@@ -947,9 +899,9 @@ class PointCloud:
 
         Isotropic and separable smoothing lengths are the distance to the
         ``num_neighbors``-th nearest neighbor. Covariant smoothing tensors
-        follow Marinho (2021): :math:`H = \\zeta_{\\max} \\Sigma^{1/2}`, with
-        :math:`\\Sigma` the mass-weighted covariance of the neighbors about
-        the query point and :math:`\\zeta_{\\max}` their largest Mahalanobis
+        follow Marinho (2021): :math:`H = \zeta_{\max} \Sigma^{1/2}`, with
+        :math:`\Sigma` the mass-weighted covariance of the neighbors about
+        the query point and :math:`\zeta_{\max}` their largest Mahalanobis
         distance, so the kernel support is the smallest ellipsoid of that
         shape enclosing all neighbors. Like every collective call, all MPI
         ranks must pass the same ``ratio_max``/``min_axis``/
@@ -965,22 +917,7 @@ class PointCloud:
         }
         self._ensure_neighbors_found(num_neighbors_temp)
 
-        # whether query_positions was supplied is decided by rank 0 alone
-        # (other ranks may pass anything, e.g. None) -- otherwise ranks
-        # could take different branches below and hang/diverge in the
-        # collective calls each branch makes (mirrors interpolate()'s
-        # has_query_positions handling).
-        has_query_positions = query_positions is not None
-        if self.size > 1:
-            has_query_positions = execution._bcast(
-                self.comm, has_query_positions if self.rank == 0 else None
-            )
-
-        if not has_query_positions:
-            # self.ghosts.nn_inds has the k find_neighbors() was last called
-            # with baked in -- a mismatch can't be silently reused (it would
-            # read the wrong number of neighbors), so this must raise rather
-            # than guess.
+        if not self._has_query_positions(query_positions):
             if self.ghosts.nn_inds.shape[1] != num_neighbors_temp:
                 raise ValueError(
                     f"'num_neighbors' ({num_neighbors_temp}) does not match "
@@ -1005,25 +942,7 @@ class PointCloud:
             )
             return
 
-        # Arbitrary query positions: route them by Hilbert code the same way
-        # interpolate(query_positions=...) does (Step 4b), then solve their
-        # K-NN with a fresh generalized ghost exchange -- num_neighbors here
-        # is this call's own, not tied to self.ghosts/find_neighbors().
-        query_positions_root = (
-            np.asarray(query_positions, dtype=np.float32) if self.rank == 0 else None
-        )
-        self.query_routing = route_query_positions(
-            self.comm, self.decomposition, query_positions_root, self.periodic
-        )
-        query_ghosts = exchange_ghosts(
-            self.comm,
-            self.decomposition,
-            num_neighbors_temp,
-            self.dim,
-            self.periodic,
-            self.boxsize,
-            target_positions=self.query_routing.local_positions,
-        )
+        query_ghosts = self._route_queries(query_positions, num_neighbors_temp)
         if self.verbose and self.rank == 0:
             info_str = "tensors" if structure_temp == "covariant" else "lengths"
             print(
@@ -1086,16 +1005,6 @@ class PointCloud:
         if self.verbose and self.rank == 0:
             print(f"[smudgy] Computing density using {st} '{kn}' kernel")
 
-        # self.smoothing.nn_inds/smoothing_lengths/smoothing_tensors are
-        # already local-sized (compute_smoothing's local+ghost result), so
-        # no _local_slice chunking is needed -- an already-local array
-        # doesn't need re-chunking. Neighbors can be ghosts (imported from
-        # other ranks), which is why combined_positions/combined_weights
-        # (local + ghost) rather than self.decomposition.local_* alone are
-        # needed to index nn_inds -- using self.smoothing.ghost_positions/
-        # ghost_weights (not self.ghosts directly), since compute_smoothing()
-        # may have used a different ghost set (an arbitrary-query-position
-        # call), see SmoothingInfo's docstring.
         nn_inds_local = self.smoothing.nn_inds
         combined_positions, combined_weights = self._combined_positions_weights(
             self.smoothing.ghost_positions, self.smoothing.ghost_weights
@@ -1170,12 +1079,7 @@ class PointCloud:
                 f"'{name}' is an existing PointCloud attribute and cannot be "
                 "used as a field name."
             )
-        # caller-supplied field values are only authoritative on rank 0.
-        # Shape validated against the GLOBAL count (not self.positions.
-        # shape[0], which is local) here, before any scattering -- and the
-        # pass/fail decision is broadcast so every rank raises together (or
-        # none do) rather than rank 0 raising before calling _scatterv_rows
-        # while every other rank is already waiting on that same collective.
+        # values are read and checked on rank 0; every rank raises together
         if self.rank == 0:
             values_full = np.asarray(values, dtype=np.float32)
             n_total = int(self.decomposition.counts.sum())
@@ -1218,13 +1122,11 @@ class PointCloud:
             Name(s) of the field(s) to delete.
 
         """
-        # --- Case 1: multiple fields ---
         if isinstance(names, (list, tuple)):
             for name in names:
-                self.delete_fields(name)  # recursive call
+                self.delete_fields(name)
             return
 
-        # --- Case 2: single field ---
         name = names
 
         if name in self._fields:
@@ -1350,11 +1252,9 @@ class PointCloud:
         npt.NDArray[np.float32] | None,
         npt.NDArray[np.float32] | None,
     ]:
-        """Prepare smoothing data (h, h_vals, h_vecs) for an adaptive deposition call.
+        """Smoothing data ``(h, eigvals, eigvecs)`` of the particles `idx` for deposit.
 
-        `idx` is this rank's already-local set of particle indices (see
-        `deposit`), not a full-size boolean mask -- keeps this gather at
-        O(n/size) instead of O(n) per rank.
+        `idx` is a slice or index array into this rank's particles.
         """
         self._check_smoothing_computed(
             "isotropic" if structure == "separable" else structure
@@ -1369,9 +1269,6 @@ class PointCloud:
 
         if structure == "covariant":
             if plane_projection is not None:
-                # reduce=False: this result is immediately consumed locally
-                # by `deposit`'s own dispatch call below, not surfaced to
-                # the caller, so there's nothing to gather here.
                 _, vals, vecs = execution._dispatch(
                     "project_2d",
                     backend=self.backend,
@@ -1394,29 +1291,17 @@ class PointCloud:
         mode: InterpolationMode,
         structure_temp: Structure,
     ) -> npt.NDArray[np.floating]:
-        """Shared body of `interpolate()`'s two local+ghost branches.
+        """Interpolate `fields` at this rank's targets (rank-local result).
 
-        SPH-interpolates `fields` at `query_positions_local` using
-        `ghost_info.nn_inds`/`nn_dists` (already solved -- either by
-        `find_neighbors()` for the particle-position case, or by a fresh
-        `ghosts.exchange_ghosts(..., target_positions=...)` call for the
-        arbitrary-query-position case, Step 4b) against this rank's own
-        local particles plus `ghost_info`'s imported ghosts.
-        `ghost_info.export_local_index`/`export_counts` must correspond to
-        the exact same exchange that produced `nn_inds` -- used here via
-        `push_to_ghosts` to fetch each neighbor's already-computed
-        density/smoothing data from whichever rank actually computed it.
-        Returns a local-sized (not full-N/M, not gathered) array; the caller
-        is responsible for knowing how to reassemble it (see `interpolate`).
+        `ghost_info` holds the targets' neighbor lists into the local
+        particles followed by its ghosts; the ghosts' fields, densities and
+        smoothing are fetched from their owning ranks with `push_to_ghosts`.
         """
         nn_inds_local = ghost_info.nn_inds
         combined_positions, combined_weights = self._combined_positions_weights(
             ghost_info.ghost_positions, ghost_info.ghost_weights
         )
 
-        # fields is already this rank's local slice (add_fields() now
-        # decomposes fields the same way positions/weights are, so no
-        # local_global_indices slicing is needed here anymore).
         ghost_fields = push_to_ghosts(self.comm, ghost_info, fields)
         combined_fields = self._combined_local_and_ghost(fields, ghost_fields)
 
@@ -1462,9 +1347,6 @@ class PointCloud:
             structure=structure_temp,
         )
 
-    # =============================================================================
-    # Core methods
-    # =============================================================================
     def interpolate(
         self,
         fields: npt.ArrayLike | str | list[str],
@@ -1568,9 +1450,6 @@ class PointCloud:
         >>> curl = pc.interpolate('velocity', query_positions, mode='curl')
 
         """
-        # ----------------------------
-        # Setup
-        # ----------------------------
         check_interpolation_mode(mode, self.dim)
         structure_temp = self._resolve_structure(structure)
         check_particle_structure(structure_temp, "interpolation")
@@ -1579,27 +1458,10 @@ class PointCloud:
         kernel_name = self.smoothing.density_kernel[structure_temp]
         num_neighbors = self.smoothing.num_neighbors
 
-        # cast fields to correct input format and validate their dimensionality for the requested mode
         fields, fields_sizes = self._resolve_fields(fields)
         self._check_field_dimensionality(mode, fields_sizes)
 
-        # whether query_positions was supplied is decided by rank 0 alone
-        # (other ranks may pass anything, e.g. None) -- otherwise ranks
-        # could take different branches below and hang/diverge in the
-        # collective execution._dispatch call at the end of this method.
-        has_query_positions = query_positions is not None
-        if self.size > 1:
-            has_query_positions = execution._bcast(
-                self.comm, has_query_positions if self.rank == 0 else None
-            )
-
-        # Two cases, both sharing `_interpolate_local`'s body: evaluate at
-        # the particles themselves (nn_inds already solved by
-        # find_neighbors(), via self.ghosts), or at arbitrary caller-
-        # supplied query positions (route them by the same Hilbert
-        # partition, then solve their K-NN with a generalized ghost
-        # exchange).
-        if not has_query_positions:
+        if not self._has_query_positions(query_positions):
             if self.ghosts.nn_inds.shape[1] != num_neighbors:
                 raise ValueError(
                     f"The neighbor lists ({self.ghosts.nn_inds.shape[1]} neighbors, "
@@ -1619,28 +1481,7 @@ class PointCloud:
                 structure_temp,
             )
 
-        # Root-authoritative, like hilbert_partition_and_scatter --
-        # route_query_positions Scatterv's the routed chunks itself, so
-        # (unlike the old path below) the full (M, D) array is never
-        # broadcast to every rank.
-        query_positions_root = (
-            np.asarray(query_positions, dtype=np.float32)
-            if self.rank == 0
-            else None
-        )
-        self.query_routing = route_query_positions(
-            self.comm, self.decomposition, query_positions_root, self.periodic
-        )
-        query_ghosts = exchange_ghosts(
-            self.comm,
-            self.decomposition,
-            num_neighbors,
-            self.dim,
-            self.periodic,
-            self.boxsize,
-            target_positions=self.query_routing.local_positions,
-        )
-
+        query_ghosts = self._route_queries(query_positions, num_neighbors)
         self._print_interpolation(mode, "query positions", structure_temp, kernel_name)
         return self._interpolate_local(
             self.query_routing.local_positions,
@@ -1806,19 +1647,9 @@ class PointCloud:
 
         d_lens = domain_max - domain_min
 
-        # idx_local selects this rank's own local particles falling within
-        # the requested extent -- already this rank's share (Step 1's
-        # Hilbert partition already balanced counts, so no further chunking
-        # is needed here). For adaptive=True, this assumes compute_smoothing()
-        # was last called at particle positions (not query_positions) --
-        # matching this method's own long-standing "use the instance's
-        # smoothing data" contract.
-        #
-        # With extent=None every particle is selected: the box is periodic
-        # and __init__ already wrapped positions into [0, boxsize), so the
-        # mask would be all-True. slice(None) then turns every gather below
-        # (and in _prepare_deposition_smoothing) into a free view instead of
-        # a full copy -- these copies used to dominate fixed-grid runtimes.
+        # idx_local selects this rank's particles inside the extent. Without
+        # an extent every (wrapped) particle is inside, and slice(None) keeps
+        # all gathers below views instead of copies.
         local_positions = self.decomposition.local_positions
         if extent is None:
             idx_local = slice(None)
@@ -1834,9 +1665,6 @@ class PointCloud:
         if np.any(domain_min != 0):
             pos_temp = pos_temp - domain_min
         weights_temp = self.decomposition.local_weights[idx_local]
-        # fields is already this rank's local slice (add_fields() decomposes
-        # fields the same way positions/weights are), so only idx_local's
-        # own within-rank selection is needed here.
         fields_temp = fields[idx_local]
 
         # if plane_projection is set, collect relevant axes
@@ -1858,7 +1686,6 @@ class PointCloud:
                 )
             plane_projection = [int(a) for a in plane_projection]
 
-            # fancy indexing does not work here -> use np.take to select and stack relevant axes
             pos_temp = np.take(pos_temp, plane_projection, axis=1)
             d_lens = np.take(d_lens, plane_projection).astype(np.float32)
 
@@ -1866,9 +1693,6 @@ class PointCloud:
         dep_dim = pos_temp.shape[1]
         gridnums_temp = self._resolve_gridnums(gridnums, dep_dim)
 
-        # ----------------------------
-        # Input preparation
-        # ----------------------------
         h = h_vals = h_vecs = None
         if adaptive:
             h, h_vals, h_vecs = self._prepare_deposition_smoothing(
@@ -1899,9 +1723,6 @@ class PointCloud:
                 deposit_kwargs["particle_hmat_eigvecs"] = h_vecs
                 deposit_kwargs["particle_hmat_eigvals"] = h_vals
 
-        # ----------------------------
-        # Verbose output / computation
-        # ----------------------------
         if self.verbose and self.rank == 0:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")

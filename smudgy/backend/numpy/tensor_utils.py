@@ -1,4 +1,4 @@
-# backend/numpy/tensor_utils.py
+"""Eigenvector conventions and plane projection of smoothing tensors (NumPy)."""
 
 import numpy as np
 

@@ -58,7 +58,8 @@ def covariant_inputs_from_inverse(
     r_vec, H_inv, inv_det: qd.f32, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
     """Kernel coordinate q = |H^-1 r|, its gradient and the prefactor
-    sigma / det(H), from the precomputed H^-1 and 1/det(H) of one particle."""
+    sigma / det(H), from the precomputed H^-1 and 1/det(H) of one particle.
+    """
     xi = H_inv @ r_vec
     q = xi.norm()
     scale = sigma_val * inv_det
@@ -97,8 +98,8 @@ def _erf(x: qd.f32) -> qd.f32:
 def _spherical_evaluate_integral_default(
     F_fn: qd.template(), support: qd.f32, dim: qd.template(), q1: qd.f32, q2_in: qd.f32
 ) -> qd.f32:
-    """Default SphericalKernel::evaluate_integral (used by kernels that don't
-    override it: Tophat, Lucy, Gaussian, WendlandC2/C4/C6).
+    """Radial integral F(q2) - F(q1) over [q1, q2] clipped to [0, support]
+    (used by the kernels without a piecewise-specialised version).
     """
     result = 0.0
     q2 = q2_in
@@ -120,8 +121,8 @@ def _separable_integrate_1d(
     q0_in: qd.f32,
     q1_in: qd.f32,
 ) -> qd.f32:
-    """SeparableKernel::integrate_1d -- 1D integral between two bounds,
-    handling the kernel's even symmetry (evaluated via F_1d on |q|).
+    """Integral of an even 1D kernel over [q0, q1] clipped to the support,
+    from its antiderivative F_1d on |q|.
     """
     result = 0.0
     q0 = q0_in
@@ -139,7 +140,7 @@ def _separable_integrate_1d(
 
 
 # =============================================================================
-# Separable kernels (SeparableKernel subclasses)
+# Separable kernels (1D profiles of tensor-product kernels)
 # =============================================================================
 # --- TophatRect ---------------------------------------------------------
 TOPHAT_RECT_SUPPORT = SEPARABLE["tophat"].support
@@ -211,7 +212,7 @@ def gaussian_sep_F_1d(q_in: qd.f32, dim: qd.template()) -> qd.f32:
 
 
 # =============================================================================
-# Spherical kernels (SphericalKernel subclasses)
+# Spherical (radial) kernels
 # =============================================================================
 # --- Tophat ----------------------------------------------------------------
 TOPHAT_SUPPORT = SPHERICAL["tophat"].support
@@ -1025,7 +1026,9 @@ def create_separable_kernel(name: str) -> SeparableKernelSpec:
     try:
         return SEPARABLE_KERNELS[name]
     except KeyError:
-        raise ValueError(f"Unknown kernel: {name!r}") from None
+        raise ValueError(
+            f"Unknown separable kernel: {name!r}. Available: {list(SEPARABLE_KERNELS)}"
+        ) from None
 
 
 def create_spherical_kernel(name: str) -> SphericalKernelSpec:
@@ -1050,16 +1053,16 @@ def create_spherical_kernel(name: str) -> SphericalKernelSpec:
     try:
         return SPHERICAL_KERNELS[name]
     except KeyError:
-        raise ValueError(f"Unknown kernel: {name!r}") from None
+        raise ValueError(
+            f"Unknown spherical kernel: {name!r}. Available: {list(SPHERICAL_KERNELS)}"
+        ) from None
 
 
 # =============================================================================
 # Sample grid kernels and wrapper
 # =============================================================================
-# One qd.kernel per dimension, mirroring the dim==1/2/3 branches in the C++.
-# `evaluate_integral_fn` and `sigma_fn` are passed as qd.template() so the
-# chosen kernel's math is fully inlined -- no virtual call, no runtime
-# dispatch on which kernel this is.
+# Kernel functions are passed as qd.template() arguments, so each kernel's
+# math is inlined into a specialised compiled kernel.
 
 
 # --------------------------------------------------------------------------
@@ -1355,7 +1358,7 @@ def _build_kernel_sample_grid_cached(
 
 
 # =============================================================================
-# Utility functions (debugging / testing parity with the C++ helpers)
+# Utility functions (normalisation checks, kernel profiles)
 # =============================================================================
 @qd.kernel
 def _separable_axis_integral(
@@ -1430,7 +1433,7 @@ def _sample_profile_1d(
     q_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
     values_out: qd.types.ndarray(dtype=qd.f32, ndim=1),
 ):
-    """sigma * W(|q|) on `num_samples` points spanning [-support, support)."""
+    """Sigma * W(|q|) on `num_samples` points spanning [-support, support)."""
     dq = 2.0 * support / num_samples
     sig = sigma_fn(dim)
     for i in range(num_samples):

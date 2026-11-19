@@ -1,4 +1,5 @@
-# backend/numpy/smoothing.py
+"""Smoothing lengths and covariant smoothing tensors (NumPy reference backend)."""
+
 import numpy as np
 import numpy.typing as npt
 

@@ -7,6 +7,8 @@ BACKENDS = ("numpy", "quadrants")
 
 
 class Routine(NamedTuple):
+    """Where a backend routine lives: ``backend/<name>/<module>.<function>``."""
+
     module: str  # module inside backend/<name>/
     function: str
 
