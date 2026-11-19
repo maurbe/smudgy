@@ -1634,9 +1634,11 @@ class PointCloud:
             Number of cells along each axis.
         extent : Optional[Sequence[Sequence[float]]], optional
             Domain bounds ``[[xmin, xmax], [ymin, ymax], ...]``, one row per
-            dimension of the point cloud. Only particles inside are
-            deposited. If None, uses ``[0, boxsize]`` (required for
-            non-periodic point clouds).
+            dimension of the point cloud. If given, the grid spans exactly
+            this extent with `gridnums` cells, is non-periodic (whether or
+            not `boxsize` was set), and only particles inside are deposited.
+            If None, uses ``[0, boxsize]`` with the cloud's periodicity;
+            then `boxsize` must be set.
         adaptive : bool, default True
             If True, use the instance's smoothing data (see
             :meth:`compute_smoothing`) with the selected structure and
@@ -1719,7 +1721,16 @@ class PointCloud:
                 bool(self.periodic),
             )
         else:
+            # an explicit extent always wins over boxsize: non-periodic grid
+            # spanning exactly [min, max] per axis, whether or not the cloud
+            # was built with a (periodic) boxsize
             ext = np.asarray(extent, dtype=np.float32)
+            if ext.shape != (self.dim, 2):
+                raise ValueError(
+                    f"'extent' must have shape ({self.dim}, 2), got {ext.shape}"
+                )
+            if np.any(ext[:, 1] <= ext[:, 0]):
+                raise ValueError(f"'extent' needs max > min on every axis, got {ext.tolist()}")
             domain_min, domain_max, periodic = ext[:, 0], ext[:, 1], False
 
         d_lens = domain_max - domain_min
