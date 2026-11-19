@@ -3,6 +3,16 @@
 Kernels are looked up by name in the ``SEPARABLE_KERNELS`` and
 ``SPHERICAL_KERNELS`` registries; the dimension is a compile-time parameter,
 so every (kernel, dimension) pair is compiled into its own specialized code.
+
+Each kernel ``<name>`` is a set of Quadrants functions of q = r / h (constants in
+:mod:`smudgy.backend.kernel_table`):
+
+- spherical: ``<name>_evaluate(q, dim)`` (shape W(q), unnormalised),
+  ``<name>_F(q, dim)`` (radial antiderivative of W(q) q^(dim-1)),
+  ``<name>_evaluate_integral(q1, q2, dim)`` and
+  ``<name>_gradient(q, grad_q, dim)`` (dW/dq * grad_q);
+- separable: ``<name>_sep_evaluate_1d(q, dim)`` and its antiderivative
+  ``<name>_sep_F_1d(q, dim)``.
 """
 
 from collections.abc import Callable
@@ -42,6 +52,7 @@ def _make_sigma(values):
 def prepare_isotropic_inputs(
     r_vec, h: qd.f32, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
+    """Kernel coordinate q = |r| / h, its gradient and the prefactor sigma / h^dim."""
     r_mag = r_vec.norm()
     q = r_mag / (h + eps)
     scale = sigma_val / (h**dim)
@@ -57,8 +68,9 @@ def prepare_isotropic_inputs(
 def covariant_inputs_from_inverse(
     r_vec, H_inv, inv_det: qd.f32, dim: qd.template(), sigma_val: qd.f32, eps: qd.f32
 ):
-    """Kernel coordinate q = |H^-1 r|, its gradient and the prefactor
-    sigma / det(H), from the precomputed H^-1 and 1/det(H) of one particle.
+    """Kernel coordinate q = |H^-1 r|, its gradient and the prefactor sigma / det(H).
+
+    H^-1 and 1/det(H) are precomputed once per particle.
     """
     xi = H_inv @ r_vec
     q = xi.norm()
@@ -77,6 +89,7 @@ def covariant_inputs_from_inverse(
 @qd.func
 def _erf(x: qd.f32) -> qd.f32:
     """Abramowitz & Stegun 7.1.26 approximation, max abs error ~1.5e-7.
+
     Quadrants has no built-in erf, needed for the Gaussian kernels' F(q).
     """
     sign = 1.0
@@ -98,8 +111,9 @@ def _erf(x: qd.f32) -> qd.f32:
 def _spherical_evaluate_integral_default(
     F_fn: qd.template(), support: qd.f32, dim: qd.template(), q1: qd.f32, q2_in: qd.f32
 ) -> qd.f32:
-    """Radial integral F(q2) - F(q1) over [q1, q2] clipped to [0, support]
-    (used by the kernels without a piecewise-specialised version).
+    """Radial integral F(q2) - F(q1) over [q1, q2] clipped to [0, support].
+
+    Used by the kernels without a piecewise-specialised version.
     """
     result = 0.0
     q2 = q2_in
@@ -121,8 +135,9 @@ def _separable_integrate_1d(
     q0_in: qd.f32,
     q1_in: qd.f32,
 ) -> qd.f32:
-    """Integral of an even 1D kernel over [q0, q1] clipped to the support,
-    from its antiderivative F_1d on |q|.
+    """Integral of an even 1D kernel over [q0, q1] clipped to the support.
+
+    Computed from its antiderivative F_1d on |q|.
     """
     result = 0.0
     q0 = q0_in
@@ -1074,7 +1089,7 @@ def create_spherical_kernel(name: str) -> SphericalKernelSpec:
 
 
 def _compute_n_q(eta_crit: float, nyquist_factor: float = 2.0) -> int:
-    """Number of positive-radial shells.
+    """Return the number of radial shells of the sample table.
 
     eta_crit is a diameter ratio; Nyquist spacing applies to the radius, so
     the effective radial eta_crit is eta_crit / 2.
@@ -1086,9 +1101,9 @@ def _compute_n_q(eta_crit: float, nyquist_factor: float = 2.0) -> int:
 def _n_points_circle_shell(
     u_outer: float, eta_crit_radius: float, nyquist_factor: float
 ) -> int:
-    """2D: number of uniformly-spaced angular samples needed on a shell of
-    (normalized) outer radius u_outer, to keep point spacing <= s/nyquist_factor
-    in the worst case (eta -> eta_crit).
+    """Return the 2D angular sample count of a shell of outer radius u_outer.
+
+    Keeps the point spacing <= 1 / nyquist_factor cells for eta -> eta_crit.
     """
     delta = 1.0 / nyquist_factor
     circumference = 2.0 * pi * eta_crit_radius * u_outer
@@ -1098,9 +1113,7 @@ def _n_points_circle_shell(
 def _n_points_sphere_shell(
     u_outer: float, eta_crit_radius: float, nyquist_factor: float
 ) -> int:
-    """3D: number of quasi-uniformly-spaced directional samples needed on a
-    shell of (normalized) outer radius u_outer.
-    """
+    """Return the 3D directional sample count of a shell of outer radius u_outer."""
     delta = 1.0 / nyquist_factor
     r = eta_crit_radius * u_outer
     area = 4.0 * pi * r * r
@@ -1108,8 +1121,9 @@ def _n_points_sphere_shell(
 
 
 def _fibonacci_sphere_points(n: int) -> np.ndarray:
-    """N quasi-uniformly distributed unit vectors on the sphere (Fibonacci
-    spiral point set). No pole clustering, deterministic, O(n).
+    """Return n quasi-uniform unit vectors on the sphere (Fibonacci spiral).
+
+    No pole clustering, deterministic, O(n).
     """
     i = np.arange(n, dtype=np.float64)
     golden_angle = pi * (3.0 - np.sqrt(5.0))
@@ -1147,10 +1161,7 @@ def _build_shell_layout_1d(
 def _build_shell_layout_2d(
     support: float, eta_crit: float, nyquist_factor: float = 2.0
 ):
-    """2D: uniform angular samples per shell (no pole-clustering issue in
-    2D -- a circle has no poles -- so uniform angle spacing is already
-    spherically-uniform).
-    """
+    """Shell layout in 2D: uniformly spaced angles per shell."""
     n_q = _compute_n_q(eta_crit, nyquist_factor)
     eta_crit_radius = eta_crit / 2.0
     dq = support / n_q
@@ -1178,9 +1189,7 @@ def _build_shell_layout_2d(
 def _build_shell_layout_3d(
     support: float, eta_crit: float, nyquist_factor: float = 2.0
 ):
-    """3D: Fibonacci-sphere directional samples per shell -- quasi-uniform
-    coverage of the sphere, no pole clustering.
-    """
+    """Shell layout in 3D: Fibonacci-sphere directions per shell."""
     n_q = _compute_n_q(eta_crit, nyquist_factor)
     eta_crit_radius = eta_crit / 2.0
     dq = support / n_q

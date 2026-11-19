@@ -37,19 +37,19 @@ SEED = 42
 
 def _deposit_single_particle(name, dim, pos, gridnum=GRIDNUM):
     """Deposit one unit-weight particle and return the flattened grid weights."""
-    kernel = dep._KERNELS[(name, dim)]
     particle_positions = np.asarray([pos], dtype=np.float32)
     particle_weights = np.array([1.0], dtype=np.float32)
     particle_fields = particle_weights[:, None]
     boxsizes = np.ones(dim, dtype=np.float32)
     gridnums = [gridnum] * dim
-    _, grid_weights = kernel(
+    _, grid_weights = dep.deposit(
         particle_positions,
         particle_fields,
         particle_weights,
         boxsizes,
         gridnums,
         True,  # periodic
+        name,
     )
     return grid_weights
 

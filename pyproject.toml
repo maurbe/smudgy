@@ -55,3 +55,7 @@ line-length = 88
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "D", "UP"]
 ignore = ["E501", "D203", "D213", "D413"]
+
+[tool.ruff.lint.per-file-ignores]
+# per-kernel qd.funcs follow the naming scheme documented in the module docstring
+"smudgy/backend/quadrants/kernels.py" = ["D103"]

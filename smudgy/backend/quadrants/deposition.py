@@ -1,3 +1,12 @@
+"""Particle-to-grid deposition (Quadrants backend).
+
+Fixed-grid deposition uses B-spline stencils (NGP ... 6-point). Adaptive
+deposition spreads each particle with its own smoothing: separable
+(tensor-product kernels, integrated exactly per cell), isotropic or covariant
+(radial kernels; sampled for kernels small against the cell size, per-cell
+quadrature otherwise). Every kernel is compiled per dimension from one source.
+"""
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,10 +38,10 @@ def _apply_pbc(idx: qd.i32, gridnum: qd.i32) -> qd.i32:
 def _cell_index_from_pos(
     pos: qd.f32, cellSize_inv: qd.f32, gridnum: qd.i32, periodic: qd.template()
 ):
-    """Returns (index, valid). `valid` is always True when periodic
-    (wrapped via modulo); for non-periodic it's False when pos falls
-    outside the grid -- mirrors the C++ optional-returning
-    cell_index_from_pos, minus the std::optional machinery.
+    """Return ``(cell index, valid)`` of a position along one axis.
+
+    Periodic grids wrap the index (always valid); otherwise positions outside
+    the grid are invalid.
     """
     idx = qd.floor(pos * cellSize_inv, int)
     valid = True
@@ -57,8 +66,7 @@ def _cell_index_from_int(idx: qd.i32, gridnum: qd.i32, periodic: qd.template()):
 
 
 def _sample_buffer_size(eta_crit, dim):
-    """Cells per axis of the per-particle local buffer used by the sample
-    branch of isotropic/covariant deposition.
+    """Return the cells per axis of the sample branch's per-particle buffer.
 
     A particle in that branch has kernel diameter eta < eta_crit cells along
     its narrowest axis, so (for isotropic kernels on cubic cells) it touches
@@ -74,6 +82,7 @@ def _sample_buffer_size(eta_crit, dim):
 
 def _round_up_stencil(n, bucket=8):
     """Round the stencil size up to the nearest multiple of `bucket`.
+
     Keeps MAX_STENCIL (a qd.template() arg) taking only a handful of
     distinct values across a run, so Quadrants reuses one compiled kernel
     per bucket instead of JIT-recompiling every time smoothing lengths
@@ -167,211 +176,6 @@ QUADRATURE_POINTS_3D = {
 }
 
 
-@qd.func
-def _isotropic_cell_integral_1d(
-    evaluate_fn: qd.template(),
-    quad_points: qd.template(),
-    dim: qd.template(),
-    a: qd.i32,
-    x_cell: qd.f32,
-    hsm_phys: qd.f32,
-    kernel_prefactor: qd.f32,
-    cellSize_x: qd.f32,
-) -> qd.f32:
-    """Quadrature-integrated kernel mass over cell a."""
-    s = 0.0
-
-    for ox, coeff in qd.static(quad_points):
-        dx = (x_cell - (a + ox)) * cellSize_x
-        q = qd.abs(dx) / hsm_phys
-        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
-
-    return s * cellSize_x
-
-
-@qd.func
-def _isotropic_cell_integral_2d(
-    evaluate_fn: qd.template(),
-    quad_points: qd.template(),
-    dim: qd.template(),
-    a: qd.i32,
-    b: qd.i32,
-    x_cell: qd.f32,
-    y_cell: qd.f32,
-    hsm_phys: qd.f32,
-    kernel_prefactor: qd.f32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-) -> qd.f32:
-    """Quadrature-integrated kernel mass over cell (a, b), matching the
-    C++ `eval` lambda + integrate_cell_2d(...) * cellSize_x * cellSize_y.
-    """
-    s = 0.0
-
-    for ox, oy, coeff in qd.static(quad_points):
-
-        dx = (x_cell - (a + ox)) * cellSize_x
-        dy = (y_cell - (b + oy)) * cellSize_y
-
-        r = qd.sqrt(dx * dx + dy * dy)
-        q = r / hsm_phys
-
-        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
-
-    return s * cellSize_x * cellSize_y
-
-
-@qd.func
-def _isotropic_cell_integral_3d(
-    evaluate_fn: qd.template(),
-    quad_points: qd.template(),
-    dim: qd.template(),
-    a: qd.i32,
-    b: qd.i32,
-    c: qd.i32,
-    x_cell: qd.f32,
-    y_cell: qd.f32,
-    z_cell: qd.f32,
-    hsm_phys: qd.f32,
-    kernel_prefactor: qd.f32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-    cellSize_z: qd.f32,
-) -> qd.f32:
-    """Quadrature-integrated kernel mass over cell (a, b, c)."""
-    s = 0.0
-
-    for ox, oy, oz, coeff in qd.static(quad_points):
-
-        dx = (x_cell - (a + ox)) * cellSize_x
-        dy = (y_cell - (b + oy)) * cellSize_y
-        dz = (z_cell - (c + oz)) * cellSize_z
-
-        r = qd.sqrt(dx * dx + dy * dy + dz * dz)
-        q = r / hsm_phys
-
-        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
-
-    return s * cellSize_x * cellSize_y * cellSize_z
-
-
-@qd.func
-def _covariant_cell_integral_1d(
-    evaluate_fn: qd.template(),
-    quad_points: qd.template(),
-    dim: qd.template(),
-    a: qd.i32,
-    x_cell: qd.f32,
-    e0x: qd.f32,
-    eval0: qd.f32,
-    kernel_prefactor: qd.f32,
-    cellSize_x: qd.f32,
-) -> qd.f32:
-
-    s = 0.0
-
-    for ox, coeff in qd.static(quad_points):
-        dx = (x_cell - (a + ox)) * cellSize_x
-
-        # project the separation vector onto each principal axis and
-        # scale by that axis's own semi-axis length -- this is what
-        # turns the isotropic q = |d| / h into the ellipsoidal q
-        xi0 = (e0x * dx) / eval0
-        q = qd.abs(xi0)  # kernels expect q >= 0 (2D/3D get it from the sqrt)
-        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
-
-    return s * cellSize_x
-
-
-@qd.func
-def _covariant_cell_integral_2d(
-    evaluate_fn: qd.template(),
-    quad_points: qd.template(),
-    dim: qd.template(),
-    a: qd.i32,
-    b: qd.i32,
-    x_cell: qd.f32,
-    y_cell: qd.f32,
-    e0x: qd.f32,
-    e0y: qd.f32,
-    e1x: qd.f32,
-    e1y: qd.f32,
-    eval0: qd.f32,
-    eval1: qd.f32,
-    kernel_prefactor: qd.f32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-) -> qd.f32:
-
-    s = 0.0
-
-    for ox, oy, coeff in qd.static(quad_points):
-        dx = (x_cell - (a + ox)) * cellSize_x
-        dy = (y_cell - (b + oy)) * cellSize_y
-
-        # project the separation vector onto each principal axis and
-        # scale by that axis's own semi-axis length -- this is what
-        # turns the isotropic q = |d| / h into the ellipsoidal q
-        xi0 = (e0x * dx + e0y * dy) / eval0
-        xi1 = (e1x * dx + e1y * dy) / eval1
-
-        q = qd.sqrt(xi0 * xi0 + xi1 * xi1)
-
-        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
-
-    return s * cellSize_x * cellSize_y
-
-
-@qd.func
-def _covariant_cell_integral_3d(
-    evaluate_fn: qd.template(),
-    quad_points: qd.template(),
-    dim: qd.template(),
-    a: qd.i32,
-    b: qd.i32,
-    c: qd.i32,
-    x_cell: qd.f32,
-    y_cell: qd.f32,
-    z_cell: qd.f32,
-    e0x: qd.f32,
-    e0y: qd.f32,
-    e0z: qd.f32,
-    e1x: qd.f32,
-    e1y: qd.f32,
-    e1z: qd.f32,
-    e2x: qd.f32,
-    e2y: qd.f32,
-    e2z: qd.f32,
-    eval0: qd.f32,
-    eval1: qd.f32,
-    eval2: qd.f32,
-    kernel_prefactor: qd.f32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-    cellSize_z: qd.f32,
-) -> qd.f32:
-
-    s = 0.0
-
-    for ox, oy, oz, coeff in qd.static(quad_points):
-        dx = (x_cell - (a + ox)) * cellSize_x
-        dy = (y_cell - (b + oy)) * cellSize_y
-        dz = (z_cell - (c + oz)) * cellSize_z
-
-        # project the separation vector onto each principal axis and
-        # scale by that axis's own semi-axis length -- this is what
-        # turns the isotropic q = |d| / h into the ellipsoidal q
-        xi0 = (e0x * dx + e0y * dy + e0z * dz) / eval0
-        xi1 = (e1x * dx + e1y * dy + e1z * dz) / eval1
-        xi2 = (e2x * dx + e2y * dy + e2z * dz) / eval2
-
-        q = qd.sqrt(xi0 * xi0 + xi1 * xi1 + xi2 * xi2)
-
-        s += coeff * kernel_prefactor * evaluate_fn(q, dim)
-
-    return s * cellSize_x * cellSize_y * cellSize_z
-
-
 # =============================================================================
 # ||                                                                         ||
 # ||                          STATIC KERNELS                                 ||
@@ -410,7 +214,7 @@ def _tsc_stencil(g: qd.f32):
 
 @qd.func
 def _bspline4_stencil(g: qd.f32):
-    """Cubic B-spline (was "pcs")."""
+    """Cubic B-spline (4-point)."""
     gx = g - 0.5
     ix = qd.floor(gx, int)
     dx = gx - ix
@@ -457,7 +261,7 @@ def _bspline5_stencil(g: qd.f32):
 
 @qd.func
 def _bspline6_stencil(g: qd.f32):
-    """Quintic B-spline (6-point, was "pqs")."""
+    """Quintic B-spline (6-point)."""
     gx = g - 0.5
     ix = qd.floor(gx, int)
     dx = gx - ix
@@ -574,1637 +378,774 @@ _FIXED_GRID_KERNELS = {
 
 
 # =============================================================================
-# ||                                                                         ||
-# ||                       ADAPTIVE KERNELS                                  ||
-# ||                                                                         ||
+# Adaptive deposition: shared helpers
 # =============================================================================
-
-
-# =============================================================================
-# Separable Kernels
-# =============================================================================
-@qd.kernel
-def _separable_1d(
-    F_1d_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
-    periodic: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 1)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 1)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    cellSize_x_inv: qd.f32,
-    max_support: qd.f32,
-    MAX_STENCIL: qd.template(),
-    Nx: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nx, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (Nx,)
+# The adaptive kernels below are written once for 1, 2 and 3 dimensions; `dim`
+# is a template argument, so every per-axis loop is unrolled at compile time.
+# Sums and products over axes start from the first term and run in axis order,
+# so they compile to the same floating-point expressions as hand-written
+# per-dimension code (results are bit-identical to that code).
+@qd.func
+def _grid_add(
+    grid_weights: qd.template(),
+    grid_fields: qd.template(),
+    quantities: qd.template(),
+    n,
+    cell,
+    w,
+    dim: qd.template(),
 ):
-    F = fields.shape[1]
-    sig = sigma_fn(dim)
-
-    for n in range(positions.shape[0]):
-
-        wx = qd.Vector.zero(qd.f32, MAX_STENCIL)
-        wj = particle_weights[n]
-
-        x_phys = positions[n, 0]
-
-        hsm_x_phys = smoothing_lengths[n, 0]
-
-        if qd.static(periodic):
-            hsm_max = hsm_x_phys
-            if hsm_max > max_support:
-                scale = max_support / hsm_max
-                hsm_x_phys *= scale
-
-        x_cell = x_phys * cellSize_x_inv
-
-        hsm_x_cell = hsm_x_phys * cellSize_x_inv
-
-        inv_hx = 1.0 / hsm_x_cell
-
-        support_x_cell = kernel_support * hsm_x_cell
-
-        i_min = qd.cast(qd.floor(x_cell - support_x_cell), qd.i32)
-        i_max = qd.cast(qd.ceil(x_cell + support_x_cell), qd.i32) - 1
-
-        if qd.static(not periodic):
-            i_min = qd.max(i_min, 0)
-            i_max = qd.min(i_max, Nx - 1)
-
-        nx = i_max - i_min + 1
-        for si in range(nx):
-            i = i_min + si
-            q_left = (i - x_cell) * inv_hx
-            q_right = ((i + 1) - x_cell) * inv_hx
-            wx[si] = (
-                wj
-                * sig
-                * _separable_integrate_1d(F_1d_fn, kernel_support, dim, q_left, q_right)
-            )  # sig here!
-
-        for si in qd.ndrange(nx):
-
-            i = i_min + si
-
-            ii = i
-            if qd.static(periodic):
-                ii = _apply_pbc(i, Nx)
-
-            w = wx[si]
-            qd.atomic_add(weights[ii], w)
-            for f in range(F):
-                qd.atomic_add(
-                    fields[ii, f],
-                    quantities[n, f] * w,
-                )
-
-
-@qd.kernel
-def _separable_2d(
-    F_1d_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
-    periodic: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 2)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 2)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    cellSize_x_inv: qd.f32,
-    cellSize_y_inv: qd.f32,
-    max_support: qd.f32,
-    MAX_STENCIL: qd.template(),
-    Nx: qd.i32,
-    Ny: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nx, Ny, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nx, Ny)
-):
-    F = fields.shape[2]
-    sig = sigma_fn(dim)
-
-    for n in range(positions.shape[0]):
-
-        wx = qd.Vector.zero(qd.f32, MAX_STENCIL)
-        wy = qd.Vector.zero(qd.f32, MAX_STENCIL)
-        wj = particle_weights[n]
-
-        x_phys = positions[n, 0]
-        y_phys = positions[n, 1]
-
-        hsm_x_phys = smoothing_lengths[n, 0]
-        hsm_y_phys = smoothing_lengths[n, 1]
-
-        if qd.static(periodic):
-            hsm_max = qd.max(hsm_x_phys, hsm_y_phys)
-            if hsm_max > max_support:
-                scale = max_support / hsm_max
-                hsm_x_phys *= scale
-                hsm_y_phys *= scale
-
-        x_cell = x_phys * cellSize_x_inv
-        y_cell = y_phys * cellSize_y_inv
-
-        hsm_x_cell = hsm_x_phys * cellSize_x_inv
-        hsm_y_cell = hsm_y_phys * cellSize_y_inv
-
-        inv_hx = 1.0 / hsm_x_cell
-        inv_hy = 1.0 / hsm_y_cell
-
-        support_x_cell = kernel_support * hsm_x_cell
-        support_y_cell = kernel_support * hsm_y_cell
-
-        i_min = qd.cast(qd.floor(x_cell - support_x_cell), qd.i32)
-        i_max = qd.cast(qd.ceil(x_cell + support_x_cell), qd.i32) - 1
-        j_min = qd.cast(qd.floor(y_cell - support_y_cell), qd.i32)
-        j_max = qd.cast(qd.ceil(y_cell + support_y_cell), qd.i32) - 1
-
-        if qd.static(not periodic):
-            i_min = qd.max(i_min, 0)
-            i_max = qd.min(i_max, Nx - 1)
-            j_min = qd.max(j_min, 0)
-            j_max = qd.min(j_max, Ny - 1)
-
-        nx = i_max - i_min + 1
-        for si in range(nx):
-            i = i_min + si
-            q_left = (i - x_cell) * inv_hx
-            q_right = ((i + 1) - x_cell) * inv_hx
-            wx[si] = sig * _separable_integrate_1d(
-                F_1d_fn, kernel_support, dim, q_left, q_right
-            )  # sig here!
-
-        ny = j_max - j_min + 1
-        for sj in range(ny):
-            j = j_min + sj
-            q_left = (j - y_cell) * inv_hy
-            q_right = ((j + 1) - y_cell) * inv_hy
-            wy[sj] = wj * _separable_integrate_1d(
-                F_1d_fn, kernel_support, dim, q_left, q_right
-            )  # wj here!
-
-        for si, sj in qd.ndrange(nx, ny):
-
-            i = i_min + si
-            j = j_min + sj
-
-            ii = i
-            jj = j
-            if qd.static(periodic):
-                ii = _apply_pbc(i, Nx)
-                jj = _apply_pbc(j, Ny)
-
-            w = wx[si] * wy[sj]
-            qd.atomic_add(weights[ii, jj], w)
-            for f in range(F):
-                qd.atomic_add(
-                    fields[ii, jj, f],
-                    quantities[n, f] * w,
-                )
-
-
-@qd.kernel
-def _separable_3d(
-    F_1d_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
-    periodic: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    cellSize_x_inv: qd.f32,
-    cellSize_y_inv: qd.f32,
-    cellSize_z_inv: qd.f32,
-    max_support: qd.f32,
-    MAX_STENCIL: qd.template(),
-    Nx: qd.i32,
-    Ny: qd.i32,
-    Nz: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nx, Ny, Nz)
-):
-    F = fields.shape[3]
-    sig = sigma_fn(dim)
-
-    for n in range(positions.shape[0]):
-
-        wx = qd.Vector.zero(qd.f32, MAX_STENCIL)
-        wy = qd.Vector.zero(qd.f32, MAX_STENCIL)
-        wz = qd.Vector.zero(qd.f32, MAX_STENCIL)
-        wj = particle_weights[n]
-
-        x_phys = positions[n, 0]
-        y_phys = positions[n, 1]
-        z_phys = positions[n, 2]
-
-        hsm_x_phys = smoothing_lengths[n, 0]
-        hsm_y_phys = smoothing_lengths[n, 1]
-        hsm_z_phys = smoothing_lengths[n, 2]
-
-        if qd.static(periodic):
-            hsm_max = qd.max(hsm_x_phys, qd.max(hsm_y_phys, hsm_z_phys))
-            if hsm_max > max_support:
-                scale = max_support / hsm_max
-                hsm_x_phys *= scale
-                hsm_y_phys *= scale
-                hsm_z_phys *= scale
-
-        x_cell = x_phys * cellSize_x_inv
-        y_cell = y_phys * cellSize_y_inv
-        z_cell = z_phys * cellSize_z_inv
-
-        hsm_x_cell = hsm_x_phys * cellSize_x_inv
-        hsm_y_cell = hsm_y_phys * cellSize_y_inv
-        hsm_z_cell = hsm_z_phys * cellSize_z_inv
-
-        inv_hx = 1.0 / hsm_x_cell
-        inv_hy = 1.0 / hsm_y_cell
-        inv_hz = 1.0 / hsm_z_cell
-
-        support_x_cell = kernel_support * hsm_x_cell
-        support_y_cell = kernel_support * hsm_y_cell
-        support_z_cell = kernel_support * hsm_z_cell
-
-        i_min = qd.cast(qd.floor(x_cell - support_x_cell), qd.i32)
-        i_max = qd.cast(qd.ceil(x_cell + support_x_cell), qd.i32) - 1
-        j_min = qd.cast(qd.floor(y_cell - support_y_cell), qd.i32)
-        j_max = qd.cast(qd.ceil(y_cell + support_y_cell), qd.i32) - 1
-        k_min = qd.cast(qd.floor(z_cell - support_z_cell), qd.i32)
-        k_max = qd.cast(qd.ceil(z_cell + support_z_cell), qd.i32) - 1
-
-        if qd.static(not periodic):
-            i_min = qd.max(i_min, 0)
-            i_max = qd.min(i_max, Nx - 1)
-            j_min = qd.max(j_min, 0)
-            j_max = qd.min(j_max, Ny - 1)
-            k_min = qd.max(k_min, 0)
-            k_max = qd.min(k_max, Nz - 1)
-
-        nx = i_max - i_min + 1
-        for si in range(nx):
-            i = i_min + si
-            q_left = (i - x_cell) * inv_hx
-            q_right = ((i + 1) - x_cell) * inv_hx
-            wx[si] = sig * _separable_integrate_1d(
-                F_1d_fn, kernel_support, dim, q_left, q_right
+    """Add weight `w` of particle `n` (and its fields times `w`) to grid cell `cell`."""
+    F = grid_fields.shape[dim]
+    if qd.static(dim == 1):
+        qd.atomic_add(grid_weights[cell[0]], w)
+        for f in range(F):
+            qd.atomic_add(grid_fields[cell[0], f], quantities[n, f] * w)
+    elif qd.static(dim == 2):
+        qd.atomic_add(grid_weights[cell[0], cell[1]], w)
+        for f in range(F):
+            qd.atomic_add(grid_fields[cell[0], cell[1], f], quantities[n, f] * w)
+    else:
+        qd.atomic_add(grid_weights[cell[0], cell[1], cell[2]], w)
+        for f in range(F):
+            qd.atomic_add(
+                grid_fields[cell[0], cell[1], cell[2], f], quantities[n, f] * w
             )
 
-        ny = j_max - j_min + 1
-        for sj in range(ny):
-            j = j_min + sj
-            q_left = (j - y_cell) * inv_hy
-            q_right = ((j + 1) - y_cell) * inv_hy
-            wy[sj] = wj * _separable_integrate_1d(
-                F_1d_fn, kernel_support, dim, q_left, q_right
-            )
 
-        nz = k_max - k_min + 1
-        for sk in range(nz):
-            k = k_min + sk
-            q_left = (k - z_cell) * inv_hz
-            q_right = ((k + 1) - z_cell) * inv_hz
-            wz[sk] = _separable_integrate_1d(
-                F_1d_fn, kernel_support, dim, q_left, q_right
-            )
-
-        for si, sj, sk in qd.ndrange(nx, ny, nz):
-
-            i = i_min + si
-            j = j_min + sj
-            k = k_min + sk
-
-            ii = i
-            jj = j
-            kk = k
-            if qd.static(periodic):
-                ii = _apply_pbc(i, Nx)
-                jj = _apply_pbc(j, Ny)
-                kk = _apply_pbc(k, Nz)
-
-            w = wx[si] * wy[sj] * wz[sk]
-
-            qd.atomic_add(weights[ii, jj, kk], w)
-            for f in range(F):
-                qd.atomic_add(
-                    fields[ii, jj, kk, f],
-                    quantities[n, f] * w,
-                )
+@qd.func
+def _box_count(ext, dim: qd.template()) -> qd.i32:
+    """Return the number of cells of a box with extents `ext` (0 if any is <= 0)."""
+    count = 1
+    for d in qd.static(range(dim)):
+        if ext[d] <= 0:
+            count = 0
+        count *= qd.max(ext[d], 0)
+    return count
 
 
-# =============================================================================
-# Isotropic Kernels
-# =============================================================================
-@qd.kernel
-def _isotropic_1d(
+@qd.func
+def _next_offset(s, ext, dim: qd.template()):
+    """Advance per-axis offsets `s` to the next cell of a box with extents `ext`.
+
+    The last axis runs fastest, as in nested loops over the axes.
+    """
+    s[dim - 1] += 1
+    for d in qd.static(range(dim - 1, 0, -1)):
+        if s[d] >= ext[d]:
+            s[d] = 0
+            s[d - 1] += 1
+    return s
+
+
+@qd.func
+def _isotropic_cell_integral(
     evaluate_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
     quad_points: qd.template(),
-    periodic: qd.template(),
-    eta_crit: qd.f32,
-    B: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 1)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, 1)
-    sample_integrals: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (S,)
-    num_samples: qd.i32,
-    cellSize_x: qd.f32,
-    cellSize_x_inv: qd.f32,
-    max_support: qd.f32,
-    Nx: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nx, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (Nx)
-):
-    F = fields.shape[1]
-    sig = sigma_fn(dim)
-
-    for n in range(positions.shape[0]):
-        x_phys = positions[n, 0]
-
-        hsm_phys = smoothing_lengths[n]
-        if qd.static(periodic):
-            if hsm_phys > max_support:
-                hsm_phys = max_support
-
-        kernel_prefactor = sig / hsm_phys
-
-        x_cell = x_phys * cellSize_x_inv
-
-        support_phys = kernel_support * hsm_phys
-        support_x_cell = support_phys * cellSize_x_inv
-
-        eta = 2.0 * support_x_cell  # diameter convention
-
-        wj = particle_weights[n]
-
-        i0 = qd.floor(x_cell - support_x_cell, int)
-        fits = qd.floor(x_cell + support_x_cell, int) - i0 < B
-
-        if eta < eta_crit and fits:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples,
-            # summed per cell in a local buffer first (one atomic per touched
-            # cell instead of one per sample) ---
-            buf = qd.Vector.zero(qd.f32, B)
-            for s in range(num_samples):
-                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
-                li = qd.floor(x_sample * cellSize_x_inv, int) - i0
-                if 0 <= li < B:
-                    buf[li] += sample_integrals[s]
-
-            for a in range(B):
-                v = buf[a]
-                if v != 0.0:
-                    ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
-                    if ix_valid:
-                        w = wj * v
-                        qd.atomic_add(weights[ix], w)
-                        for f in range(F):
-                            qd.atomic_add(fields[ix, f], quantities[n, f] * w)
-
-        elif eta < eta_crit:
-            # --- same, direct per-sample deposition (particle too large for
-            # the local buffer) ---
-            for s in range(num_samples):
-                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
-
-                ix, ix_valid = _cell_index_from_pos(
-                    x_sample, cellSize_x_inv, Nx, periodic
-                )
-
-                if ix_valid:
-                    integral = sample_integrals[s]
-                    if integral != 0.0:
-                        w = wj * integral
-                        qd.atomic_add(weights[ix], w)
-                        for f in range(F):
-                            qd.atomic_add(fields[ix, f], quantities[n, f] * w)
-
+    dim: qd.template(),
+    a,
+    x_cell,
+    hsm_phys: qd.f32,
+    kernel_prefactor: qd.f32,
+    cell_size,
+) -> qd.f32:
+    """Quadrature of the kernel mass over cell `a` (cell coordinates)."""
+    s = 0.0
+    for qp in qd.static(quad_points):  # (offset per axis..., weight)
+        d0 = (x_cell[0] - (a[0] + qp[0])) * cell_size[0]
+        q = 0.0
+        if qd.static(dim == 1):
+            q = qd.abs(d0) / hsm_phys
         else:
-            # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            # cell ceil(x + s) lies entirely outside the (compact) support,
-            # so the stencil stops one cell before it
-            i_min = i0
-            i_max = qd.ceil(x_cell + support_x_cell, int) - 1
-
-            if qd.static(not periodic):
-                i_min = qd.max(i_min, 0)
-                i_max = qd.min(i_max, Nx - 1)
-
-            # pass 1: total mass over the affected cells (no per-cell storage)
-            total_integral = 0.0
-            for a in range(i_min, i_max + 1):
-                integral = _isotropic_cell_integral_1d(
-                    evaluate_fn,
-                    quad_points,
-                    dim,
-                    a,
-                    x_cell,
-                    hsm_phys,
-                    kernel_prefactor,
-                    cellSize_x,
-                )
-                total_integral += integral
-
-            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_integral
-
-                # pass 2: recompute (cheap) + deposit normalized weight
-                for a in range(i_min, i_max + 1):
-                    aa = a
-                    if qd.static(periodic):
-                        aa = _apply_pbc(a, Nx)
-
-                    integral = _isotropic_cell_integral_1d(
-                        evaluate_fn,
-                        quad_points,
-                        dim,
-                        a,
-                        x_cell,
-                        hsm_phys,
-                        kernel_prefactor,
-                        cellSize_x,
-                    )
-                    w_corr = wj * integral * correction
-
-                    qd.atomic_add(weights[aa], w_corr)
-                    for f in range(F):
-                        qd.atomic_add(fields[aa, f], quantities[n, f] * w_corr)
+            r2 = d0 * d0
+            for d in qd.static(range(1, dim)):
+                dd = (x_cell[d] - (a[d] + qp[d])) * cell_size[d]
+                r2 = r2 + dd * dd
+            q = qd.sqrt(r2) / hsm_phys
+        s += qp[dim] * kernel_prefactor * evaluate_fn(q, dim)
+    for d in qd.static(range(dim)):
+        s = s * cell_size[d]
+    return s
 
 
-@qd.kernel
-def _isotropic_2d(
+@qd.func
+def _covariant_cell_integral(
     evaluate_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
     quad_points: qd.template(),
-    periodic: qd.template(),
-    eta_crit: qd.f32,
-    B: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 2)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, 2)
-    sample_integrals: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (S,)
-    num_samples: qd.i32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-    cellSize_x_inv: qd.f32,
-    cellSize_y_inv: qd.f32,
-    max_support: qd.f32,
-    Nx: qd.i32,
-    Ny: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nx, Ny, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nx, Ny)
-):
-    F = fields.shape[2]
-    sig = sigma_fn(dim)
+    dim: qd.template(),
+    a,
+    x_cell,
+    E,
+    ev,
+    kernel_prefactor: qd.f32,
+    cell_size,
+) -> qd.f32:
+    """Quadrature of the ellipsoidal kernel mass over cell `a`.
 
-    for n in range(positions.shape[0]):
-        x_phys = positions[n, 0]
-        y_phys = positions[n, 1]
+    `E` holds the principal axes as columns, `ev` the semi-axis lengths.
+    """
+    s = 0.0
+    for qp in qd.static(quad_points):  # (offset per axis..., weight)
+        dx = qd.Vector.zero(qd.f32, dim)
+        for d in qd.static(range(dim)):
+            dx[d] = (x_cell[d] - (a[d] + qp[d])) * cell_size[d]
+        # separation projected onto each principal axis, in units of that
+        # semi-axis: the ellipsoidal q
+        q2 = 0.0
+        q = 0.0
+        for c in qd.static(range(dim)):
+            proj = E[0, c] * dx[0]
+            for b in qd.static(range(1, dim)):
+                proj = proj + E[b, c] * dx[b]
+            xi = proj / ev[c]
+            if qd.static(dim == 1):
+                q = qd.abs(xi)  # kernels expect q >= 0
+            elif qd.static(c == 0):
+                q2 = xi * xi
+            else:
+                q2 = q2 + xi * xi
+        if qd.static(dim > 1):
+            q = qd.sqrt(q2)
+        s += qp[dim] * kernel_prefactor * evaluate_fn(q, dim)
+    for d in qd.static(range(dim)):
+        s = s * cell_size[d]
+    return s
 
-        hsm_phys = smoothing_lengths[n]
-        if qd.static(periodic):
-            if hsm_phys > max_support:
-                hsm_phys = max_support
 
-        kernel_prefactor = sig / (hsm_phys * hsm_phys)
-
-        x_cell = x_phys * cellSize_x_inv
-        y_cell = y_phys * cellSize_y_inv
-
-        support_phys = kernel_support * hsm_phys
-        support_x_cell = support_phys * cellSize_x_inv
-        support_y_cell = support_phys * cellSize_y_inv
-
-        eta = 2.0 * qd.min(support_x_cell, support_y_cell)  # diameter convention
-
-        wj = particle_weights[n]
-
-        i0 = qd.floor(x_cell - support_x_cell, int)
-        j0 = qd.floor(y_cell - support_y_cell, int)
-        fits = (qd.floor(x_cell + support_x_cell, int) - i0 < B) and (
-            qd.floor(y_cell + support_y_cell, int) - j0 < B
+@qd.func
+def _cell_integral(
+    evaluate_fn: qd.template(),
+    quad_points: qd.template(),
+    dim: qd.template(),
+    covariant: qd.template(),
+    a,
+    x_cell,
+    hsm_phys: qd.f32,
+    E,
+    ev,
+    kernel_prefactor: qd.f32,
+    cell_size,
+) -> qd.f32:
+    """Kernel mass over cell `a`, isotropic (`hsm_phys`) or covariant (`E`, `ev`)."""
+    result = 0.0
+    if qd.static(covariant):
+        result = _covariant_cell_integral(
+            evaluate_fn, quad_points, dim, a, x_cell, E, ev, kernel_prefactor, cell_size
         )
+    else:
+        result = _isotropic_cell_integral(
+            evaluate_fn, quad_points, dim, a, x_cell, hsm_phys, kernel_prefactor,
+            cell_size,
+        )
+    return result
 
-        if eta < eta_crit and fits:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples,
-            # summed per cell in a local buffer first (one atomic per touched
-            # cell instead of one per sample) ---
-            buf = qd.Vector.zero(qd.f32, B * B)
-            for s in range(num_samples):
-                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
-                y_sample = y_phys + sample_coords[s, 1] * hsm_phys
-                li = qd.floor(x_sample * cellSize_x_inv, int) - i0
-                lj = qd.floor(y_sample * cellSize_y_inv, int) - j0
-                if 0 <= li < B and 0 <= lj < B:
-                    buf[li * B + lj] += sample_integrals[s]
 
-            for a in range(B):
-                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
-                for b in range(B):
-                    v = buf[a * B + b]
+@qd.func
+def _quadrature_total(
+    evaluate_fn: qd.template(),
+    quad_points: qd.template(),
+    dim: qd.template(),
+    covariant: qd.template(),
+    lo,
+    ext,
+    x_cell,
+    hsm_phys: qd.f32,
+    E,
+    ev,
+    kernel_prefactor: qd.f32,
+    cell_size,
+) -> qd.f32:
+    """Sum the cell integrals over the box `lo + [0, ext)`.
+
+    Nested loops, so that per-axis terms are hoisted out of the inner loops.
+    """
+    total = 0.0
+    if qd.static(dim == 1):
+        for i in range(lo[0], lo[0] + ext[0]):
+            total += _cell_integral(
+                evaluate_fn, quad_points, dim, covariant, qd.Vector([i]), x_cell,
+                hsm_phys, E, ev, kernel_prefactor, cell_size,
+            )
+    elif qd.static(dim == 2):
+        for i in range(lo[0], lo[0] + ext[0]):
+            for j in range(lo[1], lo[1] + ext[1]):
+                total += _cell_integral(
+                    evaluate_fn, quad_points, dim, covariant, qd.Vector([i, j]),
+                    x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size,
+                )
+    else:
+        for i in range(lo[0], lo[0] + ext[0]):
+            for j in range(lo[1], lo[1] + ext[1]):
+                for k in range(lo[2], lo[2] + ext[2]):
+                    total += _cell_integral(
+                        evaluate_fn, quad_points, dim, covariant,
+                        qd.Vector([i, j, k]), x_cell, hsm_phys, E, ev,
+                        kernel_prefactor, cell_size,
+                    )
+    return total
+
+
+@qd.func
+def _quadrature_cell_add(
+    evaluate_fn: qd.template(),
+    quad_points: qd.template(),
+    dim: qd.template(),
+    covariant: qd.template(),
+    periodic: qd.template(),
+    a,
+    x_cell,
+    hsm_phys: qd.f32,
+    E,
+    ev,
+    kernel_prefactor: qd.f32,
+    cell_size,
+    N,
+    wj: qd.f32,
+    correction: qd.f32,
+    n,
+    grid_weights: qd.template(),
+    grid_fields: qd.template(),
+    quantities: qd.template(),
+):
+    """Deposit the kernel mass of cell `a`, scaled by wj * correction."""
+    integral = _cell_integral(
+        evaluate_fn, quad_points, dim, covariant, a, x_cell, hsm_phys, E, ev,
+        kernel_prefactor, cell_size,
+    )
+    cell = qd.Vector.zero(qd.i32, dim)
+    for d in qd.static(range(dim)):
+        if qd.static(periodic):
+            cell[d] = _apply_pbc(a[d], N[d])
+        else:
+            cell[d] = a[d]
+    _grid_add(
+        grid_weights, grid_fields, quantities, n, cell, wj * integral * correction, dim
+    )
+
+
+@qd.func
+def _quadrature_deposit(
+    evaluate_fn: qd.template(),
+    quad_points: qd.template(),
+    dim: qd.template(),
+    covariant: qd.template(),
+    periodic: qd.template(),
+    lo,
+    ext,
+    x_cell,
+    hsm_phys: qd.f32,
+    E,
+    ev,
+    kernel_prefactor: qd.f32,
+    cell_size,
+    N,
+    wj: qd.f32,
+    correction: qd.f32,
+    n,
+    grid_weights: qd.template(),
+    grid_fields: qd.template(),
+    quantities: qd.template(),
+):
+    """Deposit every cell of the box `lo + [0, ext)`, weight wj * integral * correction."""
+    if qd.static(dim == 1):
+        for i in range(lo[0], lo[0] + ext[0]):
+            _quadrature_cell_add(
+                evaluate_fn, quad_points, dim, covariant, periodic, qd.Vector([i]),
+                x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size, N, wj,
+                correction, n, grid_weights, grid_fields, quantities,
+            )
+    elif qd.static(dim == 2):
+        for i in range(lo[0], lo[0] + ext[0]):
+            for j in range(lo[1], lo[1] + ext[1]):
+                _quadrature_cell_add(
+                    evaluate_fn, quad_points, dim, covariant, periodic,
+                    qd.Vector([i, j]), x_cell, hsm_phys, E, ev, kernel_prefactor,
+                    cell_size, N, wj, correction, n, grid_weights, grid_fields,
+                    quantities,
+                )
+    else:
+        for i in range(lo[0], lo[0] + ext[0]):
+            for j in range(lo[1], lo[1] + ext[1]):
+                for k in range(lo[2], lo[2] + ext[2]):
+                    _quadrature_cell_add(
+                        evaluate_fn, quad_points, dim, covariant, periodic,
+                        qd.Vector([i, j, k]), x_cell, hsm_phys, E, ev,
+                        kernel_prefactor, cell_size, N, wj, correction, n,
+                        grid_weights, grid_fields, quantities,
+                    )
+
+
+@qd.func
+def _deposit_sample_buffer(
+    buf,
+    i0,
+    wj: qd.f32,
+    n,
+    N,
+    periodic: qd.template(),
+    B: qd.template(),
+    dim: qd.template(),
+    grid_weights: qd.template(),
+    grid_fields: qd.template(),
+    quantities: qd.template(),
+):
+    """Add a particle's per-cell sample sums `buf` (B**dim cells from `i0`)."""
+    if qd.static(dim == 1):
+        for a in range(B):
+            v = buf[a]
+            if v != 0.0:
+                ix, ok_x = _cell_index_from_int(i0[0] + a, N[0], periodic)
+                if ok_x:
+                    _grid_add(
+                        grid_weights, grid_fields, quantities, n, qd.Vector([ix]),
+                        wj * v, dim,
+                    )
+    elif qd.static(dim == 2):
+        for a in range(B):
+            ix, ok_x = _cell_index_from_int(i0[0] + a, N[0], periodic)
+            for b in range(B):
+                v = buf[a * B + b]
+                if v != 0.0:
+                    iy, ok_y = _cell_index_from_int(i0[1] + b, N[1], periodic)
+                    if ok_x and ok_y:
+                        _grid_add(
+                            grid_weights, grid_fields, quantities, n,
+                            qd.Vector([ix, iy]), wj * v, dim,
+                        )
+    else:
+        for a in range(B):
+            ix, ok_x = _cell_index_from_int(i0[0] + a, N[0], periodic)
+            for b in range(B):
+                iy, ok_y = _cell_index_from_int(i0[1] + b, N[1], periodic)
+                for c in range(B):
+                    v = buf[(a * B + b) * B + c]
                     if v != 0.0:
-                        iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
-                        if ix_valid and iy_valid:
-                            w = wj * v
-                            qd.atomic_add(weights[ix, iy], w)
-                            for f in range(F):
-                                qd.atomic_add(fields[ix, iy, f], quantities[n, f] * w)
+                        iz, ok_z = _cell_index_from_int(i0[2] + c, N[2], periodic)
+                        if ok_x and ok_y and ok_z:
+                            _grid_add(
+                                grid_weights, grid_fields, quantities, n,
+                                qd.Vector([ix, iy, iz]), wj * v, dim,
+                            )
 
-        elif eta < eta_crit:
-            # --- same, direct per-sample deposition (particle too large for
-            # the local buffer) ---
-            for s in range(num_samples):
-                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
-                y_sample = y_phys + sample_coords[s, 1] * hsm_phys
 
-                ix, ix_valid = _cell_index_from_pos(
-                    x_sample, cellSize_x_inv, Nx, periodic
-                )
-                iy, iy_valid = _cell_index_from_pos(
-                    y_sample, cellSize_y_inv, Ny, periodic
-                )
+# =============================================================================
+# Separable kernel
+# =============================================================================
+@qd.kernel
+def _separable(
+    F_1d_fn: qd.template(),
+    sigma_fn: qd.template(),
+    kernel_support: qd.f32,
+    dim: qd.template(),
+    periodic: qd.template(),
+    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
+    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
+    smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
+    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
+    cell_size_inv: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
+    max_support: qd.f32,
+    MAX_STENCIL: qd.template(),
+    fields: qd.types.ndarray(dtype=qd.f32),  # (*gridnums, F)
+    weights: qd.types.ndarray(dtype=qd.f32),  # gridnums
+):
+    """Tensor-product kernel, integrated exactly per cell and axis."""
+    sig = sigma_fn(dim)
+    N = qd.Vector.zero(qd.i32, dim)
+    inv = qd.Vector.zero(qd.f32, dim)
+    for d in qd.static(range(dim)):
+        N[d] = weights.shape[d]
+        inv[d] = cell_size_inv[d]
 
-                if ix_valid and iy_valid:
-                    integral = sample_integrals[s]
-                    if integral != 0.0:
-                        w = wj * integral
-                        qd.atomic_add(weights[ix, iy], w)
-                        for f in range(F):
-                            qd.atomic_add(fields[ix, iy, f], quantities[n, f] * w)
+    for n in range(positions.shape[0]):
+        wts = qd.Matrix.zero(qd.f32, dim, MAX_STENCIL)
+        wj = particle_weights[n]
 
-        else:
-            # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            # cell ceil(x + s) lies entirely outside the (compact) support,
-            # so the stencil stops one cell before it
-            i_min = i0
-            i_max = qd.ceil(x_cell + support_x_cell, int) - 1
-            j_min = j0
-            j_max = qd.ceil(y_cell + support_y_cell, int) - 1
+        h = qd.Vector.zero(qd.f32, dim)
+        for d in qd.static(range(dim)):
+            h[d] = smoothing_lengths[n, d]
+        if qd.static(periodic):  # support at most half the box
+            h_max = h[0]
+            for d in qd.static(range(1, dim)):
+                h_max = qd.max(h_max, h[d])
+            if h_max > max_support:
+                scale = max_support / h_max
+                for d in qd.static(range(dim)):
+                    h[d] *= scale
 
+        lo = qd.Vector.zero(qd.i32, dim)
+        ext = qd.Vector.zero(qd.i32, dim)
+        for d in qd.static(range(dim)):
+            x_cell = positions[n, d] * inv[d]
+            h_cell = h[d] * inv[d]
+            inv_h = 1.0 / h_cell
+            support_cell = kernel_support * h_cell
+            i_min = qd.cast(qd.floor(x_cell - support_cell), qd.i32)
+            i_max = qd.cast(qd.ceil(x_cell + support_cell), qd.i32) - 1
             if qd.static(not periodic):
                 i_min = qd.max(i_min, 0)
-                i_max = qd.min(i_max, Nx - 1)
-                j_min = qd.max(j_min, 0)
-                j_max = qd.min(j_max, Ny - 1)
+                i_max = qd.min(i_max, N[d] - 1)
+            lo[d] = i_min
+            ext[d] = i_max - i_min + 1
+            for si in range(ext[d]):
+                i = i_min + si
+                q_left = (i - x_cell) * inv_h
+                q_right = ((i + 1) - x_cell) * inv_h
+                integral = _separable_integrate_1d(
+                    F_1d_fn, kernel_support, dim, q_left, q_right
+                )
+                # normalisation on axis 0, particle weight on axis 1
+                if qd.static(dim == 1):
+                    wts[d, si] = wj * sig * integral
+                elif qd.static(d == 0):
+                    wts[d, si] = sig * integral
+                elif qd.static(d == 1):
+                    wts[d, si] = wj * integral
+                else:
+                    wts[d, si] = integral
 
-            # pass 1: total mass over the affected cells (no per-cell storage)
-            total_integral = 0.0
-            for a in range(i_min, i_max + 1):
-                for b in range(j_min, j_max + 1):
-                    integral = _isotropic_cell_integral_2d(
-                        evaluate_fn,
-                        quad_points,
-                        dim,
-                        a,
-                        b,
-                        x_cell,
-                        y_cell,
-                        hsm_phys,
-                        kernel_prefactor,
-                        cellSize_x,
-                        cellSize_y,
-                    )
-                    total_integral += integral
-
-            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_integral
-
-                # pass 2: recompute (cheap) + deposit normalized weight
-                for a in range(i_min, i_max + 1):
-                    aa = a
-                    if qd.static(periodic):
-                        aa = _apply_pbc(a, Nx)
-
-                    for b in range(j_min, j_max + 1):
-                        bb = b
-                        if qd.static(periodic):
-                            bb = _apply_pbc(b, Ny)
-
-                        integral = _isotropic_cell_integral_2d(
-                            evaluate_fn,
-                            quad_points,
-                            dim,
-                            a,
-                            b,
-                            x_cell,
-                            y_cell,
-                            hsm_phys,
-                            kernel_prefactor,
-                            cellSize_x,
-                            cellSize_y,
-                        )
-                        w_corr = wj * integral * correction
-
-                        qd.atomic_add(weights[aa, bb], w_corr)
-                        for f in range(F):
-                            qd.atomic_add(fields[aa, bb, f], quantities[n, f] * w_corr)
+        s = qd.Vector.zero(qd.i32, dim)
+        for _ in range(_box_count(ext, dim)):
+            cell = qd.Vector.zero(qd.i32, dim)
+            w = wts[0, s[0]]
+            for d in qd.static(range(dim)):
+                if qd.static(d > 0):
+                    w = w * wts[d, s[d]]
+                c = lo[d] + s[d]
+                if qd.static(periodic):
+                    c = _apply_pbc(c, N[d])
+                cell[d] = c
+            _grid_add(weights, fields, quantities, n, cell, w, dim)
+            s = _next_offset(s, ext, dim)
 
 
+# =============================================================================
+# Isotropic kernel
+# =============================================================================
 @qd.kernel
-def _isotropic_3d(
+def _isotropic(
     evaluate_fn: qd.template(),
     sigma_fn: qd.template(),
     kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
+    dim: qd.template(),
     quad_points: qd.template(),
     periodic: qd.template(),
     eta_crit: qd.f32,
     B: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
+    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
     quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
     smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
     particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, 3)
+    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, D)
     sample_integrals: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (S,)
     num_samples: qd.i32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-    cellSize_z: qd.f32,
-    cellSize_x_inv: qd.f32,
-    cellSize_y_inv: qd.f32,
-    cellSize_z_inv: qd.f32,
+    cell_size: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
+    cell_size_inv: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     max_support: qd.f32,
-    Nx: qd.i32,
-    Ny: qd.i32,
-    Nz: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nx, Ny, Nz)
+    fields: qd.types.ndarray(dtype=qd.f32),  # (*gridnums, F)
+    weights: qd.types.ndarray(dtype=qd.f32),  # gridnums
 ):
-    F = fields.shape[3]
+    """Radial kernel W(|x - x_n| / h_n).
+
+    Particles with kernel diameter eta < eta_crit cells are deposited with the
+    precomputed sample table (through a local B**dim cell buffer if they fit
+    into it), larger ones by per-cell quadrature renormalised to the
+    particle's weight.
+    """
     sig = sigma_fn(dim)
+    N = qd.Vector.zero(qd.i32, dim)
+    cs = qd.Vector.zero(qd.f32, dim)
+    inv = qd.Vector.zero(qd.f32, dim)
+    for d in qd.static(range(dim)):
+        N[d] = weights.shape[d]
+        cs[d] = cell_size[d]
+        inv[d] = cell_size_inv[d]
+    no_axes = qd.Matrix.zero(qd.f32, dim, dim)  # unused by isotropic cells
+    no_ev = qd.Vector.zero(qd.f32, dim)
 
     for n in range(positions.shape[0]):
-        x_phys = positions[n, 0]
-        y_phys = positions[n, 1]
-        z_phys = positions[n, 2]
-
         hsm_phys = smoothing_lengths[n]
         if qd.static(periodic):
             if hsm_phys > max_support:
                 hsm_phys = max_support
 
-        kernel_prefactor = sig / (hsm_phys * hsm_phys * hsm_phys)
-
-        x_cell = x_phys * cellSize_x_inv
-        y_cell = y_phys * cellSize_y_inv
-        z_cell = z_phys * cellSize_z_inv
-
+        h_pow = hsm_phys
+        for d in qd.static(range(1, dim)):
+            h_pow = h_pow * hsm_phys
+        kernel_prefactor = sig / h_pow
         support_phys = kernel_support * hsm_phys
-        support_x_cell = support_phys * cellSize_x_inv
-        support_y_cell = support_phys * cellSize_y_inv
-        support_z_cell = support_phys * cellSize_z_inv
 
-        eta = 2.0 * qd.min(
-            support_x_cell, qd.min(support_y_cell, support_z_cell)
-        )  # diameter convention
+        x_phys = qd.Vector.zero(qd.f32, dim)
+        x_cell = qd.Vector.zero(qd.f32, dim)
+        support_cell = qd.Vector.zero(qd.f32, dim)
+        i0 = qd.Vector.zero(qd.i32, dim)
+        fits = True
+        eta = 0.0
+        for d in qd.static(range(dim)):
+            x_phys[d] = positions[n, d]
+            x_cell[d] = x_phys[d] * inv[d]
+            support_cell[d] = support_phys * inv[d]
+            i0[d] = qd.floor(x_cell[d] - support_cell[d], int)
+            fits = fits and (qd.floor(x_cell[d] + support_cell[d], int) - i0[d] < B)
+            if qd.static(d == 0):
+                eta = support_cell[d]
+            else:
+                eta = qd.min(eta, support_cell[d])
+        eta = 2.0 * eta  # kernel diameter in cells, along the narrowest axis
         wj = particle_weights[n]
 
-        i0 = qd.floor(x_cell - support_x_cell, int)
-        j0 = qd.floor(y_cell - support_y_cell, int)
-        k0 = qd.floor(z_cell - support_z_cell, int)
-        fits = (
-            (qd.floor(x_cell + support_x_cell, int) - i0 < B)
-            and (qd.floor(y_cell + support_y_cell, int) - j0 < B)
-            and (qd.floor(z_cell + support_z_cell, int) - k0 < B)
-        )
-
         if eta < eta_crit and fits:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples,
-            # summed per cell in a local buffer first (one atomic per touched
-            # cell instead of one per sample) ---
-            buf = qd.Vector.zero(qd.f32, B * B * B)
+            # samples summed per cell in a local buffer: one atomic per cell
+            buf = qd.Vector.zero(qd.f32, qd.static(B**dim))
             for s in range(num_samples):
-                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
-                y_sample = y_phys + sample_coords[s, 1] * hsm_phys
-                z_sample = z_phys + sample_coords[s, 2] * hsm_phys
-                li = qd.floor(x_sample * cellSize_x_inv, int) - i0
-                lj = qd.floor(y_sample * cellSize_y_inv, int) - j0
-                lk = qd.floor(z_sample * cellSize_z_inv, int) - k0
-                if 0 <= li < B and 0 <= lj < B and 0 <= lk < B:
-                    buf[(li * B + lj) * B + lk] += sample_integrals[s]
-
-            for a in range(B):
-                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
-                for b in range(B):
-                    iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
-                    for c in range(B):
-                        v = buf[(a * B + b) * B + c]
-                        if v != 0.0:
-                            iz, iz_valid = _cell_index_from_int(k0 + c, Nz, periodic)
-                            if ix_valid and iy_valid and iz_valid:
-                                w = wj * v
-                                qd.atomic_add(weights[ix, iy, iz], w)
-                                for f in range(F):
-                                    qd.atomic_add(
-                                        fields[ix, iy, iz, f], quantities[n, f] * w
-                                    )
+                idx = 0
+                inside = True
+                for d in qd.static(range(dim)):
+                    x_sample = x_phys[d] + sample_coords[s, d] * hsm_phys
+                    li = qd.floor(x_sample * inv[d], int) - i0[d]
+                    inside = inside and (0 <= li < B)
+                    idx = idx * B + li
+                if inside:
+                    buf[idx] += sample_integrals[s]
+            _deposit_sample_buffer(
+                buf, i0, wj, n, N, periodic, B, dim, weights, fields, quantities
+            )
 
         elif eta < eta_crit:
-            # --- same, direct per-sample deposition (particle too large for
-            # the local buffer) ---
+            # too large for the buffer: one atomic per sample
             for s in range(num_samples):
-                x_sample = x_phys + sample_coords[s, 0] * hsm_phys
-                y_sample = y_phys + sample_coords[s, 1] * hsm_phys
-                z_sample = z_phys + sample_coords[s, 2] * hsm_phys
-
-                ix, ix_valid = _cell_index_from_pos(
-                    x_sample, cellSize_x_inv, Nx, periodic
-                )
-                iy, iy_valid = _cell_index_from_pos(
-                    y_sample, cellSize_y_inv, Ny, periodic
-                )
-                iz, iz_valid = _cell_index_from_pos(
-                    z_sample, cellSize_z_inv, Nz, periodic
-                )
-
-                if ix_valid and iy_valid and iz_valid:
-                    integral = sample_integrals[s]
-                    if integral != 0.0:
-                        w = wj * integral
-                        qd.atomic_add(weights[ix, iy, iz], w)
-                        for f in range(F):
-                            qd.atomic_add(fields[ix, iy, iz, f], quantities[n, f] * w)
-
-        else:
-            # --- cell-quadrature branch, mass-conserving via two-pass renormalization ---
-            # cell ceil(x + s) lies entirely outside the (compact) support,
-            # so the stencil stops one cell before it
-            i_min = i0
-            i_max = qd.ceil(x_cell + support_x_cell, int) - 1
-            j_min = j0
-            j_max = qd.ceil(y_cell + support_y_cell, int) - 1
-            k_min = k0
-            k_max = qd.ceil(z_cell + support_z_cell, int) - 1
-
-            if qd.static(not periodic):
-                i_min = qd.max(i_min, 0)
-                i_max = qd.min(i_max, Nx - 1)
-                j_min = qd.max(j_min, 0)
-                j_max = qd.min(j_max, Ny - 1)
-                k_min = qd.max(k_min, 0)
-                k_max = qd.min(k_max, Nz - 1)
-
-            # pass 1: total mass over the affected cells (no per-cell storage)
-            total_integral = 0.0
-            for a in range(i_min, i_max + 1):
-                for b in range(j_min, j_max + 1):
-                    for c in range(k_min, k_max + 1):
-                        integral = _isotropic_cell_integral_3d(
-                            evaluate_fn,
-                            quad_points,
-                            dim,
-                            a,
-                            b,
-                            c,
-                            x_cell,
-                            y_cell,
-                            z_cell,
-                            hsm_phys,
-                            kernel_prefactor,
-                            cellSize_x,
-                            cellSize_y,
-                            cellSize_z,
-                        )
-                        total_integral += integral
-
-            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_integral
-
-                # pass 2: recompute (cheap) + deposit normalized weight
-                for a in range(i_min, i_max + 1):
-                    aa = a
-                    if qd.static(periodic):
-                        aa = _apply_pbc(a, Nx)
-
-                    for b in range(j_min, j_max + 1):
-                        bb = b
-                        if qd.static(periodic):
-                            bb = _apply_pbc(b, Ny)
-
-                        for c in range(k_min, k_max + 1):
-                            cc = c
-                            if qd.static(periodic):
-                                cc = _apply_pbc(c, Nz)
-
-                            integral = _isotropic_cell_integral_3d(
-                                evaluate_fn,
-                                quad_points,
-                                dim,
-                                a,
-                                b,
-                                c,
-                                x_cell,
-                                y_cell,
-                                z_cell,
-                                hsm_phys,
-                                kernel_prefactor,
-                                cellSize_x,
-                                cellSize_y,
-                                cellSize_z,
-                            )
-                            w_corr = wj * integral * correction
-
-                            qd.atomic_add(weights[aa, bb, cc], w_corr)
-                            for f in range(F):
-                                qd.atomic_add(
-                                    fields[aa, bb, cc, f], quantities[n, f] * w_corr
-                                )
-
-
-# =============================================================================
-# Covariant Kernels
-# =============================================================================
-@qd.kernel
-def _covariant_1d(
-    evaluate_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
-    quad_points: qd.template(),
-    periodic: qd.template(),
-    eta_crit: qd.f32,
-    B: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,1)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,F)
-    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 1, 1)
-    hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,1)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S,1)
-    sample_integrals: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    num_samples: qd.i32,
-    cellSize_x: qd.f32,
-    cellSize_x_inv: qd.f32,
-    max_support: qd.f32,
-    Nx: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nx,F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (Nx,)
-):
-    F = fields.shape[1]
-    sig = sigma_fn(dim)
-
-    for n in range(positions.shape[0]):
-
-        x_phys = positions[n, 0]
-
-        # always 1 in 1D, but kept for API symmetry
-        e0 = hmat_eigvecs[n, 0, 0]
-
-        eval0 = hmat_eigvals[n, 0]
-
-        if qd.static(periodic):
-            if eval0 > max_support:
-                eval0 = max_support
-
-        eval0_cell = eval0 * cellSize_x_inv
-
-        x_cell = x_phys * cellSize_x_inv
-        support_x_cell = kernel_support * qd.abs(eval0_cell)
-
-        eta = 2.0 * support_x_cell  # diameter convention
-        wj = particle_weights[n]
-
-        i0 = qd.floor(x_cell - support_x_cell, int)
-        fits = qd.floor(x_cell + support_x_cell, int) - i0 < B
-
-        if eta < eta_crit and fits:
-            # sample deposition summed per cell in a local buffer first (one
-            # atomic per touched cell instead of one per sample)
-            buf = qd.Vector.zero(qd.f32, B)
-            for s in range(num_samples):
-                x_sample = x_phys + e0 * (eval0 * sample_coords[s, 0])
-                li = qd.floor(x_sample * cellSize_x_inv, int) - i0
-                if 0 <= li < B:
-                    buf[li] += sample_integrals[s]
-
-            for a in range(B):
-                v = buf[a]
-                if v != 0.0:
-                    ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
-                    if ix_valid:
-                        w = wj * v
-                        qd.atomic_add(weights[ix], w)
-                        for f in range(F):
-                            qd.atomic_add(fields[ix, f], quantities[n, f] * w)
-
-        elif eta < eta_crit:
-
-            for s in range(num_samples):
-
-                cx = sample_coords[s, 0]
-
-                x_sample = x_phys + e0 * (eval0 * cx)
-
-                ix, valid = _cell_index_from_pos(
-                    x_sample,
-                    cellSize_x_inv,
-                    Nx,
-                    periodic,
-                )
-
+                cell = qd.Vector.zero(qd.i32, dim)
+                valid = True
+                for d in qd.static(range(dim)):
+                    x_sample = x_phys[d] + sample_coords[s, d] * hsm_phys
+                    c, ok = _cell_index_from_pos(x_sample, inv[d], N[d], periodic)
+                    cell[d] = c
+                    valid = valid and ok
                 if valid:
                     integral = sample_integrals[s]
                     if integral != 0.0:
-                        w = wj * integral
-
-                        qd.atomic_add(weights[ix], w)
-
-                        for f in range(F):
-                            qd.atomic_add(
-                                fields[ix, f],
-                                quantities[n, f] * w,
-                            )
-
-        else:
-            detH = eval0
-            kernel_prefactor = sig / detH
-
-            # cell ceil(x + s) lies entirely outside the (compact) support
-            i_min = i0
-            i_max = qd.ceil(x_cell + support_x_cell, int) - 1
-
-            if qd.static(not periodic):
-                i_min = qd.max(i_min, 0)
-                i_max = qd.min(i_max, Nx - 1)
-
-            total_integral = 0.0
-
-            for a in range(i_min, i_max + 1):
-
-                integral = _covariant_cell_integral_1d(
-                    evaluate_fn,
-                    quad_points,
-                    dim,
-                    a,
-                    x_cell,
-                    e0,
-                    eval0,
-                    kernel_prefactor,
-                    cellSize_x,
-                )
-
-                total_integral += integral
-
-            if total_integral > 0.0:
-
-                correction = 1.0 / total_integral
-
-                for a in range(i_min, i_max + 1):
-
-                    aa = a
-                    if qd.static(periodic):
-                        aa = _apply_pbc(a, Nx)
-
-                    integral = _covariant_cell_integral_1d(
-                        evaluate_fn,
-                        quad_points,
-                        dim,
-                        a,
-                        x_cell,
-                        e0,
-                        eval0,
-                        kernel_prefactor,
-                        cellSize_x,
-                    )
-
-                    w_corr = wj * integral * correction
-
-                    qd.atomic_add(weights[aa], w_corr)
-
-                    for f in range(F):
-                        qd.atomic_add(
-                            fields[aa, f],
-                            quantities[n, f] * w_corr,
+                        _grid_add(
+                            weights, fields, quantities, n, cell, wj * integral, dim
                         )
 
+        else:
+            # per-cell quadrature; cell ceil(x + support) lies outside the
+            # support, so the stencil stops one cell before it
+            lo = qd.Vector.zero(qd.i32, dim)
+            ext = qd.Vector.zero(qd.i32, dim)
+            for d in qd.static(range(dim)):
+                i_min = i0[d]
+                i_max = qd.ceil(x_cell[d] + support_cell[d], int) - 1
+                if qd.static(not periodic):
+                    i_min = qd.max(i_min, 0)
+                    i_max = qd.min(i_max, N[d] - 1)
+                lo[d] = i_min
+                ext[d] = i_max - i_min + 1
+            # pass 1: total over the cells, to renormalise to the particle weight
+            total_integral = _quadrature_total(
+                evaluate_fn, quad_points, dim, False, lo, ext, x_cell, hsm_phys,
+                no_axes, no_ev, kernel_prefactor, cs,
+            )
+            if total_integral > 0.0:
+                _quadrature_deposit(
+                    evaluate_fn, quad_points, dim, False, periodic, lo, ext, x_cell,
+                    hsm_phys, no_axes, no_ev, kernel_prefactor, cs, N, wj,
+                    1.0 / total_integral, n, weights, fields, quantities,
+                )
 
+
+# =============================================================================
+# Covariant kernel
+# =============================================================================
 @qd.kernel
-def _covariant_2d(
+def _covariant(
     evaluate_fn: qd.template(),
     sigma_fn: qd.template(),
     kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
+    dim: qd.template(),
     quad_points: qd.template(),
     periodic: qd.template(),
     eta_crit: qd.f32,
     B: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,2)
-    quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,F)
-    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 2, 2), columns
-    hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N,2)
-    particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S,2)
-    sample_integrals: qd.types.ndarray(dtype=qd.f32, ndim=1),
-    num_samples: qd.i32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-    cellSize_x_inv: qd.f32,
-    cellSize_y_inv: qd.f32,
-    max_support: qd.f32,
-    Nx: qd.i32,
-    Ny: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nx,Ny,F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (Nx,Ny)
-):
-    F = fields.shape[2]
-    sig = sigma_fn(dim)
-
-    for n in range(positions.shape[0]):
-
-        x_phys = positions[n, 0]
-        y_phys = positions[n, 1]
-
-        # column-major
-        e0x = hmat_eigvecs[n, 0, 0]
-        e0y = hmat_eigvecs[n, 1, 0]
-
-        e1x = hmat_eigvecs[n, 0, 1]
-        e1y = hmat_eigvecs[n, 1, 1]
-
-        eval0 = hmat_eigvals[n, 0]
-        eval1 = hmat_eigvals[n, 1]
-
-        if qd.static(periodic):
-            max_eval = qd.max(eval0, eval1)
-            if max_eval > max_support:
-                scale = max_support / max_eval
-                eval0 *= scale
-                eval1 *= scale
-
-        eval0_cell = eval0 * cellSize_x_inv
-        eval1_cell = eval1 * cellSize_y_inv
-
-        support_x_cell = kernel_support * qd.sqrt(
-            (e0x * eval0_cell) ** 2 + (e1x * eval1_cell) ** 2
-        )
-        support_y_cell = kernel_support * qd.sqrt(
-            (e0y * eval0_cell) ** 2 + (e1y * eval1_cell) ** 2
-        )
-
-        eta = 2.0 * qd.min(support_x_cell, support_y_cell)  # diameter convention
-
-        # A degenerate ellipsoid (any eigenvalue exactly 0 -- possible with
-        # few neighbors, e.g. near-coplanar configurations) makes
-        # detH = eval0*eval1 = 0 in the quadrature branch below, which would
-        # divide by zero. eta itself doesn't reliably flag this (it's driven
-        # by the largest eigenvalue per axis, not the product), so check
-        # explicitly and force the (division-free) sample branch instead.
-        degenerate = eval0 <= 0.0 or eval1 <= 0.0
-
-        wj = particle_weights[n]
-
-        x_cell = x_phys * cellSize_x_inv
-        y_cell = y_phys * cellSize_y_inv
-        i0 = qd.floor(x_cell - support_x_cell, int)
-        j0 = qd.floor(y_cell - support_y_cell, int)
-        fits = (qd.floor(x_cell + support_x_cell, int) - i0 < B) and (
-            qd.floor(y_cell + support_y_cell, int) - j0 < B
-        )
-        use_samples = eta < eta_crit or degenerate
-
-        # cell ceil(x + s) lies entirely outside the (compact) support
-        i_min = i0
-        i_max = qd.ceil(x_cell + support_x_cell, int) - 1
-        j_min = j0
-        j_max = qd.ceil(y_cell + support_y_cell, int) - 1
-        if qd.static(not periodic):
-            i_min = qd.max(i_min, 0)
-            i_max = qd.min(i_max, Nx - 1)
-            j_min = qd.max(j_min, 0)
-            j_max = qd.min(j_max, Ny - 1)
-
-        # Quadrature pass 1 (total kernel weight over the affected cells) is
-        # evaluated before the branch decision: a strongly elongated
-        # ellipse can span several cells along the grid axes (eta >=
-        # eta_crit) while being thinner than a cell across its minor axis,
-        # so that no quadrature node falls inside its support. Its total is
-        # then 0 and, instead of silently dropping the particle's mass, it
-        # is deposited via the (normalized) sample table.
-        kernel_prefactor = 0.0
-        total_integral = 0.0
-        if not use_samples:
-            detH = eval0 * eval1
-            kernel_prefactor = sig / detH
-            for a in range(i_min, i_max + 1):
-                for b in range(j_min, j_max + 1):
-                    total_integral += _covariant_cell_integral_2d(
-                        evaluate_fn,
-                        quad_points,
-                        dim,
-                        a,
-                        b,
-                        x_cell,
-                        y_cell,
-                        e0x,
-                        e0y,
-                        e1x,
-                        e1y,
-                        eval0,
-                        eval1,
-                        kernel_prefactor,
-                        cellSize_x,
-                        cellSize_y,
-                    )
-            if total_integral <= 0.0:
-                use_samples = True
-
-        if use_samples and fits:
-            # sample deposition summed per cell in a local buffer first (one
-            # atomic per touched cell instead of one per sample)
-            buf = qd.Vector.zero(qd.f32, B * B)
-            for s in range(num_samples):
-                cx = sample_coords[s, 0]
-                cy = sample_coords[s, 1]
-
-                x_sample = x_phys + e0x * (eval0 * cx) + e1x * (eval1 * cy)
-                y_sample = y_phys + e0y * (eval0 * cx) + e1y * (eval1 * cy)
-
-                li = qd.floor(x_sample * cellSize_x_inv, int) - i0
-                lj = qd.floor(y_sample * cellSize_y_inv, int) - j0
-                if 0 <= li < B and 0 <= lj < B:
-                    buf[li * B + lj] += sample_integrals[s]
-
-            for a in range(B):
-                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
-                for b in range(B):
-                    v = buf[a * B + b]
-                    if v != 0.0:
-                        iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
-                        if ix_valid and iy_valid:
-                            w = wj * v
-                            qd.atomic_add(weights[ix, iy], w)
-                            for f in range(F):
-                                qd.atomic_add(fields[ix, iy, f], quantities[n, f] * w)
-
-        elif use_samples:
-
-            for s in range(num_samples):
-
-                cx = sample_coords[s, 0]
-                cy = sample_coords[s, 1]
-
-                x_sample = x_phys + e0x * (eval0 * cx) + e1x * (eval1 * cy)
-                y_sample = y_phys + e0y * (eval0 * cx) + e1y * (eval1 * cy)
-
-                ix, ix_valid = _cell_index_from_pos(
-                    x_sample, cellSize_x_inv, Nx, periodic
-                )
-                iy, iy_valid = _cell_index_from_pos(
-                    y_sample, cellSize_y_inv, Ny, periodic
-                )
-
-                if ix_valid and iy_valid:
-                    integral = sample_integrals[s]
-                    if integral != 0.0:
-                        w = wj * integral
-                        qd.atomic_add(weights[ix, iy], w)
-
-                        for f in range(F):
-                            qd.atomic_add(
-                                fields[ix, iy, f],
-                                quantities[n, f] * w,
-                            )
-
-        else:
-            # cell-quadrature branch, mass-conserving via two-pass
-            # renormalization (pass 1 computed above)
-            if total_integral > 0.0:
-
-                correction = 1.0 / total_integral
-
-                for a in range(i_min, i_max + 1):
-
-                    aa = a
-                    if qd.static(periodic):
-                        aa = _apply_pbc(a, Nx)
-
-                    for b in range(j_min, j_max + 1):
-
-                        bb = b
-                        if qd.static(periodic):
-                            bb = _apply_pbc(b, Ny)
-
-                        integral = _covariant_cell_integral_2d(
-                            evaluate_fn,
-                            quad_points,
-                            dim,
-                            a,
-                            b,
-                            x_cell,
-                            y_cell,
-                            e0x,
-                            e0y,
-                            e1x,
-                            e1y,
-                            eval0,
-                            eval1,
-                            kernel_prefactor,
-                            cellSize_x,
-                            cellSize_y,
-                        )
-
-                        w_corr = wj * integral * correction
-
-                        qd.atomic_add(weights[aa, bb], w_corr)
-
-                        for f in range(F):
-                            qd.atomic_add(
-                                fields[aa, bb, f],
-                                quantities[n, f] * w_corr,
-                            )
-
-
-@qd.kernel
-def _covariant_3d(
-    evaluate_fn: qd.template(),
-    sigma_fn: qd.template(),
-    kernel_support: qd.f32,
-    dim: qd.template(),  # only new line in the signature
-    quad_points: qd.template(),
-    periodic: qd.template(),
-    eta_crit: qd.f32,
-    B: qd.template(),
-    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
+    positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
     quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
-    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, 3, 3), columns
-    hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, 3)
+    hmat_eigvecs: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (N, D, D), columns
+    hmat_eigvals: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
     particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
-    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, 3)
+    sample_coords: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (S, D)
     sample_integrals: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (S,)
     num_samples: qd.i32,
-    cellSize_x: qd.f32,
-    cellSize_y: qd.f32,
-    cellSize_z: qd.f32,
-    cellSize_x_inv: qd.f32,
-    cellSize_y_inv: qd.f32,
-    cellSize_z_inv: qd.f32,
+    cell_size: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
+    cell_size_inv: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     max_support: qd.f32,
-    Nx: qd.i32,
-    Ny: qd.i32,
-    Nz: qd.i32,
-    fields: qd.types.ndarray(dtype=qd.f32, ndim=4),  # (Nx, Ny, Nz, F)
-    weights: qd.types.ndarray(dtype=qd.f32, ndim=3),  # (Nx, Ny, Nz)
+    fields: qd.types.ndarray(dtype=qd.f32),  # (*gridnums, F)
+    weights: qd.types.ndarray(dtype=qd.f32),  # gridnums
 ):
-    F = fields.shape[3]
+    """Ellipsoidal kernel W(|diag(ev)^-1 E^T (x - x_n)|).
+
+    Same branches as :func:`_isotropic`.
+
+    The quadrature total is computed before the branch decision: a strongly
+    elongated ellipsoid can span several cells along every axis (eta >=
+    eta_crit) while being thinner than a cell across its minor axis, so that
+    no quadrature node falls inside it. Such particles (and degenerate ones,
+    with a zero semi-axis) are deposited with the sample table instead of
+    being dropped.
+    """
     sig = sigma_fn(dim)
+    N = qd.Vector.zero(qd.i32, dim)
+    cs = qd.Vector.zero(qd.f32, dim)
+    inv = qd.Vector.zero(qd.f32, dim)
+    for d in qd.static(range(dim)):
+        N[d] = weights.shape[d]
+        cs[d] = cell_size[d]
+        inv[d] = cell_size_inv[d]
 
     for n in range(positions.shape[0]):
-        x_phys = positions[n, 0]
-        y_phys = positions[n, 1]
-        z_phys = positions[n, 2]
+        E = qd.Matrix.zero(qd.f32, dim, dim)  # column c: principal axis c
+        ev = qd.Vector.zero(qd.f32, dim)
+        for r in qd.static(range(dim)):
+            ev[r] = hmat_eigvals[n, r]
+            for c in qd.static(range(dim)):
+                E[r, c] = hmat_eigvecs[n, r, c]
 
-        # column-major: column j is eigenvector j
-        e0x = hmat_eigvecs[n, 0, 0]
-        e0y = hmat_eigvecs[n, 1, 0]
-        e0z = hmat_eigvecs[n, 2, 0]
+        if qd.static(periodic):  # support at most half the box
+            if qd.static(dim == 1):
+                if ev[0] > max_support:
+                    ev[0] = max_support
+            else:
+                max_eval = ev[0]
+                for c in qd.static(range(1, dim)):
+                    max_eval = qd.max(max_eval, ev[c])
+                if max_eval > max_support:
+                    scale = max_support / max_eval
+                    for c in qd.static(range(dim)):
+                        ev[c] *= scale
 
-        e1x = hmat_eigvecs[n, 0, 1]
-        e1y = hmat_eigvecs[n, 1, 1]
-        e1z = hmat_eigvecs[n, 2, 1]
+        # semi-axes in cell units (NOTE: scaled per eigen index, which is only
+        # the per-axis cell size for cubic cells)
+        ev_cell = qd.Vector.zero(qd.f32, dim)
+        degenerate = False
+        for c in qd.static(range(dim)):
+            ev_cell[c] = ev[c] * inv[c]
+            degenerate = degenerate or ev[c] <= 0.0
 
-        e2x = hmat_eigvecs[n, 0, 2]
-        e2y = hmat_eigvecs[n, 1, 2]
-        e2z = hmat_eigvecs[n, 2, 2]
-
-        eval0 = hmat_eigvals[n, 0]
-        eval1 = hmat_eigvals[n, 1]
-        eval2 = hmat_eigvals[n, 2]
-
-        if qd.static(periodic):
-            max_eval = qd.max(eval0, qd.max(eval1, eval2))
-            if max_eval > max_support:
-                scale = max_support / max_eval
-                eval0 *= scale
-                eval1 *= scale
-                eval2 *= scale
-
-        # needed for eta (branch decision) *and* reused in the else
-        # branch's support_*_cell formulas -- computed once either way
-        eval0_cell = eval0 * cellSize_x_inv
-        eval1_cell = eval1 * cellSize_y_inv
-        eval2_cell = eval2 * cellSize_z_inv
-
-        support_x_cell = kernel_support * qd.sqrt(
-            (e0x * eval0_cell) ** 2 + (e1x * eval1_cell) ** 2 + (e2x * eval2_cell) ** 2
-        )
-        support_y_cell = kernel_support * qd.sqrt(
-            (e0y * eval0_cell) ** 2 + (e1y * eval1_cell) ** 2 + (e2y * eval2_cell) ** 2
-        )
-        support_z_cell = kernel_support * qd.sqrt(
-            (e0z * eval0_cell) ** 2 + (e1z * eval1_cell) ** 2 + (e2z * eval2_cell) ** 2
-        )
-
-        eta = 2.0 * qd.min(
-            support_x_cell, qd.min(support_y_cell, support_z_cell)
-        )  # diameter convention
-
-        # A degenerate ellipsoid (any eigenvalue exactly 0 -- possible with
-        # few neighbors, e.g. near-coplanar configurations) makes
-        # detH = eval0*eval1*eval2 = 0 in the quadrature branch below, which
-        # would divide by zero. eta itself doesn't reliably flag this (it's
-        # driven by the largest eigenvalue per axis, not the product), so
-        # check explicitly and force the (division-free) sample branch.
-        degenerate = eval0 <= 0.0 or eval1 <= 0.0 or eval2 <= 0.0
+        x_phys = qd.Vector.zero(qd.f32, dim)
+        x_cell = qd.Vector.zero(qd.f32, dim)
+        support_cell = qd.Vector.zero(qd.f32, dim)
+        i0 = qd.Vector.zero(qd.i32, dim)
+        lo = qd.Vector.zero(qd.i32, dim)
+        ext = qd.Vector.zero(qd.i32, dim)
+        fits = True
+        eta = 0.0
+        for d in qd.static(range(dim)):
+            # half-extent of the support ellipsoid along axis d
+            if qd.static(dim == 1):
+                support_cell[d] = kernel_support * qd.abs(ev_cell[0])
+            else:
+                s2 = (E[d, 0] * ev_cell[0]) ** 2
+                for c in qd.static(range(1, dim)):
+                    s2 = s2 + (E[d, c] * ev_cell[c]) ** 2
+                support_cell[d] = kernel_support * qd.sqrt(s2)
+            if qd.static(d == 0):
+                eta = support_cell[d]
+            else:
+                eta = qd.min(eta, support_cell[d])
+            x_phys[d] = positions[n, d]
+            x_cell[d] = x_phys[d] * inv[d]
+            i0[d] = qd.floor(x_cell[d] - support_cell[d], int)
+            fits = fits and (qd.floor(x_cell[d] + support_cell[d], int) - i0[d] < B)
+            # cell ceil(x + support) lies outside the support
+            i_min = i0[d]
+            i_max = qd.ceil(x_cell[d] + support_cell[d], int) - 1
+            if qd.static(not periodic):
+                i_min = qd.max(i_min, 0)
+                i_max = qd.min(i_max, N[d] - 1)
+            lo[d] = i_min
+            ext[d] = i_max - i_min + 1
+        eta = 2.0 * eta  # kernel diameter in cells, along the narrowest axis
         wj = particle_weights[n]
-
-        x_cell = x_phys * cellSize_x_inv
-        y_cell = y_phys * cellSize_y_inv
-        z_cell = z_phys * cellSize_z_inv
-        i0 = qd.floor(x_cell - support_x_cell, int)
-        j0 = qd.floor(y_cell - support_y_cell, int)
-        k0 = qd.floor(z_cell - support_z_cell, int)
-        fits = (
-            (qd.floor(x_cell + support_x_cell, int) - i0 < B)
-            and (qd.floor(y_cell + support_y_cell, int) - j0 < B)
-            and (qd.floor(z_cell + support_z_cell, int) - k0 < B)
-        )
         use_samples = eta < eta_crit or degenerate
 
-        # cell ceil(x + s) lies entirely outside the (compact) support, so
-        # the stencil stops one cell before it
-        i_min = i0
-        i_max = qd.ceil(x_cell + support_x_cell, int) - 1
-        j_min = j0
-        j_max = qd.ceil(y_cell + support_y_cell, int) - 1
-        k_min = k0
-        k_max = qd.ceil(z_cell + support_z_cell, int) - 1
-        if qd.static(not periodic):
-            i_min = qd.max(i_min, 0)
-            i_max = qd.min(i_max, Nx - 1)
-            j_min = qd.max(j_min, 0)
-            j_max = qd.min(j_max, Ny - 1)
-            k_min = qd.max(k_min, 0)
-            k_max = qd.min(k_max, Nz - 1)
-
-        # Quadrature pass 1 (total kernel weight over the affected cells) is
-        # evaluated before the branch decision: a strongly elongated
-        # ellipsoid can span several cells along every grid axis (eta >=
-        # eta_crit) while being thinner than a cell across its minor axis,
-        # so that no quadrature node falls inside its support. Its total is
-        # then 0 and, instead of silently dropping the particle's mass, it
-        # is deposited via the (normalized) sample table.
         kernel_prefactor = 0.0
         total_integral = 0.0
         if not use_samples:
-            detH = eval0 * eval1 * eval2
-            kernel_prefactor = sig / detH
-            for a in range(i_min, i_max + 1):
-                for b in range(j_min, j_max + 1):
-                    for c in range(k_min, k_max + 1):
-                        total_integral += _covariant_cell_integral_3d(
-                            evaluate_fn,
-                            quad_points,
-                            dim,
-                            a,
-                            b,
-                            c,
-                            x_cell,
-                            y_cell,
-                            z_cell,
-                            e0x,
-                            e0y,
-                            e0z,
-                            e1x,
-                            e1y,
-                            e1z,
-                            e2x,
-                            e2y,
-                            e2z,
-                            eval0,
-                            eval1,
-                            eval2,
-                            kernel_prefactor,
-                            cellSize_x,
-                            cellSize_y,
-                            cellSize_z,
-                        )
+            det_h = ev[0]
+            for c in qd.static(range(1, dim)):
+                det_h = det_h * ev[c]
+            kernel_prefactor = sig / det_h
+            total_integral = _quadrature_total(
+                evaluate_fn, quad_points, dim, True, lo, ext, x_cell, 0.0, E, ev,
+                kernel_prefactor, cs,
+            )
             if total_integral <= 0.0:
                 use_samples = True
 
         if use_samples and fits:
-            # --- anti-aliasing branch: deposit via precomputed kernel samples,
-            # summed per cell in a local buffer first (one atomic per touched
-            # cell instead of one per sample) ---
-            buf = qd.Vector.zero(qd.f32, B * B * B)
+            # samples summed per cell in a local buffer: one atomic per cell
+            buf = qd.Vector.zero(qd.f32, qd.static(B**dim))
             for s in range(num_samples):
-                cx = sample_coords[s, 0]
-                cy = sample_coords[s, 1]
-                cz = sample_coords[s, 2]
-
-                # map the isotropic unit-sphere sample into the
-                # particle's physical ellipsoid: R diag(evals) c
-                x_sample = (
-                    x_phys
-                    + e0x * (eval0 * cx)
-                    + e1x * (eval1 * cy)
-                    + e2x * (eval2 * cz)
-                )
-                y_sample = (
-                    y_phys
-                    + e0y * (eval0 * cx)
-                    + e1y * (eval1 * cy)
-                    + e2y * (eval2 * cz)
-                )
-                z_sample = (
-                    z_phys
-                    + e0z * (eval0 * cx)
-                    + e1z * (eval1 * cy)
-                    + e2z * (eval2 * cz)
-                )
-
-                li = qd.floor(x_sample * cellSize_x_inv, int) - i0
-                lj = qd.floor(y_sample * cellSize_y_inv, int) - j0
-                lk = qd.floor(z_sample * cellSize_z_inv, int) - k0
-                if 0 <= li < B and 0 <= lj < B and 0 <= lk < B:
-                    buf[(li * B + lj) * B + lk] += sample_integrals[s]
-
-            for a in range(B):
-                ix, ix_valid = _cell_index_from_int(i0 + a, Nx, periodic)
-                for b in range(B):
-                    iy, iy_valid = _cell_index_from_int(j0 + b, Ny, periodic)
-                    for c in range(B):
-                        v = buf[(a * B + b) * B + c]
-                        if v != 0.0:
-                            iz, iz_valid = _cell_index_from_int(k0 + c, Nz, periodic)
-                            if ix_valid and iy_valid and iz_valid:
-                                w = wj * v
-                                qd.atomic_add(weights[ix, iy, iz], w)
-                                for f in range(F):
-                                    qd.atomic_add(
-                                        fields[ix, iy, iz, f], quantities[n, f] * w
-                                    )
+                idx = 0
+                inside = True
+                for d in qd.static(range(dim)):
+                    # unit-ball sample mapped into the ellipsoid: E diag(ev) c
+                    x_sample = x_phys[d]
+                    for c in qd.static(range(dim)):
+                        x_sample = x_sample + E[d, c] * (ev[c] * sample_coords[s, c])
+                    li = qd.floor(x_sample * inv[d], int) - i0[d]
+                    inside = inside and (0 <= li < B)
+                    idx = idx * B + li
+                if inside:
+                    buf[idx] += sample_integrals[s]
+            _deposit_sample_buffer(
+                buf, i0, wj, n, N, periodic, B, dim, weights, fields, quantities
+            )
 
         elif use_samples:
-            # --- same, direct per-sample deposition (particle too large for
-            # the local buffer) ---
+            # too large for the buffer: one atomic per sample
             for s in range(num_samples):
-                cx = sample_coords[s, 0]
-                cy = sample_coords[s, 1]
-                cz = sample_coords[s, 2]
-
-                # map the isotropic unit-sphere sample into the
-                # particle's physical ellipsoid: R diag(evals) c
-                x_sample = (
-                    x_phys
-                    + e0x * (eval0 * cx)
-                    + e1x * (eval1 * cy)
-                    + e2x * (eval2 * cz)
-                )
-                y_sample = (
-                    y_phys
-                    + e0y * (eval0 * cx)
-                    + e1y * (eval1 * cy)
-                    + e2y * (eval2 * cz)
-                )
-                z_sample = (
-                    z_phys
-                    + e0z * (eval0 * cx)
-                    + e1z * (eval1 * cy)
-                    + e2z * (eval2 * cz)
-                )
-
-                ix, ix_valid = _cell_index_from_pos(
-                    x_sample, cellSize_x_inv, Nx, periodic
-                )
-                iy, iy_valid = _cell_index_from_pos(
-                    y_sample, cellSize_y_inv, Ny, periodic
-                )
-                iz, iz_valid = _cell_index_from_pos(
-                    z_sample, cellSize_z_inv, Nz, periodic
-                )
-
-                if ix_valid and iy_valid and iz_valid:
+                cell = qd.Vector.zero(qd.i32, dim)
+                valid = True
+                for d in qd.static(range(dim)):
+                    x_sample = x_phys[d]
+                    for c in qd.static(range(dim)):
+                        x_sample = x_sample + E[d, c] * (ev[c] * sample_coords[s, c])
+                    cd, ok = _cell_index_from_pos(x_sample, inv[d], N[d], periodic)
+                    cell[d] = cd
+                    valid = valid and ok
+                if valid:
                     integral = sample_integrals[s]
                     if integral != 0.0:
-                        w = wj * integral
-                        qd.atomic_add(weights[ix, iy, iz], w)
-                        for f in range(F):
-                            qd.atomic_add(fields[ix, iy, iz, f], quantities[n, f] * w)
+                        _grid_add(
+                            weights, fields, quantities, n, cell, wj * integral, dim
+                        )
 
         else:
-            # --- cell-quadrature branch, mass-conserving via two-pass
-            # renormalization (pass 1 computed above) ---
-            if total_integral > 0.0:  # BUGFIX: C++ divides unconditionally
-                correction = 1.0 / total_integral
-
-                # pass 2: recompute (cheap) + deposit normalized weight
-                for a in range(i_min, i_max + 1):
-                    aa = a
-                    if qd.static(periodic):
-                        aa = _apply_pbc(a, Nx)
-
-                    for b in range(j_min, j_max + 1):
-                        bb = b
-                        if qd.static(periodic):
-                            bb = _apply_pbc(b, Ny)
-
-                        for c in range(k_min, k_max + 1):
-                            cc = c
-                            if qd.static(periodic):
-                                cc = _apply_pbc(c, Nz)
-
-                            integral = _covariant_cell_integral_3d(
-                                evaluate_fn,
-                                quad_points,
-                                dim,
-                                a,
-                                b,
-                                c,
-                                x_cell,
-                                y_cell,
-                                z_cell,
-                                e0x,
-                                e0y,
-                                e0z,
-                                e1x,
-                                e1y,
-                                e1z,
-                                e2x,
-                                e2y,
-                                e2z,
-                                eval0,
-                                eval1,
-                                eval2,
-                                kernel_prefactor,
-                                cellSize_x,
-                                cellSize_y,
-                                cellSize_z,
-                            )
-                            w_corr = wj * integral * correction
-
-                            qd.atomic_add(weights[aa, bb, cc], w_corr)
-                            for f in range(F):
-                                qd.atomic_add(
-                                    fields[aa, bb, cc, f], quantities[n, f] * w_corr
-                                )
+            # per-cell quadrature, renormalised with the pass-1 total
+            _quadrature_deposit(
+                evaluate_fn, quad_points, dim, True, periodic, lo, ext, x_cell, 0.0,
+                E, ev, kernel_prefactor, cs, N, wj, 1.0 / total_integral, n,
+                weights, fields, quantities,
+            )
 
 
 # =============================================================================
-# ||                                                                         ||
-# ||                               WRAPPERS                                  ||
-# ||                                                                         ||
+# Python wrappers
 # =============================================================================
-_KERNELS = {
-    False: _FIXED_GRID_KERNELS,  # static (fixed-stencil) methods
-    True: {  # adaptive (smoothing-length-dependent) methods
-        ("separable", 1): _separable_1d,
-        ("separable", 2): _separable_2d,
-        ("separable", 3): _separable_3d,
-        ("isotropic", 1): _isotropic_1d,
-        ("isotropic", 2): _isotropic_2d,
-        ("isotropic", 3): _isotropic_3d,
-        ("covariant", 1): _covariant_1d,
-        ("covariant", 2): _covariant_2d,
-        ("covariant", 3): _covariant_3d,
-    },
+_ADAPTIVE_KERNELS = {
+    "separable": _separable,
+    "isotropic": _isotropic,
+    "covariant": _covariant,
 }
 
 
 @dataclass(slots=True)
 class KernelPreparation:
-    """Everything needed to run one adaptive deposition, plus enough
-    derived/introspectable state (cell sizes, stencil/sample counts, ...)
-    to show a front-end what was actually computed. `kernel` + `args` are
-    what actually gets called; the rest of the fields exist for
-    inspection/debugging, not for driving the call themselves.
-    """
+    """A prepared adaptive deposition: call ``kernel(*args)``, read the grids."""
 
-    # -------------------------------------------------------------------
-    # What to call
-    # -------------------------------------------------------------------
-    kernel: Any  # the @qd.kernel to invoke
-    args: tuple  # exact positional args for `kernel`
-
-    # -------------------------------------------------------------------
-    # Output arrays (also embedded in `args`; kept here too since Quadrants
-    # fills ndarrays in place -- these are the objects to hand back)
-    # -------------------------------------------------------------------
-    grid_fields: np.ndarray
-    grid_weights: np.ndarray
-
-    # -------------------------------------------------------------------
-    # Derived quantities, for introspection / front-end display only
-    # -------------------------------------------------------------------
-    structure: str = ""
-    dim: int = 0
-    kernel_name: str = ""
-    support: float = 0.0
-    periodic: bool = False
-    cell_sizes: tuple = ()
-    max_support: float = 0.0
-    max_stencil: int | None = None  # separable only
-    num_samples: int | None = None  # isotropic / covariant only
-    eta_crit: float | None = None  # isotropic / covariant only
+    kernel: Any
+    args: tuple
+    grid_fields: np.ndarray  # (*gridnums, F), filled in place
+    grid_weights: np.ndarray  # gridnums, filled in place
     sample_buffer: int | None = None  # isotropic / covariant only
 
 
@@ -2244,7 +1185,6 @@ def _prepare_separable(
     grid_fields = np.zeros((*gridnums, F), dtype=np.float32)
     grid_weights = np.zeros(gridnums, dtype=np.float32)
 
-    kernel = _KERNELS[True][("separable", DIM)]
     args = (
         kspec.F_1d,
         kspec.sigma,
@@ -2255,27 +1195,13 @@ def _prepare_separable(
         particle_fields,
         particle_hsml,
         particle_weights,
-        *cell_size_invs,
+        np.array(cell_size_invs, dtype=np.float32),
         max_support,
         max_stencil,
-        *gridnums,
         grid_fields,
         grid_weights,
     )
-
-    return KernelPreparation(
-        kernel=kernel,
-        args=args,
-        grid_fields=grid_fields,
-        grid_weights=grid_weights,
-        structure="separable",
-        kernel_name=kernel_name,
-        support=support,
-        periodic=bool(periodic),
-        cell_sizes=tuple(1.0 / c for c in cell_size_invs),
-        max_support=float(max_support),
-        max_stencil=int(max_stencil),
-    )
+    return KernelPreparation(_separable, args, grid_fields, grid_weights)
 
 
 _QUADRATURE_TABLES = {
@@ -2298,11 +1224,10 @@ def _prepare_radial(
     integration_method,
     eta_crit,
 ):
-    """Shared set-up of isotropic and covariant deposition.
+    """Prepare an isotropic or covariant deposition.
 
-    Both use a spherical kernel, the same cell quadrature for resolved
-    particles and the same sample table for unresolved ones; they differ only
-    in the smoothing arrays passed to the kernel.
+    Both use the same kernel family, cell quadrature and sample table; only
+    the smoothing arrays differ.
     """
     DIM = particle_positions.shape[1]
     gridnums = tuple(int(n) for n in gridnums)
@@ -2346,27 +1271,14 @@ def _prepare_radial(
         grid["coords"],
         grid["integrals"],
         grid["count"],
-        *cell_sizes,
-        *cell_size_invs,
+        np.array(cell_sizes, dtype=np.float32),
+        np.array(cell_size_invs, dtype=np.float32),
         max_support,
-        *gridnums,
         grid_fields,
         grid_weights,
     )
-
     return KernelPreparation(
-        kernel=_KERNELS[True][(structure, DIM)],
-        args=args,
-        grid_fields=grid_fields,
-        grid_weights=grid_weights,
-        structure=structure,
-        kernel_name=kernel_name,
-        support=support,
-        periodic=bool(periodic),
-        cell_sizes=cell_sizes,
-        max_support=float(max_support),
-        num_samples=int(grid["count"]),
-        eta_crit=float(eta_crit),
+        _ADAPTIVE_KERNELS[structure], args, grid_fields, grid_weights,
         sample_buffer=int(sample_buffer),
     )
 
@@ -2400,31 +1312,37 @@ def deposit(
     integration_method="midpoint",
     eta_crit=4.0,
 ):
-    """Deposit particle data onto a grid.
+    """Deposit particle data onto a grid covering ``[0, boxsizes)``.
 
     Parameters
     ----------
-    particle_positions, particle_fields, particle_weights, boxsizes, gridnums, periodic
-        Always required.
+    particle_positions, particle_fields, particle_weights : np.ndarray
+        Positions (N, D), fields (N, F) and weights (N,).
+    boxsizes, gridnums : array_like
+        Grid extent and number of cells per axis, shape (D,).
     adaptive : bool
-        Select fixed-grid or smoothing-length-dependent deposition.
+        Fixed-grid stencil (False) or per-particle smoothing (True).
     kernel_name : str
-        A fixed-grid stencil when ``adaptive=False``; otherwise a kernel from
-        the selected adaptive structure's family.
+        A fixed-grid stencil (``"ngp"``, ``"cic"``, ``"tsc"``,
+        ``"bspline4"``, ``"bspline5"``, ``"bspline6"``) when
+        ``adaptive=False``; otherwise a kernel of the structure's family
+        (separable: ``"tophat"``, ``"tsc"``, ``"gaussian"``; isotropic and
+        covariant: any radial kernel).
     structure : {"separable", "isotropic", "covariant"}, optional
-        Required when ``adaptive=True``:
-
-        - fixed-grid (``adaptive=False``): `kernel_name` is one of
-          ``"ngp"``, ``"cic"``, ``"tsc"``, ``"bspline4"``, ``"bspline5"``,
-          ``"bspline6"``.
-        - separable: needs `particle_hsml` (N, D) and one of the separable
-          kernels ``"tophat"``, ``"tsc"``, ``"gaussian"``. Integrated
-          exactly; `integration_method` is ignored.
-        - isotropic: needs `particle_hsml` (N,), a radial kernel such as
-          ``"cubic_spline"``, `integration_method`, `eta_crit`.
-        - covariant: needs `particle_hmat_eigvecs` (N, D, D),
-          `particle_hmat_eigvals` (N, D), plus the same kernel/quadrature
-          options as ``"isotropic"``.
+        Adaptive structure; must be None when ``adaptive=False``.
+    periodic : bool
+        Wrap the grid periodically; otherwise contributions outside it are
+        dropped.
+    particle_hsml : np.ndarray, optional
+        Smoothing lengths, (N, D) for separable, (N,) for isotropic.
+    particle_hmat_eigvecs, particle_hmat_eigvals : np.ndarray, optional
+        Covariant only: principal axes as columns (N, D, D) and semi-axis
+        lengths (N, D).
+    integration_method : {"midpoint", "trapezoidal", "simpson"}
+        Cell quadrature rule (isotropic and covariant).
+    eta_crit : float
+        Kernel diameter in cells below which the sample table is used instead
+        of cell quadrature (isotropic and covariant).
 
     Returns
     -------
@@ -2446,7 +1364,7 @@ def deposit(
         check_fixed_grid_kernel(kernel_name, structure)
         key = (kernel_name, dim)
         try:
-            kernel = _KERNELS[False][key]
+            kernel = _FIXED_GRID_KERNELS[key]
         except KeyError:
             raise ValueError(
                 f"Unsupported combination: kernel_name={kernel_name!r}, dim={dim}."
