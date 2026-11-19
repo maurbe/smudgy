@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import quadrants as qd
 
+from .._common import ADAPTIVE_STRUCTURES, as_f32, check_fixed_grid_kernel
 from .kernels import (
     _separable_integrate_1d,
     build_kernel_sample_grid,
@@ -68,12 +69,6 @@ def _sample_buffer_size(eta_crit, dim):
     b = int(np.ceil(eta_crit)) + 1
     return max(1, min(b, {1: 64, 2: 16, 3: 6}[dim]))
 
-
-def _as_float32(array):
-    """Return a C-contiguous float32 array. No copy if `array` is
-    already float32 and C-contiguous; copies otherwise.
-    """
-    return np.ascontiguousarray(array, dtype=np.float32)
 
 
 def _round_up_stencil(n, bucket=8):
@@ -2173,9 +2168,6 @@ _KERNELS = {
     },
 }
 
-FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "bspline4", "bspline5", "bspline6"]
-ADAPTIVE_STRUCTURES = ["separable", "isotropic", "covariant"]
-
 
 @dataclass(slots=True)
 class KernelPreparation:
@@ -2226,7 +2218,7 @@ def _prepare_separable(
     particle_hsml,  # (N, D) -- per-axis smoothing length
 ):
     DIM = particle_positions.shape[1]
-    particle_hsml = _as_float32(particle_hsml)
+    particle_hsml = as_f32(particle_hsml)
 
     gridnums = tuple(int(n) for n in gridnums)
     boxsizes = tuple(float(b) for b in boxsizes)
@@ -2296,7 +2288,7 @@ def _prepare_isotropic(
     eta_crit,
 ):
     DIM = particle_positions.shape[1]
-    particle_hsml = _as_float32(particle_hsml)
+    particle_hsml = as_f32(particle_hsml)
 
     gridnums = tuple(int(n) for n in gridnums)
     boxsizes = tuple(float(b) for b in boxsizes)
@@ -2393,10 +2385,10 @@ def _prepare_covariant(
     # i.e. column j (eigenvector j) contiguous -- transpose(0, 2, 1) turns
     # (N, row, col) into (N, col, row) so reshape(-1, D*D) lays out each
     # column contiguously.
-    particle_hmat_eigvecs = _as_float32(
+    particle_hmat_eigvecs = as_f32(
         particle_hmat_eigvecs.transpose(0, 2, 1).reshape(-1, DIM * DIM)
     )
-    particle_hmat_eigvals = _as_float32(particle_hmat_eigvals)
+    particle_hmat_eigvals = as_f32(particle_hmat_eigvals)
 
     gridnums = tuple(int(n) for n in gridnums)
     boxsizes = tuple(float(b) for b in boxsizes)
@@ -2536,20 +2528,14 @@ def deposit(
     grid_weights : ndarray, shape (*gridnums,)
 
     """
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
     dim = particle_positions.shape[-1]
 
     if not adaptive:
-        if structure is not None:
-            raise ValueError("structure is only valid when adaptive=True.")
-        if kernel_name not in FIXED_GRID_KERNELS:
-            raise ValueError(
-                f"kernel_name={kernel_name!r} is not a fixed-grid stencil. "
-                f"Available: {FIXED_GRID_KERNELS}"
-            )
+        check_fixed_grid_kernel(kernel_name, structure)
         key = (kernel_name, dim)
         try:
             kernel = _KERNELS[False][key]
@@ -2576,7 +2562,7 @@ def deposit(
     if structure not in ADAPTIVE_STRUCTURES:
         raise ValueError(
             f"structure={structure!r} is not available for adaptive deposition. "
-            f"Available: {ADAPTIVE_STRUCTURES}"
+            f"Available: {list(ADAPTIVE_STRUCTURES)}"
         )
 
     provided_kwargs = {
@@ -2622,57 +2608,3 @@ def deposit(
 
     prep.kernel(*prep.args)
     return np.moveaxis(prep.grid_fields, -1, 0), prep.grid_weights
-
-
-# ============================================================
-if __name__ == "__main__":
-    dim = 3
-    N = int(1e6)
-    F = 4
-    structure = "separable"
-    kernel_name = "tsc"
-
-    particle_positions = np.random.uniform(0, 1, (N, dim))
-    particle_fields = np.ones((N, F))
-    particle_weights = np.ones(N)
-    particle_hsml = np.ones((N, dim)) * 0.01
-    particle_hmat_eigvecs = np.tile(np.eye(dim), (N, 1, 1))
-    particle_hmat_eigvals = np.ones((N, dim)) * 0.01
-    boxsizes = np.array([1.0] * dim)
-    gridnums = [256] * dim
-    periodic = True
-
-    from timeit import repeat
-
-    N_REPEATS = 3
-    N_LOOPS = 3
-
-    kwargs = dict(
-        particle_positions=particle_positions,
-        particle_fields=particle_fields,
-        particle_weights=particle_weights,
-        particle_hsml=particle_hsml,
-        particle_hmat_eigvecs=particle_hmat_eigvecs,
-        particle_hmat_eigvals=particle_hmat_eigvals,
-        boxsizes=boxsizes,
-        gridnums=gridnums,
-        periodic=periodic,
-        adaptive=True,
-        structure=structure,
-        kernel_name=kernel_name,
-        integration_method="midpoint",
-        eta_crit=4.0,
-    )
-
-    fields, weights = deposit(**kwargs)
-    print("fields:", fields.shape)
-    print("weights:", weights.shape)
-
-    best = min(
-        repeat(
-            stmt=lambda: deposit(**kwargs),
-            repeat=N_REPEATS,
-            number=N_LOOPS,
-        )
-    )
-    print(f"Best runtime: {best / N_LOOPS * 1e3:.3f} ms")

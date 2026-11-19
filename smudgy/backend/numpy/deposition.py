@@ -2,22 +2,8 @@ from itertools import product
 
 import numpy as np
 
+from .._common import as_f32, check_fixed_grid_kernel
 
-def _as_float32(array):
-    """Return a float32 view of ``array`` without copying when possible.
-
-    Parameters
-    ----------
-    array
-        Input array-like object.
-
-    Returns
-    -------
-    numpy.ndarray
-        ``float32`` view or copy of ``array``.
-
-    """
-    return np.asarray(array, dtype=np.float32)
 
 
 # =============================================================================
@@ -51,10 +37,10 @@ def _ngp_1d(
         Particle counts per cell (used as normalization weights).
 
     """
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx = gridnums[0]
     F = particle_fields.shape[1]
@@ -129,10 +115,10 @@ def _ngp_2d(
         Particle counts per cell (used as normalization weights).
 
     """
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny = gridnums
     F = particle_fields.shape[1]
@@ -209,10 +195,10 @@ def _ngp_3d(
         Particle counts per cell (used as normalization weights).
 
     """
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny, Nz = gridnums
     F = particle_fields.shape[1]
@@ -306,10 +292,10 @@ def _cic_1d(
         Particle counts per cell (used as normalization weights).
 
     """
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx = gridnums[0]
     F = particle_fields.shape[1]
@@ -427,10 +413,10 @@ def _cic_2d(
         Particle counts per cell (used as normalization weights).
 
     """
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny = gridnums
     F = particle_fields.shape[1]
@@ -531,10 +517,10 @@ def _cic_3d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny, Nz = gridnums
     F = particle_fields.shape[1]
@@ -652,10 +638,10 @@ def _tsc_1d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx = gridnums[0]
     F = particle_fields.shape[1]
@@ -735,10 +721,10 @@ def _tsc_2d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny = gridnums
     F = particle_fields.shape[1]
@@ -827,10 +813,10 @@ def _tsc_3d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny, Nz = gridnums
     F = particle_fields.shape[1]
@@ -933,10 +919,10 @@ def _bspline4_1d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx = gridnums[0]
     F = particle_fields.shape[1]
@@ -1017,10 +1003,10 @@ def _bspline4_2d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny = gridnums
     F = particle_fields.shape[1]
@@ -1110,10 +1096,10 @@ def _bspline4_3d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny, Nz = gridnums
     F = particle_fields.shape[1]
@@ -1217,10 +1203,10 @@ def _bspline5_1d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx = gridnums[0]
     F = particle_fields.shape[1]
@@ -1312,10 +1298,10 @@ def _bspline5_2d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny = gridnums
     F = particle_fields.shape[1]
@@ -1418,10 +1404,10 @@ def _bspline5_3d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny, Nz = gridnums
     F = particle_fields.shape[1]
@@ -1539,10 +1525,10 @@ def _bspline6_1d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx = gridnums[0]
     F = particle_fields.shape[1]
@@ -1624,10 +1610,10 @@ def _bspline6_2d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny = gridnums
     F = particle_fields.shape[1]
@@ -1719,10 +1705,10 @@ def _bspline6_3d(
     gridnums,
     periodic,
 ):
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
 
     Nx, Ny, Nz = gridnums
     F = particle_fields.shape[1]
@@ -1819,8 +1805,6 @@ def _bspline6_3d(
 # =============================================================================
 # Python-level dispatch
 # =============================================================================
-FIXED_GRID_KERNELS = ["ngp", "cic", "tsc", "bspline4", "bspline5", "bspline6"]
-
 _KERNELS = {
     ("ngp", 1): _ngp_1d,
     ("ngp", 2): _ngp_2d,
@@ -1871,18 +1855,12 @@ def deposit(
             "backend='numpy' does not support adaptive deposition; "
             "use backend='quadrants'."
         )
-    if structure is not None:
-        raise ValueError("structure is only valid when adaptive=True.")
-    if kernel_name not in FIXED_GRID_KERNELS:
-        raise ValueError(
-            f"kernel_name={kernel_name!r} is not available on backend='numpy'. "
-            f"Available: {FIXED_GRID_KERNELS}"
-        )
+    check_fixed_grid_kernel(kernel_name, structure)
 
-    particle_positions = _as_float32(particle_positions)
-    particle_fields = _as_float32(particle_fields)
-    particle_weights = _as_float32(particle_weights)
-    boxsizes = _as_float32(boxsizes)
+    particle_positions = as_f32(particle_positions)
+    particle_fields = as_f32(particle_fields)
+    particle_weights = as_f32(particle_weights)
+    boxsizes = as_f32(boxsizes)
     dim = particle_positions.shape[-1]
 
     key = (kernel_name, dim)
@@ -1903,58 +1881,3 @@ def deposit(
     )
 
     return grid_fields, grid_weights
-
-
-# ============================================================
-if __name__ == "__main__":
-
-    kernel_name = "bspline6"
-    dim = 1
-    N = int(1e6)
-    F = 3
-    particle_positions = np.random.uniform(0, 1, (N, dim))
-    particle_fields = np.ones((len(particle_positions), F))
-    particle_weights = np.ones(len(particle_positions))
-    boxsizes = np.array([1.0] * dim)
-    gridnums = [512] * dim
-    periodic = True
-
-    from timeit import repeat
-
-    N_REPEATS = 3
-    N_LOOPS = 3
-
-    # ------------------------------------------------------------------
-    # Correctness
-    # ------------------------------------------------------------------
-    fields, weights = deposit(
-        particle_positions,
-        particle_fields,
-        particle_weights,
-        boxsizes,
-        gridnums,
-        periodic,
-        kernel_name=kernel_name,
-    )
-    print("fields:", fields.shape)
-    print("weights:", weights.shape)
-
-    # ------------------------------------------------------------------
-    # Benchmark
-    # ------------------------------------------------------------------
-    best = min(
-        repeat(
-            stmt=lambda: deposit(
-                particle_positions,
-                particle_fields,
-                particle_weights,
-                boxsizes,
-                gridnums,
-                periodic,
-                kernel_name=kernel_name,
-            ),
-            repeat=N_REPEATS,
-            number=N_LOOPS,
-        )
-    )
-    print(f"Best runtime: {best / N_LOOPS * 1e3:.3f} ms")

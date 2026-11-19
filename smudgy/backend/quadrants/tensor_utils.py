@@ -3,12 +3,8 @@
 import numpy as np
 import quadrants as qd
 
+from .._common import BASIS_VECTORS, as_f32
 from .linalg import sym_eig_descending
-
-E1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-E2 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-E3 = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-BASIS_VECTORS = [E1, E2, E3]
 
 
 @qd.kernel
@@ -64,9 +60,9 @@ def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
         Array of eigenvectors of the projected 2D tensors of shape (N, 2, 2).
 
     """
-    h_tensor = np.ascontiguousarray(h_tensor, dtype=np.float32)
-    ea = np.ascontiguousarray(BASIS_VECTORS[plane[0]], dtype=np.float32)
-    eb = np.ascontiguousarray(BASIS_VECTORS[plane[1]], dtype=np.float32)
+    h_tensor = as_f32(h_tensor)
+    ea = as_f32(BASIS_VECTORS[plane[0]])
+    eb = as_f32(BASIS_VECTORS[plane[1]])
 
     N = h_tensor.shape[0]
     h2d = np.zeros((N, 2, 2), dtype=np.float32)

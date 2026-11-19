@@ -9,6 +9,13 @@ import numpy.typing as npt
 from mpi4py import MPI
 
 from . import execution
+from .backend import check_backend
+from .backend._common import ADAPTIVE_STRUCTURES as STRUCTURES
+from .backend._common import (  # noqa: F401  (INTERPOLATION_MODES re-exported)
+    INTERPOLATION_MODES,
+    check_interpolation_mode,
+    check_particle_structure,
+)
 from .backend.quadrants import init as quadrants_init
 from .decomposition import (
     QueryRouting,
@@ -18,10 +25,7 @@ from .decomposition import (
 from .ghosts import GhostInfo, exchange_ghosts, push_to_ghosts
 from .smooth import SmoothingInfo
 
-STRUCTURES = ("separable", "isotropic", "covariant")
 Structure = Literal["separable", "isotropic", "covariant"]
-
-INTERPOLATION_MODES = ("field", "gradient", "divergence", "curl")
 InterpolationMode = Literal["field", "gradient", "divergence", "curl"]
 
 
@@ -254,13 +258,7 @@ class PointCloud:
             :class:`PointCloud`.
 
         """
-        assert isinstance(
-            backend, str
-        ), f"'backend' must be a string but found {type(backend)}"
-        if backend not in ("numpy", "quadrants"):
-            raise ValueError(
-                f"backend must be one of 'numpy' or 'quadrants' but found {backend!r}"
-            )
+        check_backend(backend)
         self.backend = backend
         if backend == "quadrants":
             quadrants_init(**kwargs)
@@ -549,10 +547,6 @@ class PointCloud:
         mode: InterpolationMode,
         field_sizes: list[int],
     ) -> None:
-
-        # map which fields are vector fields
-        field_types = np.array([size > 1 for size in field_sizes], dtype=np.bool_)
-
         """Check that field dimensions match the requested operation.
 
         Parameters
@@ -561,8 +555,6 @@ class PointCloud:
             The interpolation mode ('field', 'gradient', 'divergence', 'curl').
         field_sizes : list[int]
             List of component counts for each field.
-        field_types : npt.NDArray[np.bool_]
-            Boolean array indicating vector fields (True) vs scalar fields (False).
 
         Raises
         ------
@@ -570,6 +562,9 @@ class PointCloud:
             If field type is incompatible with the requested operation.
 
         """
+        check_interpolation_mode(mode, self.dim)
+        # map which fields are vector fields
+        field_types = np.array([size > 1 for size in field_sizes], dtype=np.bool_)
         if mode == "gradient":
             # Gradients work on both scalars and vectors, but we compute per component
             pass
@@ -1013,8 +1008,8 @@ class PointCloud:
 
         Notes
         -----
-        Results are stored in ``smoothing.density_isotropic`` (separable and
-        isotropic) or ``smoothing.density_covariant`` and are rank-local (use
+        Results are stored in ``smoothing.density_isotropic`` or
+        ``smoothing.density_covariant`` and are rank-local (use
         :meth:`get`, e.g. ``pc.get("density_isotropic")``, to collect them).
         Requires :meth:`compute_smoothing` at the particle positions with
         the same structure.
@@ -1031,11 +1026,12 @@ class PointCloud:
 
         """
         st = self._resolve_structure(structure)
+        check_particle_structure(st, "density")
         kn = self._resolve_kernel(kernel_name)
         self._check_smoothing_computed(st)
 
         if self.verbose and self.rank == 0:
-            print(f"[smudgy] Computing density using " f"{st} '{kn}' kernel")
+            print(f"[smudgy] Computing density using {st} '{kn}' kernel")
 
         # self.smoothing.nn_inds/smoothing_lengths/smoothing_tensors are
         # already local-sized (compute_smoothing's local+ghost result), so
@@ -1248,21 +1244,19 @@ class PointCloud:
                 smoothing_tensors_eigvecs, dtype=np.float32
             )
 
-    def _detect_field_types(self, field_sizes: list[int]) -> npt.NDArray[np.bool_]:
-        """Detect whether each field is scalar (1 component) or vector (≥2 components).
-
-        Parameters
-        ----------
-        field_sizes : list[int]
-            List of component counts for each field.
-
-        Returns
-        -------
-        npt.NDArray[np.bool_]
-            Boolean array where True indicates a vector field.
-
-        """
-        return np.array([size > 1 for size in field_sizes], dtype=np.bool_)
+    def _print_interpolation(self, mode, where, structure):
+        """Verbose rank-0 message shared by both interpolate() branches."""
+        if self.verbose and self.rank == 0:
+            what = {
+                "field": "fields",
+                "gradient": "gradients of fields",
+                "divergence": "divergence of fields",
+                "curl": "curl of fields",
+            }[mode]
+            print(
+                f"[smudgy] Interpolating {what} at {where} using {structure} "
+                f"'{self.smoothing.kernel_name}' kernel"
+            )
 
     def _prepare_deposition_smoothing(
         self,
@@ -1502,17 +1496,11 @@ class PointCloud:
         # Setup
         # ----------------------------
         self._ensure_neighbors_found(self._resolve_num_neighbors())
-        if mode not in INTERPOLATION_MODES:
-            raise ValueError(
-                f"'mode' must be one of {INTERPOLATION_MODES}, got '{mode}'"
-            )
+        check_interpolation_mode(mode, self.dim)
 
         # check that structure is set either globally or via argument
         structure_temp = self._resolve_structure(structure)
-        if structure_temp not in ["isotropic", "covariant"]:
-            raise ValueError(
-                f"For interpolation, 'structure' must be one of ['isotropic', 'covariant'], got '{structure_temp}'"
-            )
+        check_particle_structure(structure_temp, "interpolation")
 
         # check that density has been computed for the chosen structure
         self._check_density_computed(structure_temp)
@@ -1538,17 +1526,7 @@ class PointCloud:
         # partition, then solve their K-NN with a generalized ghost
         # exchange).
         if not has_query_positions:
-            if self.verbose and self.rank == 0:
-                mode_str = {
-                    "field": "fields",
-                    "gradient": "gradients of fields",
-                    "divergence": "divergence of fields",
-                    "curl": "curl of fields",
-                }[mode]
-                print(
-                    f"[smudgy] Interpolating {mode_str} at query positions using "
-                    f"{structure_temp} '{self.smoothing.kernel_name}' kernel (local+ghost)"
-                )
+            self._print_interpolation(mode, "particle positions", structure_temp)
             return self._interpolate_local(
                 self.decomposition.local_positions,
                 self.ghosts,
@@ -1558,49 +1536,37 @@ class PointCloud:
                 structure_temp,
             )
 
-        if has_query_positions:
-            # Root-authoritative, like hilbert_partition_and_scatter --
-            # route_query_positions Scatterv's the routed chunks itself, so
-            # (unlike the old path below) the full (M, D) array is never
-            # broadcast to every rank.
-            query_positions_root = (
-                np.asarray(query_positions, dtype=np.float32)
-                if self.rank == 0
-                else None
-            )
-            self.query_routing = route_query_positions(
-                self.comm, self.decomposition, query_positions_root, self.periodic
-            )
-            query_ghosts = exchange_ghosts(
-                self.comm,
-                self.decomposition,
-                self.smoothing.num_neighbors,
-                self.dim,
-                self.periodic,
-                self.boxsize,
-                target_positions=self.query_routing.local_positions,
-            )
+        # Root-authoritative, like hilbert_partition_and_scatter --
+        # route_query_positions Scatterv's the routed chunks itself, so
+        # (unlike the old path below) the full (M, D) array is never
+        # broadcast to every rank.
+        query_positions_root = (
+            np.asarray(query_positions, dtype=np.float32)
+            if self.rank == 0
+            else None
+        )
+        self.query_routing = route_query_positions(
+            self.comm, self.decomposition, query_positions_root, self.periodic
+        )
+        query_ghosts = exchange_ghosts(
+            self.comm,
+            self.decomposition,
+            self.smoothing.num_neighbors,
+            self.dim,
+            self.periodic,
+            self.boxsize,
+            target_positions=self.query_routing.local_positions,
+        )
 
-            if self.verbose and self.rank == 0:
-                mode_str = {
-                    "field": "fields",
-                    "gradient": "gradients of fields",
-                    "divergence": "divergence of fields",
-                    "curl": "curl of fields",
-                }[mode]
-                print(
-                    f"[smudgy] Interpolating {mode_str} at routed query positions "
-                    f"using {structure_temp} '{self.smoothing.kernel_name}' kernel "
-                    "(local+ghost)"
-                )
-            return self._interpolate_local(
-                self.query_routing.local_positions,
-                query_ghosts,
-                fields,
-                fields_sizes,
-                mode,
-                structure_temp,
-            )
+        self._print_interpolation(mode, "query positions", structure_temp)
+        return self._interpolate_local(
+            self.query_routing.local_positions,
+            query_ghosts,
+            fields,
+            fields_sizes,
+            mode,
+            structure_temp,
+        )
 
     def deposit(
         self,

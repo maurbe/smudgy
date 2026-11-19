@@ -3,14 +3,8 @@
 import numpy as np
 import quadrants as qd
 
+from .._common import EPS, as_f32, as_i32, check_hmat_args, normalize_boxsize
 from .linalg import sym_eig_descending
-
-_EPS = 1e-7
-
-
-def _as_float32(array):
-    """Return a C-contiguous float32 array. No copy if `array` is already float32 and C-contiguous; copies otherwise."""
-    return np.ascontiguousarray(array, dtype=np.float32)
 
 
 def compute_hsml(nn_dists: np.ndarray) -> np.ndarray:
@@ -27,7 +21,7 @@ def compute_hsml(nn_dists: np.ndarray) -> np.ndarray:
         Array of smoothing lengths.
 
     """
-    return np.ascontiguousarray(nn_dists[:, -1], dtype=np.float32)
+    return as_f32(nn_dists[:, -1])
 
 
 @qd.func
@@ -200,36 +194,15 @@ def compute_hmat(
         Principal axes (columns), shape (N, D, D).
     """
     dim = query_positions.shape[-1]
-    if dim not in (1, 2, 3):
-        raise ValueError(
-            "[smudgy] Only 1D, 2D and 3D positions are supported for anisotropic smoothing tensors."
-        )
-    if not ratio_max >= 1.0:
-        raise ValueError(f"[smudgy] ratio_max must be >= 1, got {ratio_max}.")
-
-    query_positions = _as_float32(query_positions)
-    positions = _as_float32(positions)
-    weights = _as_float32(weights)
-    nn_inds = np.ascontiguousarray(nn_inds, dtype=np.int32)
-
-    periodic = boxsize is not None
-    box = (
-        np.ascontiguousarray(np.broadcast_to(boxsize, (dim,)), dtype=np.float32)
-        if periodic
-        else np.zeros(dim, dtype=np.float32)
-    )
-
     Nq = nn_inds.shape[0]
-    if volume_preserving:
-        if hsml is None:
-            raise ValueError("[smudgy] volume_preserving=True requires hsml.")
-        hsml_arr = _as_float32(hsml)
-        if hsml_arr.shape != (Nq,):
-            raise ValueError(
-                f"[smudgy] hsml must have shape ({Nq},), got {hsml_arr.shape}."
-            )
-    else:
-        hsml_arr = np.zeros(Nq, dtype=np.float32)
+    min_axis = check_hmat_args(dim, ratio_max, min_axis, volume_preserving, hsml, Nq)
+
+    query_positions = as_f32(query_positions)
+    positions = as_f32(positions)
+    weights = as_f32(weights)
+    nn_inds = as_i32(nn_inds)
+    box, periodic = normalize_boxsize(boxsize, dim)
+    hsml_arr = as_f32(hsml) if volume_preserving else np.zeros(Nq, dtype=np.float32)
 
     H = np.zeros((Nq, dim, dim), dtype=np.float32)
     eigvals = np.zeros((Nq, dim), dtype=np.float32)
@@ -245,9 +218,9 @@ def compute_hmat(
         periodic,
         dim,
         bool(volume_preserving),
-        float(_EPS),
+        float(EPS),
         float(ratio_max),
-        float(min_axis) if min_axis is not None else 0.0,
+        min_axis,
         H,
         eigvals,
         eigvecs,

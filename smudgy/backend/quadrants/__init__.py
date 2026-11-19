@@ -1,3 +1,5 @@
+import warnings
+
 import quadrants as qd
 
 _initialized = False
@@ -31,6 +33,13 @@ def init(arch=None, force=False, **kwargs):
 
     if arch is None:
         if _initialized and not force:
+            if kwargs:
+                warnings.warn(
+                    f"Quadrants is already initialized ({_current_config}); "
+                    f"ignoring {sorted(kwargs)}. Pass arch=... or force=True "
+                    "to re-initialize.",
+                    stacklevel=2,
+                )
             return
         arch = "gpu"
 
@@ -46,6 +55,17 @@ def init(arch=None, force=False, **kwargs):
     qd.init(arch=_ARCH_MAP[arch], **kwargs)
     _initialized = True
     _current_config = config
+
+
+def ensure_initialized(arch="cpu"):
+    """Initialize with `arch` only if no runtime is running yet.
+
+    For helpers that just need *a* runtime: unlike ``init(arch=...)`` this
+    never re-initializes (and so never discards) a runtime the user already
+    started, e.g. on the GPU.
+    """
+    if not _initialized:
+        init(arch=arch)
 
 
 def current_config():

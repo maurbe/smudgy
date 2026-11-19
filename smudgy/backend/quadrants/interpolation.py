@@ -6,9 +6,16 @@ from .kernels import (
     prepare_covariant_inputs,
     prepare_isotropic_inputs,
 )
+from .._common import (
+    EPS,
+    as_f32,
+    as_i32,
+    check_interpolation_mode,
+    check_particle_structure,
+    normalize_boxsize,
+    support_scaled,
+)
 from .smoothing import _coordinate_difference_with_pbc
-
-_EPS = 1e-7
 
 
 # =============================================================================
@@ -62,39 +69,15 @@ def _kernel_inputs(
     return q, grad_q, scale
 
 
-def _as_float32(array):
-    return np.ascontiguousarray(array, dtype=np.float32)
-
-
-def _support_scaled(h, kernel):
-    """Rescale h so the kernel's compact support does not extend past q = 1.
-
-    In particle mode `h` is the distance to the K-th neighbour (isotropic) or
-    the tensor whose ellipsoid passes through the farthest neighbour
-    (covariant), and only those K neighbours are summed. A kernel whose
-    support is `s` > 1 times h would be truncated there, so h -> h / s.
-    Kernels with s <= 1 are left as they are. Returns a new array; `h`
-    itself is never modified.
-    """
-    if kernel.support <= 1.0:
-        return h
-    return np.asarray(h, dtype=np.float32) / np.float32(kernel.support)
-
-
 def _common_inputs(query_positions, positions, weights, nn_inds, h, boxsize, dim):
     """Contiguous float32/int32 copies (no-ops if already so) + boxsize/periodic."""
-    periodic = boxsize is not None
-    box = (
-        np.ascontiguousarray(np.broadcast_to(boxsize, (dim,)), dtype=np.float32)
-        if periodic
-        else np.zeros(dim, dtype=np.float32)
-    )
+    box, periodic = normalize_boxsize(boxsize, dim)
     return (
-        _as_float32(query_positions),
-        _as_float32(positions),
-        _as_float32(weights),
-        np.ascontiguousarray(nn_inds, dtype=np.int32),
-        _as_float32(h),
+        as_f32(query_positions),
+        as_f32(positions),
+        as_f32(weights),
+        as_i32(nn_inds),
+        as_f32(h),
         box,
         periodic,
     )
@@ -153,11 +136,9 @@ def density(
     boxsize : np.ndarray or None
         Box sizes for periodic boundary conditions.
     """
-    if structure == "separable":
-        raise ValueError("structure='separable' is not supported for particle density.")
-
+    check_particle_structure(structure, "density")
     kernel = create_spherical_kernel(kernel_name)
-    h = _support_scaled(h, kernel)
+    h = support_scaled(h, kernel.support)
     query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
         query_positions, positions, weights, nn_inds, h, boxsize, dim
     )
@@ -169,7 +150,7 @@ def density(
         dim,
         structure == "covariant",
         periodic,
-        float(_EPS),
+        float(EPS),
         query_positions,
         positions,
         weights,
@@ -381,18 +362,14 @@ def interpolate(
     boxsize : np.ndarray or None
         Box sizes for periodic boundary conditions.
     """
-    if structure == "separable":
-        raise ValueError("structure='separable' is not supported for particle density.")
-
-    if dim == 1 and mode == "curl":
-        raise NotImplementedError
-
+    check_particle_structure(structure, "interpolation")
+    check_interpolation_mode(mode, dim)
     kernel = create_spherical_kernel(kernel_name)
-    h = _support_scaled(h, kernel)
+    h = support_scaled(h, kernel.support)
     query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
         query_positions, positions, weights, nn_inds, h, boxsize, dim
     )
-    fields = _as_float32(fields)
+    fields = as_f32(fields)
 
     N = nn_inds.shape[0]
     F = fields.shape[1]
@@ -405,14 +382,10 @@ def interpolate(
         out = np.zeros((N, F, dim), dtype=np.float32)
     elif mode == "divergence":
         fn, kernel_fn, out = _divergence_kernel, kernel.gradient, np.zeros((N, F), np.float32)
-    elif mode == "curl":
+    else:  # "curl" (validated above)
         C = 1 if dim == 2 else dim
         fn, kernel_fn = _curl_kernel, kernel.gradient
         out = np.zeros((N, F, C), dtype=np.float32)
-    else:
-        raise ValueError(
-            f"Unsupported interpolation mode '{mode}'. Expected one of 'field', 'gradient', 'divergence', 'curl'."
-        )
 
     fn(
         kernel_fn,
@@ -421,7 +394,7 @@ def interpolate(
         covariant,
         periodic,
         F,
-        _EPS,
+        EPS,
         query_positions,
         positions,
         weights,

@@ -2,36 +2,17 @@
 import numpy as np
 import numpy.typing as npt
 
+from .._common import EPS, as_f32, check_hmat_args
 from ..neighbors import coordinate_difference_with_pbc
 from .tensor_utils import _fix_eigvec_sign
 
 FloatArray = npt.NDArray[np.float32]
 IntArray = npt.NDArray[np.int32]
 
-_EPS = 1e-7
-
-
-def _as_float32(array):
-    """Return a float32 view of ``array`` without copying when possible.
-
-    Parameters
-    ----------
-    array
-        Input array-like object.
-
-    Returns
-    -------
-    numpy.ndarray
-        ``float32`` view or copy of ``array``.
-
-    """
-    return np.asarray(array, dtype=np.float32)
-
 
 def compute_hsml(nn_dists: FloatArray) -> FloatArray:
     """Return the distance to the farthest (k-th) neighbour as smoothing length."""
-    nn_dists = _as_float32(nn_dists)
-    return nn_dists[:, -1]
+    return as_f32(nn_dists[:, -1])
 
 
 def compute_hmat(
@@ -81,25 +62,16 @@ def compute_hmat(
         Principal axes (columns), shape (N, D, D).
     """
     dim = query_positions.shape[-1]
-    if dim not in (1, 2, 3):
-        raise ValueError(
-            "[smudgy] Only 1D, 2D and 3D positions are supported for anisotropic smoothing tensors."
-        )
-    if not ratio_max >= 1.0:
-        raise ValueError(f"[smudgy] ratio_max must be >= 1, got {ratio_max}.")
+    min_axis = check_hmat_args(
+        dim, ratio_max, min_axis, volume_preserving, hsml, query_positions.shape[0]
+    )
     if volume_preserving:
-        if hsml is None:
-            raise ValueError("[smudgy] volume_preserving=True requires hsml.")
         hsml = np.asarray(hsml, dtype=np.float64)
-        if hsml.shape != (query_positions.shape[0],):
-            raise ValueError(
-                f"[smudgy] hsml must have shape ({query_positions.shape[0]},), got {hsml.shape}."
-            )
 
-    query_positions = _as_float32(query_positions)
-    neighbor_positions = _as_float32(positions)[nn_inds]
-    neighbor_weights = _as_float32(weights)[nn_inds]
-    boxsize = _as_float32(boxsize) if boxsize is not None else None
+    query_positions = as_f32(query_positions)
+    neighbor_positions = as_f32(positions)[nn_inds]
+    neighbor_weights = as_f32(weights)[nn_inds]
+    boxsize = as_f32(boxsize) if boxsize is not None else None
 
     rel_coords = coordinate_difference_with_pbc(
         neighbor_positions, query_positions[:, np.newaxis, :], boxsize
@@ -111,7 +83,7 @@ def compute_hmat(
     w /= w.sum(axis=1, keepdims=True)
     Sigma = np.einsum("nk,nki,nkj->nij", w, rel64, rel64, optimize=True)
     Sigma += (
-        _EPS
+        EPS
         * np.trace(Sigma, axis1=-2, axis2=-1)[..., None, None]
         * np.eye(dim, dtype=np.float64)
     )
@@ -141,7 +113,7 @@ def compute_hmat(
     if volume_preserving:  # det H = hsml^D
         det = np.maximum(np.prod(axes, axis=1), 1e-300)
         axes *= (hsml / det ** (1.0 / dim))[:, None]
-    if min_axis is not None:  # only ever enlarges axes
+    if min_axis > 0.0:  # only ever enlarges axes
         axes = np.maximum(axes, min_axis)
 
     H = np.einsum("nij,nj,nkj->nik", eigvecs, axes, eigvecs, optimize=True)

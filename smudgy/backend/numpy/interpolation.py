@@ -1,22 +1,12 @@
 import numpy as np
 
+from .._common import (
+    check_interpolation_mode,
+    check_particle_structure,
+    support_scaled,
+)
 from ..neighbors import coordinate_difference_with_pbc
 from .kernels import get_kernel, prepare_kernel_inputs
-
-
-def _support_scaled(h, kernel):
-    """Rescale h so the kernel's compact support does not extend past q = 1.
-
-    In particle mode `h` is the distance to the K-th neighbour (isotropic) or
-    the tensor whose ellipsoid passes through the farthest neighbour
-    (covariant), and only those K neighbours are summed. A kernel whose
-    support is `s` > 1 times h would be truncated there, so h -> h / s.
-    Kernels with s <= 1 are left as they are. Returns a new array; `h`
-    itself is never modified.
-    """
-    if kernel.support <= 1.0:
-        return h
-    return np.asarray(h) / np.float32(kernel.support)
 
 
 def _gather_rel_coords(query_positions, positions, nn_inds, boxsize):
@@ -47,14 +37,9 @@ def density(
 
     Same arguments as :func:`smudgy.backend.quadrants.interpolation.density`.
     """
-    if structure == "separable":
-        raise ValueError("structure='separable' is not supported for particle density.")
-
-    kernel = get_kernel(
-        kernel_name,
-        dim=dim,
-    )
-    h = _support_scaled(h, kernel)
+    check_particle_structure(structure, "density")
+    kernel = get_kernel(kernel_name, dim=dim)
+    h = support_scaled(h, kernel.support)
     r_ij = _gather_rel_coords(query_positions, positions, nn_inds, boxsize)
     neighbor_weights = np.asarray(weights)[nn_inds]
 
@@ -94,13 +79,10 @@ def interpolate(
 
     Same arguments as :func:`smudgy.backend.quadrants.interpolation.interpolate`.
     """
-    if structure == "separable":
-        raise ValueError(
-            "structure='separable' is not supported for particle interpolation."
-        )
-
+    check_particle_structure(structure, "interpolation")
+    check_interpolation_mode(mode, dim)
     kernel = get_kernel(kernel_name, dim=dim)
-    h = _support_scaled(h, kernel)
+    h = support_scaled(h, kernel.support)
     r_ij = _gather_rel_coords(query_positions, positions, nn_inds, boxsize)
     fields = np.asarray(fields)[nn_inds]
     weights = np.asarray(weights)[nn_inds]
@@ -127,9 +109,6 @@ def interpolate(
         return np.einsum("...kfd,...kd,...k->...f", fields, w_grad, weights)
 
     if mode == "curl":
-        if dim == 1:
-            raise NotImplementedError
-
         if dim == 2:
             curl = (
                 fields[..., 0] * w_grad[..., 1, None]
@@ -140,8 +119,3 @@ def interpolate(
         else:
             curl = np.cross(fields, w_grad[..., None, :], axis=-1)
             return np.einsum("...kfd,...k->...fd", curl, weights)
-
-    raise ValueError(
-        f"Unsupported interpolation mode '{mode}'. "
-        "Expected one of 'field', 'gradient', 'divergence', 'curl'."
-    )

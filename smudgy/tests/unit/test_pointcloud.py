@@ -218,7 +218,7 @@ class TestInit:
 
     def test_backend_non_string_raises(self, rng):
         pos = make_positions(rng, n=10)
-        with pytest.raises(AssertionError):
+        with pytest.raises(TypeError):
             PointCloud(pos, backend=123, verbose=False)
 
 

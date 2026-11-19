@@ -68,11 +68,6 @@ def prepare_kernel_inputs(kernel, structure, r_ij, h, dim, eps=1e-7):
         return _prepare_isotropic_inputs(kernel, r_ij, h, eps)
     if structure == "covariant":
         return _prepare_covariant_inputs(kernel, r_ij, h, eps)
-    if structure == "separable":
-        raise ValueError(
-            "structure='separable' is not supported for particle density "
-            "or interpolation; use 'isotropic' or 'covariant'."
-        )
     raise ValueError(f"Invalid structure '{structure}'")
 
 

@@ -1561,6 +1561,18 @@ def _build_kernel_sample_grid_cached(
 # =============================================================================
 # Utility functions (debugging / testing parity with the C++ helpers)
 # =============================================================================
+@qd.kernel
+def _separable_axis_integral(
+    F_1d_fn: qd.template(), support: qd.f32, dim: qd.template()
+) -> qd.f32:
+    return _separable_integrate_1d(F_1d_fn, support, dim, -support, support)
+
+
+@qd.kernel
+def _sigma_value(sigma_fn: qd.template(), dim: qd.template()) -> qd.f32:
+    return sigma_fn(dim)
+
+
 def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
     """Integrate a separable kernel over its support (should be unity).
 
@@ -1576,24 +1588,12 @@ def compute_total_integral_separable(kernel_name: str, dim: int) -> float:
     float
         Total integral of the kernel.
     """
-    from . import init as _quadrants_init
+    from . import ensure_initialized
 
-    _quadrants_init(arch="cpu")
+    ensure_initialized()
     kspec = create_separable_kernel(kernel_name)
-
-    @qd.kernel
-    def _compute(
-        F_1d_fn: qd.template(), support: qd.f32, dim_: qd.template()
-    ) -> qd.f32:
-        return _separable_integrate_1d(F_1d_fn, support, dim_, -support, support)
-
-    single_axis_integral = _compute(kspec.F_1d, kspec.support, dim)
-
-    @qd.kernel
-    def _sigma(sigma_fn: qd.template(), dim_: qd.template()) -> qd.f32:
-        return sigma_fn(dim_)
-
-    sigma = _sigma(kspec.sigma, dim)
+    single_axis_integral = _separable_axis_integral(kspec.F_1d, kspec.support, dim)
+    sigma = _sigma_value(kspec.sigma, dim)
     return float(sigma * (single_axis_integral**dim))
 
 
@@ -1617,9 +1617,9 @@ def compute_total_integral_spherical(
     float
         Total integral of the kernel.
     """
-    from . import init as _quadrants_init
+    from . import ensure_initialized
 
-    _quadrants_init(arch="cpu")
+    ensure_initialized()
     grid = build_kernel_sample_grid(kernel_name, dim, eta_crit)
     return float(np.sum(grid["integrals"]))
 
@@ -1677,9 +1677,9 @@ def get_spherical_kernel_values_1D(kernel_name: str):
     values : np.ndarray
         Kernel values at the sample points.
     """
-    from . import init as _quadrants_init
+    from . import ensure_initialized
 
-    _quadrants_init(arch="cpu")
+    ensure_initialized()
     kspec = create_spherical_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)
@@ -1705,9 +1705,9 @@ def get_separable_kernel_values_1D(kernel_name: str):
     values : np.ndarray
         Kernel values at the sample points.
     """
-    from . import init as _quadrants_init
+    from . import ensure_initialized
 
-    _quadrants_init(arch="cpu")
+    ensure_initialized()
     kspec = create_separable_kernel(kernel_name)
     num_samples = 100
     q = np.zeros(num_samples, dtype=np.float32)

@@ -5,15 +5,6 @@ from mpi4py import MPI
 
 from . import backend as backend_module
 
-REDUCTION = {
-    "compute_hsml": "gather",
-    "compute_hmat": "gather",
-    "compute_density": "gather",
-    "project_2d": "gather",
-    "interpolate": "gather",
-    "deposit": "reduce_sum",
-}
-
 
 def _balanced_counts(n, size):
     """Per-rank item counts for a contiguous, balanced split of n items.
@@ -303,10 +294,7 @@ def _dispatch(func: str, *, backend: str, reduce: bool = True, **kwargs):
     if size == 1 or not reduce:
         return local_result
 
-    if func not in REDUCTION:
-        raise ValueError(f"No MPI reduction strategy registered for '{func}'")
-
-    reduction = REDUCTION[func]
+    reduction = backend_module.get_routine(func).reduction
     if reduction == "gather":
         return _gather(comm, local_result)
     if reduction == "reduce_sum":
