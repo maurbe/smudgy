@@ -1,7 +1,7 @@
 """Buffer-based MPI reductions in `smudgy.execution` (no pickling).
 
-Checks `_reduce_sum` (Allreduce), `_reduce_sum_to_root` (Reduce) and `_gather`
-(Allgatherv) against numpy references, on C-contiguous arrays, on the
+Checks `_reduce_sum` (Allreduce), `_reduce_sum_to_root` (Reduce) and
+`_gatherv_rows` (Gatherv) against numpy references, on C-contiguous arrays, on the
 ``moveaxis`` views the quadrants deposition returns (reduced in place on the
 contiguous base), on read-only inputs, and with a tiny chunk size that forces
 the chunked path used for > 2**30-element grids. Also checks the per-rank
@@ -62,12 +62,14 @@ def _run_under_mpi():
             else:
                 assert f is None and w is None
 
-    # Allgatherv with unequal (and zero) row counts, multi-dim rows
+    # Gatherv with unequal (and zero) row counts, multi-dim rows
     rows = np.full((rank, 2, 3), rank, dtype=np.int64)
-    out = execution._gather(comm, (rows, rows[:, 0, 0].astype(np.float32)))
-    expect = np.concatenate([np.full((r, 2, 3), r) for r in range(size)])
-    np.testing.assert_array_equal(out[0], expect)
-    np.testing.assert_array_equal(out[1], expect[:, 0, 0])
+    out = execution._gatherv_rows(comm, rows, root=0)
+    if rank == 0:
+        expect = np.concatenate([np.full((r, 2, 3), r) for r in range(size)])
+        np.testing.assert_array_equal(out, expect)
+    else:
+        assert out is None
 
     # every rank sees its node-local rank from the launcher
     local_rank, local_size = _node.node_local()

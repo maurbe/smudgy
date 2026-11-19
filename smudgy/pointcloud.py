@@ -855,7 +855,6 @@ class PointCloud:
                 "compute_hsml",
                 backend=self.backend,
                 nn_dists=nn_dists_local,
-                reduce=False,
             )
         else:
             (
@@ -876,7 +875,6 @@ class PointCloud:
                     else None
                 ),
                 **tensor_options,
-                reduce=False,
             )
             self.smoothing.smoothing_tensors = smoothing_tensors
             self.smoothing.smoothing_tensors_eigvals = smoothing_tensors_eigvals
@@ -1118,7 +1116,6 @@ class PointCloud:
             ),
             boxsize=self.boxsize,
             structure=st,
-            reduce=False,
         )
 
         self.smoothing.kernel_name = kn
@@ -1378,7 +1375,6 @@ class PointCloud:
                 _, vals, vecs = execution._dispatch(
                     "project_2d",
                     backend=self.backend,
-                    reduce=False,
                     h_tensor=self.smoothing.smoothing_tensors[idx],
                     plane=plane_projection,
                 )
@@ -1464,7 +1460,6 @@ class PointCloud:
             boxsize=self.boxsize,
             mode=mode,
             structure=structure_temp,
-            reduce=False,
         )
 
     # =============================================================================
@@ -1911,27 +1906,14 @@ class PointCloud:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
+        # every rank deposits its own particles onto a full grid; the grids
+        # are then summed onto `root` only or onto every rank
+        grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
         if gather_to_root:
-            # Skip _dispatch's built-in allreduce-to-everyone reduction and
-            # do the equivalent sum ourselves, delivered to `root` only (Step
-            # 5 of the domain-decomposition roadmap) -- cheaper than
-            # replicating the full grid onto every rank when only `root`
-            # needs it.
-            fields_grid, weights_grid = execution._dispatch(
-                "deposit",
-                backend=self.backend,
-                reduce=False,
-                **deposit_kwargs,
-            )
-            fields_grid, weights_grid = execution._reduce_sum_to_root(
-                self.comm, (fields_grid, weights_grid), root=root
-            )
-        else:
-            fields_grid, weights_grid = execution._dispatch(
-                "deposit",
-                backend=self.backend,
-                **deposit_kwargs,
-            )
+            grids = execution._reduce_sum_to_root(self.comm, grids, root=root)
+        elif self.size > 1:
+            grids = execution._reduce_sum(self.comm, grids)
+        fields_grid, weights_grid = grids
 
         if weights_only:
             return weights_grid

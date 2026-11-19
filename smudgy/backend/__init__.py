@@ -1,4 +1,4 @@
-"""Backend registry: which routine lives where, and how MPI recombines it."""
+"""Backend registry: which module of each backend implements which routine."""
 
 from importlib import import_module
 from typing import NamedTuple
@@ -9,16 +9,15 @@ BACKENDS = ("numpy", "quadrants")
 class Routine(NamedTuple):
     module: str  # module inside backend/<name>/
     function: str
-    reduction: str  # MPI recombination: "gather" (per-row) or "reduce_sum"
 
 
 ROUTINES = {
-    "deposit": Routine("deposition", "deposit", "reduce_sum"),
-    "interpolate": Routine("interpolation", "interpolate", "gather"),
-    "compute_hsml": Routine("smoothing", "compute_hsml", "gather"),
-    "compute_hmat": Routine("smoothing", "compute_hmat", "gather"),
-    "compute_density": Routine("interpolation", "density", "gather"),
-    "project_2d": Routine("tensor_utils", "project_2d", "gather"),
+    "deposit": Routine("deposition", "deposit"),
+    "interpolate": Routine("interpolation", "interpolate"),
+    "compute_hsml": Routine("smoothing", "compute_hsml"),
+    "compute_hmat": Routine("smoothing", "compute_hmat"),
+    "compute_density": Routine("interpolation", "density"),
+    "project_2d": Routine("tensor_utils", "project_2d"),
 }
 
 
