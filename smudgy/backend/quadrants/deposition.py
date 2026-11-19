@@ -1021,12 +1021,8 @@ def _covariant(
                     for c in qd.static(range(dim)):
                         ev[c] *= scale
 
-        # semi-axes in cell units (NOTE: scaled per eigen index, which is only
-        # the per-axis cell size for cubic cells)
-        ev_cell = qd.Vector.zero(qd.f32, dim)
         degenerate = False
         for c in qd.static(range(dim)):
-            ev_cell[c] = ev[c] * inv[c]
             degenerate = degenerate or ev[c] <= 0.0
 
         x_phys = qd.Vector.zero(qd.f32, dim)
@@ -1038,13 +1034,14 @@ def _covariant(
         fits = True
         eta = 0.0
         for d in qd.static(range(dim)):
-            # half-extent of the support ellipsoid along axis d
+            # half-extent of the support ellipsoid along axis d, in cells of
+            # axis d: sqrt(sum_c (E[d, c] ev[c])^2) / cell_size[d]
             if qd.static(dim == 1):
-                support_cell[d] = kernel_support * qd.abs(ev_cell[0])
+                support_cell[d] = kernel_support * qd.abs(ev[0] * inv[0])
             else:
-                s2 = (E[d, 0] * ev_cell[0]) ** 2
+                s2 = (E[d, 0] * (ev[0] * inv[d])) ** 2
                 for c in qd.static(range(1, dim)):
-                    s2 = s2 + (E[d, c] * ev_cell[c]) ** 2
+                    s2 = s2 + (E[d, c] * (ev[c] * inv[d])) ** 2
                 support_cell[d] = kernel_support * qd.sqrt(s2)
             if qd.static(d == 0):
                 eta = support_cell[d]
