@@ -34,32 +34,86 @@ def _local_slice(n, rank, size):
     return int(starts[rank]), int(starts[rank] + counts[rank])
 
 
+# Elements per MPI call: buffer collectives take an int32 count, so larger
+# arrays are reduced in chunks.
+_MAX_COUNT = 2**30
+
+
+def _apply_parts(fn, local_result):
+    """Apply `fn` to every array of a tuple result, or to a single array."""
+    if isinstance(local_result, tuple):
+        return tuple(fn(part) for part in local_result)
+    return fn(local_result)
+
+
+def _writable_contiguous(arr):
+    """(arr, buf): `buf` a writable C-contiguous view of `arr`'s data, or a copy.
+
+    Deposition grids come back as ``np.moveaxis(grid, -1, 0)`` views of a
+    C-contiguous (*gridnums, F) array; reducing that base in place avoids a
+    full copy of the grid. If a copy is needed, `arr` is replaced by it.
+    """
+    if arr.flags.c_contiguous and arr.flags.writeable:
+        return arr, arr
+    if arr.ndim > 1:
+        base = np.moveaxis(arr, 0, -1)
+        if base.flags.c_contiguous and base.flags.writeable:
+            return arr, base
+    arr = np.array(arr, order="C")  # always a fresh, writable copy
+    return arr, arr
+
+
+def _sum_over_ranks(comm, arr, root=None):
+    """Elementwise sum of `arr` over all ranks, in place, via buffer
+    Allreduce (root=None) or Reduce onto `root` (None on other ranks)."""
+    arr, buf = _writable_contiguous(np.asarray(arr))
+    flat = buf.reshape(-1)  # view: buf is C-contiguous
+    is_root = root is None or comm.Get_rank() == root
+    for start in range(0, flat.size, _MAX_COUNT):
+        chunk = flat[start : start + _MAX_COUNT]
+        if root is None:
+            comm.Allreduce(MPI.IN_PLACE, chunk, op=MPI.SUM)
+        elif is_root:
+            comm.Reduce(MPI.IN_PLACE, chunk, op=MPI.SUM, root=root)
+        else:
+            comm.Reduce(chunk, None, op=MPI.SUM, root=root)
+    return arr if is_root else None
+
+
+def _allgatherv_rows(comm, local_rows):
+    """Concatenate every rank's rows (rank order) on every rank, via a buffer
+    Allgatherv (no pickling)."""
+    local_rows = np.ascontiguousarray(local_rows)
+    row_shape = local_rows.shape[1:]
+    row_size = int(np.prod(row_shape, dtype=np.int64)) if row_shape else 1
+    counts = np.asarray(comm.allgather(local_rows.shape[0]), dtype=np.int64)
+    out = np.empty((int(counts.sum()), *row_shape), dtype=local_rows.dtype)
+    recvcounts = counts * row_size
+    displs = np.concatenate(([0], np.cumsum(recvcounts)[:-1]))
+    comm.Allgatherv(local_rows, [out, (recvcounts, displs)])
+    return out
+
+
 def _gather(comm, local_result):
     """Stack per-rank results back in rank order (matches _local_slice)."""
-    if isinstance(local_result, tuple):
-        gathered = [comm.allgather(part) for part in local_result]
-        return tuple(np.concatenate(parts, axis=0) for parts in gathered)
-    return np.concatenate(comm.allgather(local_result), axis=0)
+    return _apply_parts(lambda part: _allgatherv_rows(comm, part), local_result)
 
 
 def _reduce_sum(comm, local_result):
-    """Elementwise-sum each rank's full-size output (e.g. deposit grids)."""
-    if isinstance(local_result, tuple):
-        return tuple(comm.allreduce(part, op=MPI.SUM) for part in local_result)
-    return comm.allreduce(local_result, op=MPI.SUM)
+    """Elementwise-sum each rank's full-size output (e.g. deposit grids) onto
+    every rank. Sums in place: the local result is overwritten."""
+    return _apply_parts(lambda part: _sum_over_ranks(comm, part), local_result)
 
 
 def _reduce_sum_to_root(comm, local_result, root=0):
     """Elementwise-sum each rank's full-size output onto `root` only.
 
-    The root-only counterpart to `_reduce_sum` (`comm.reduce` instead of
-    `comm.allreduce`) -- cheaper when only `root` needs the combined result
+    The root-only counterpart to `_reduce_sum` (``Reduce`` instead of
+    ``Allreduce``) -- cheaper when only `root` needs the combined result
     (e.g. `PointCloud.deposit(..., gather_to_root=True)`). Returns `None` on
-    every rank other than `root` (mpi4py's own `Comm.reduce` convention).
+    every rank other than `root`.
     """
-    if isinstance(local_result, tuple):
-        return tuple(comm.reduce(part, op=MPI.SUM, root=root) for part in local_result)
-    return comm.reduce(local_result, op=MPI.SUM, root=root)
+    return _apply_parts(lambda part: _sum_over_ranks(comm, part, root=root), local_result)
 
 
 def _bcast(comm, obj, root=0):

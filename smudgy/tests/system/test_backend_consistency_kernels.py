@@ -22,9 +22,7 @@ import quadrants as qd
 # Adjust these imports to your package layout.
 # ---------------------------------------------------------------------------
 from smudgy.backend.numpy.kernels import KERNEL_CLASSES, get_kernel
-from smudgy.backend.quadrants import (
-    init as quadrants_init,
-)  # noqa: F401 (kept for reference)
+from smudgy.backend.quadrants import ensure_initialized
 from smudgy.backend.quadrants.kernels import (
     SEPARABLE_KERNELS,
     SPHERICAL_KERNELS,
@@ -32,11 +30,10 @@ from smudgy.backend.quadrants.kernels import (
     create_spherical_kernel,
 )
 
-# qd.init() must run before any @qd.kernel below is *defined* (decorated),
-# not just before it's called -- calling the project wrapper here can be too
-# late/a no-op depending on its implementation, so initialize quadrants directly
-# and unconditionally as the very first thing in this module.
-qd.init(arch=qd.cpu, default_fp=qd.f32)
+# The runtime must be running before the @qd.kernel below is defined. Use
+# smudgy's helper (a no-op if a runtime already runs) instead of qd.init,
+# which would reset the runtime other tests in the session already use.
+ensure_initialized()
 
 DIMS = (1, 2, 3)
 ATOL = 1e-5

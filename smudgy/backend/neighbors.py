@@ -8,6 +8,8 @@ import numpy as np
 import numpy.typing as npt
 from scipy import spatial
 
+from ._node import kdtree_workers
+
 FloatArray = npt.NDArray[np.floating]
 IntArray = npt.NDArray[np.int_]
 BoxInput = float | Sequence[float] | npt.ArrayLike
@@ -62,7 +64,7 @@ def query_kdtree(
             Tuple of ``(distances, indices)`` from ``cKDTree.query``.
 
     """
-    return tree.query(points, k=k, workers=-1)
+    return tree.query(points, k=k, workers=kdtree_workers())
 
 
 def shift_coordinates(coordinates: npt.ArrayLike) -> FloatArray:

@@ -1,6 +1,9 @@
+import os
 import warnings
 
 import quadrants as qd
+
+from .. import _node
 
 _initialized = False
 _current_config = None
@@ -14,7 +17,7 @@ _ARCH_MAP = {
 }
 
 
-def init(arch=None, force=False, **kwargs):
+def init(arch=None, force=False, device="auto", **kwargs):
     """Initialize the Quadrants runtime used by smudgy (safe to call repeatedly).
 
     Parameters
@@ -26,8 +29,14 @@ def init(arch=None, force=False, **kwargs):
     force : bool, default False
         Re-initialize the runtime even if it is already running, e.g. to switch
         the architecture. Switching mid-process recompiles all kernels.
+    device : "auto", int or None, default "auto"
+        GPU for this process (CUDA/Vulkan, not macOS). ``"auto"`` gives each
+        MPI rank on a node its own GPU (node-local rank modulo the GPU count);
+        None leaves the choice to the driver (device 0). Must be chosen before
+        the first CUDA runtime in the process starts.
     **kwargs
-        Further keyword arguments passed to ``qd.init``.
+        Further keyword arguments passed to ``qd.init``. Unless
+        ``cpu_max_num_threads`` is given, ranks sharing a node split its cores.
     """
     global _initialized, _current_config
 
@@ -52,7 +61,12 @@ def init(arch=None, force=False, **kwargs):
     if _initialized and not force and _current_config == config:
         return
 
-    qd.init(arch=_ARCH_MAP[arch], **kwargs)
+    qd_kwargs = dict(kwargs)
+    threads = _node.cpu_threads()
+    if threads is not None:
+        qd_kwargs.setdefault("cpu_max_num_threads", threads)
+    os.environ.update(_node.gpu_env(arch, device))
+    qd.init(arch=_ARCH_MAP[arch], **qd_kwargs)
     _initialized = True
     _current_config = config
 

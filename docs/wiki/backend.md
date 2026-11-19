@@ -189,15 +189,15 @@ HPC cluster
 │
 ├── Node 0
 │     ├── MPI Rank 0
-│     │      └── Quadrants → all CPU cores / GPU
+│     │      └── Quadrants → half the CPU cores / GPU 0
 │     └── MPI Rank 1
-│            └── Quadrants → all CPU cores / GPU
+│            └── Quadrants → half the CPU cores / GPU 1
 │
 ├── Node 1
 │     ├── MPI Rank 2
-│     │      └── Quadrants → all CPU cores / GPU
+│     │      └── Quadrants → half the CPU cores / GPU 0
 │     └── MPI Rank 3
-│            └── Quadrants → all CPU cores / GPU
+│            └── Quadrants → half the CPU cores / GPU 1
 │
 └── ...
 ```
@@ -217,3 +217,16 @@ mpirun -n 8 python my_script.py
 # or
 mpiexec -n 8 python my_script.py
 ```
+
+### Sharing a node between ranks
+
+Several ranks on one node share its cores and GPUs. `smudgy` reads the node-local rank from the launcher's environment (Open MPI, MPICH/Intel MPI, MVAPICH2, Cray PALS, Slurm) and by default:
+
+- **CPU threads:** splits the node's cores evenly between its ranks, for both the Quadrants thread pool and the $k$-d tree queries. If the launcher already pinned each rank to a set of cores (e.g. `srun --cpus-per-task=8`, `mpirun --map-by ...:PE=8`), that set is used. Pass `cpu_max_num_threads=...` to override the Quadrants part.
+- **GPUs:** gives each rank on a node its own GPU (`device="auto"`): node-local rank modulo the number of GPUs. Quadrants itself always opens CUDA device 0, so `smudgy` sets `CUDA_VISIBLE_DEVICES` (Vulkan: `QD_VISIBLE_DEVICE`) before the runtime starts. A launcher that already assigns one GPU per rank (e.g. `srun --gpus-per-task=1`) is left alone. Pass `device=<int>` to choose explicitly, or `device=None` to disable. The variable must be set before anything else in the process initialises CUDA (e.g. importing and using PyTorch or CuPy first).
+
+With more ranks than GPUs per node, several ranks share a GPU and its memory.
+
+### Compiled-kernel cache
+
+Quadrants caches compiled kernels on disk (by default in `~/.cache/quadrants`) and all ranks share that directory through a lock file. On the first run every rank may compile the same kernels and wait on the lock; later runs load them from the cache. On clusters with slow or node-local home directories, point the cache to a shared, fast file system with `QD_OFFLINE_CACHE_FILE_PATH=/path/to/cache`, and warm it up once with a single-rank run of the same script.
