@@ -362,6 +362,16 @@ def exchange_ghosts(
         n_local, local_min, local_max, num_neighbors, dim,
         decomposition.domain_min, decomposition.domain_max, boxsize, periodic,
     )
+    # Ghosts are only well defined for radii below half the periodic box
+    # (minimum-image metric). The initial guess is capped there; only a
+    # radius that has to grow beyond the cap is an error. A single rank
+    # imports no ghosts, so the limit does not apply to it.
+    radius_cap = (
+        0.5 * float(np.min(boxsize_arr)) * (1.0 - 1e-6)
+        if periodic and size > 1
+        else np.inf
+    )
+    radius = min(radius, radius_cap)
 
     converged_mask = np.zeros(0, dtype=bool)
     nn_inds = nn_dists = prev_ghost_gidx = None
@@ -377,7 +387,7 @@ def exchange_ghosts(
         # on a peer that will never call the next `allgather`/`Alltoallv`
         # again. Every rank must agree on whether to raise, via a collective,
         # before any rank actually raises.
-        local_violation = periodic and radius >= float(np.min(boxsize_arr)) / 2.0
+        local_violation = radius > radius_cap
         any_violation = comm.allreduce(local_violation, op=MPI.LOR)
         if any_violation:
             max_radius = comm.allreduce(radius if local_violation else 0.0, op=MPI.MAX)
@@ -461,7 +471,8 @@ def exchange_ghosts(
                 new_radius = max(new_radius, float(np.max(d_k[grow_finite])) * (1.0 + 1e-5))
             if np.any(grow_deficit):
                 new_radius = max(new_radius, radius * 2.0)
-            radius = new_radius
+            # try the cap itself once before giving up
+            radius = min(new_radius, radius_cap) if radius < radius_cap else new_radius
     else:
         n_unconverged = int(np.sum(~converged_mask))
         total_unconverged = comm.allreduce(n_unconverged, op=MPI.SUM)

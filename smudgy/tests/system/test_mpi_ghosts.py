@@ -164,10 +164,9 @@ def _run_deadlock_check_under_mpi(out_path):
 
 
 def _run_half_box_guard_under_mpi():
-    """Deliberately trigger the periodic half-box safety guard (very few
-    particles, k close to N, in a periodic domain -- the radius needed to
-    find k neighbors among so few particles legitimately approaches/exceeds
-    half the box). Every rank must raise ValueError -- if the raise
+    """Deliberately trigger the periodic half-box safety guard: two particles
+    at the largest minimum-image distance (sqrt(3)/2 box), k=2, so each one's
+    second neighbor lies beyond half the box. Every rank must raise ValueError -- if the raise
     decision weren't synchronized across ranks, a rank that doesn't trip
     the guard would hang forever waiting on a peer that already exited, so
     this test (run under a subprocess timeout by the pytest driver) also
@@ -179,9 +178,8 @@ def _run_half_box_guard_under_mpi():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
-    rng = np.random.default_rng(11)
-    n, dim, k = 2, 3, 2
-    positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
+    n, k = 2, 2
+    positions = np.array([[0.1, 0.1, 0.1], [0.6, 0.6, 0.6]], dtype=np.float32)
     weights = np.ones(n, dtype=np.float32)
 
     pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")

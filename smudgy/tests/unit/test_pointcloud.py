@@ -124,7 +124,7 @@ class TestInit:
 
     def test_invalid_dim_rejected(self, rng):
         pos = rng.uniform(0, 1, size=(20, 4)).astype(np.float32)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             PointCloud(pos, verbose=False)
 
     def test_default_weights_are_uniform_and_correct_shape(self, rng):
@@ -144,7 +144,7 @@ class TestInit:
     def test_weights_shape_mismatch_raises(self, rng):
         pos = make_positions(rng, n=30)
         weights = rng.uniform(0.1, 2.0, size=25).astype(np.float32)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             PointCloud(pos, weights=weights, verbose=False)
 
     def test_positions_input_dtype_is_cast_to_float32(self, rng):
@@ -173,7 +173,7 @@ class TestInit:
 
     def test_vector_boxsize_wrong_length_raises(self, rng):
         pos = make_positions(rng, n=10, dim=3)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             PointCloud(pos, boxsize=[1.0, 2.0], verbose=False)
 
     def test_periodic_positions_wrapped_into_box(self, rng):

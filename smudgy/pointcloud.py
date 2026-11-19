@@ -31,6 +31,25 @@ Structure = Literal["separable", "isotropic", "covariant"]
 InterpolationMode = Literal["field", "gradient", "divergence", "curl"]
 
 
+def _input_error(positions, weights, boxsize) -> str | None:
+    """Why the constructor inputs are invalid, or None if they are valid."""
+    if positions.ndim != 2 or positions.shape[1] not in (1, 2, 3):
+        return (
+            "Particle positions must be of shape (N, 1), (N, 2) or (N, 3) but "
+            f"found {positions.shape}"
+        )
+    n, dim = positions.shape
+    if weights is not None and np.shape(weights) != (n,):
+        return f"'weights' must have shape ({n},), got {np.shape(weights)}"
+    if boxsize is not None:
+        box = np.asarray(boxsize, dtype=np.float64)
+        if box.shape not in ((), (dim,)):
+            return f"'boxsize' must be a scalar or have shape ({dim},), got {box.shape}"
+        if not np.all(box > 0):
+            return f"'boxsize' must be positive, got {box.tolist()}"
+    return None
+
+
 class PointCloud:
     """Point cloud of particles with positions and weights, the central smudgy object."""
 
@@ -89,37 +108,33 @@ class PointCloud:
         # used for Hilbert quantization) -- `positions_full`/`weights_full`
         # are deliberately local variables, never assigned to `self`, and
         # scattered away below rather than ever broadcast in full.
+        # Validated on rank 0 (the only rank reading the inputs); the verdict
+        # is broadcast so that every rank raises together.
+        error_msg = None
+        if self.rank == 0:
+            positions = np.asarray(positions)
+            error_msg = _input_error(positions, weights, boxsize)
+        if self.size > 1:
+            error_msg = execution._bcast(self.comm, error_msg)
+        if error_msg is not None:
+            raise ValueError(error_msg)
+
         if self.rank == 0:
             dim = positions.shape[-1]
-            assert dim in (
-                1,
-                2,
-                3,
-            ), f"Particle positions must be of shape (N, 1), (N, 2) or (N, 3) but found {positions.shape}"
             positions_full = positions.astype(np.float32)
 
             weights_full = (
                 np.ones(positions_full.shape[0], dtype=np.float32)
                 if weights is None
-                else weights.astype(np.float32)
+                else np.asarray(weights, dtype=np.float32)
             )
-            assert (
-                weights_full.shape[0] == positions_full.shape[0]
-            ), f"Shape mismatch: length of weights and positions must be the same but found: {weights_full.shape} and {positions_full.shape}"
 
             if boxsize is None:
                 periodic_resolved = False
                 boxsize_resolved = None
             else:
                 periodic_resolved = True
-                boxsize_arr = np.asarray(boxsize)
-                if boxsize_arr.ndim == 0:
-                    boxsize_resolved = np.repeat(boxsize_arr, dim)
-                else:
-                    assert boxsize_arr.shape == (
-                        dim,
-                    ), f"'boxsize' must be a scalar or have shape ({dim},), got {boxsize_arr.shape}"
-                    boxsize_resolved = boxsize_arr
+                boxsize_resolved = np.broadcast_to(np.asarray(boxsize), (dim,)).copy()
 
                 # Wrap into [0, boxsize) canonically, in float32 (the dtype
                 # `self.positions` is stored in): raw input isn't guaranteed
@@ -760,6 +775,8 @@ class PointCloud:
             raise ValueError(
                 f"Length of 'gridnums' ({gn.size}) must match deposition dimension ({dim})"
             )
+        if np.any(gn <= 0):
+            raise ValueError(f"'gridnums' must be positive, got {gn.tolist()}")
         return gn
 
     # =============================================================================
