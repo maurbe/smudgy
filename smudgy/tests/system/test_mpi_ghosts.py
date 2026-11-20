@@ -446,9 +446,85 @@ def _run_sparse_target_density_under_mpi(out_path):
     print(f"RANK {rank} DONE")
 
 
+def _run_multi_round_under_mpi(out_path, periodic, n, dim):
+    """Force several radius-growth rounds with a small initial radius: 3D
+    clustered particles, or (dim=1, n=60) fewer local particles than k on
+    disjoint rank intervals, so the radius doubles round after round. Ghosts
+    are sent incrementally, so the merged ghost set, the remapped neighbor
+    lists of early-converged targets and the export manifest used by
+    push_to_ghosts must all still be exact."""
+    from mpi4py import MPI
+    from scipy.spatial import cKDTree
+
+    from smudgy import PointCloud
+    from smudgy import ghosts as ghosts_module
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    rng = np.random.default_rng(51)
+    k = 16
+    if dim == 1:
+        positions = rng.uniform(0.0, 1.0, (n, dim)).astype(np.float32)
+    else:
+        centers = rng.uniform(0.1, 0.9, (6, dim))
+        positions = centers[rng.integers(0, 6, n)] + 0.04 * rng.standard_normal((n, dim))
+        positions = np.mod(positions, 1.0).astype(np.float32)
+    boxsize = 1.0 if periodic else None
+    pc = PointCloud(positions=positions, boxsize=boxsize, verbose=False, backend="numpy")
+
+    rounds = [0]
+    real_select = ghosts_module._select_ghosts_to_send
+    real_radius = ghosts_module._initial_radius
+
+    def counting_select(*args):
+        rounds[0] += 1
+        return real_select(*args)
+
+    ghosts_module._select_ghosts_to_send = counting_select
+    shrink = 0.2 if n > 1000 else 0.01
+    ghosts_module._initial_radius = lambda *a, **kw: shrink * real_radius(*a, **kw)
+    try:
+        pc.find_neighbors(num_neighbors=k)
+    finally:
+        ghosts_module._select_ghosts_to_send = real_select
+        ghosts_module._initial_radius = real_radius
+
+    g = pc.ghosts
+    local_global = pc.decomposition.local_global_indices
+    combined_global = np.concatenate([local_global, g.ghost_global_index])
+    ref_dists, ref_inds = cKDTree(positions, boxsize=boxsize).query(positions, k=k)
+    ref_dists, ref_inds = ref_dists[local_global], ref_inds[local_global]
+    sets_ok = all(
+        set(combined_global[row].tolist()) == set(ref.tolist())
+        for row, ref in zip(g.nn_inds, ref_inds)
+    )
+    dist_err = float(np.max(np.abs(np.sort(g.nn_dists, axis=1) - ref_dists), initial=0.0))
+
+    # ghosts ordered by (source rank, source local index), as one exchange
+    # of the whole set delivers them
+    order_ok = bool(np.all(np.diff(g.ghost_source_rank * (n + 1) + g.ghost_source_local_index) > 0))
+    pushed = ghosts_module.push_to_ghosts(
+        comm, g, local_global.astype(np.float64) * 10.0 + rank
+    )
+    push_ok = bool(np.array_equal(
+        pushed, g.ghost_global_index * 10.0 + g.ghost_source_rank
+    ))
+
+    ok = comm.allreduce(sets_ok and order_ok and push_ok, op=MPI.LAND)
+    max_err = comm.allreduce(dist_err, op=MPI.MAX)
+    max_rounds = comm.allreduce(rounds[0], op=MPI.MAX)
+    if rank == 0:
+        np.savez(out_path, ok=np.asarray(ok), max_err=np.asarray(max_err),
+                 rounds=np.asarray(max_rounds))
+    print(f"RANK {rank} DONE")
+
+
 def _run_under_mpi():
     mode = sys.argv[1]
-    if mode == "target_positions":
+    if mode == "multi_round":
+        _run_multi_round_under_mpi(sys.argv[2], sys.argv[3] == "periodic", int(sys.argv[4]), int(sys.argv[5]))
+    elif mode == "target_positions":
         _run_target_positions_under_mpi(sys.argv[2], sys.argv[3])
     elif mode == "sparse_target_density":
         _run_sparse_target_density_under_mpi(sys.argv[2])
@@ -540,6 +616,19 @@ def test_half_box_guard_raises_on_every_rank_without_deadlock():
     _mpiexec(5, ["half_box_guard"], timeout=30)
 
 
+
+
+@pytest.mark.parametrize(
+    "mode,n,dim,min_rounds",
+    [("periodic", 3000, 3, 2), ("nonperiodic", 3000, 3, 2), ("nonperiodic", 60, 1, 4)],
+)
+def test_incremental_exchange_over_many_rounds(tmp_path, mode, n, dim, min_rounds):
+    out_path = tmp_path / "result.npz"
+    _mpiexec(4, ["multi_round", str(out_path), mode, str(n), str(dim)])
+    result = np.load(out_path)
+    assert int(result["rounds"]) >= min_rounds  # only meaningful with growth
+    assert int(result["ok"]) == 1
+    assert float(result["max_err"]) < 1e-4
 
 
 def test_push_to_ghosts_routes_values_correctly(tmp_path):

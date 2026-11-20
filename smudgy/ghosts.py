@@ -142,15 +142,18 @@ def _initial_radius(
 
 def _select_ghosts_to_send(
     rank, size, wrapped_local, local_weights, local_global_indices,
-    all_boxes, boxsize, periodic, dim,
+    all_boxes, boxsize, periodic, dim, sent,
 ):
-    """Select this rank's particles inside every other rank's padded target box.
+    """Select this rank's particles newly inside the other ranks' padded target boxes.
 
-    Periodic images are taken into account. Returns the per-destination
+    Periodic images are taken into account. `sent` maps a destination rank
+    to the sorted local indices already sent to it in earlier rounds; those
+    are skipped, and `sent` is updated in place. Returns the per-destination
     counts and the selected positions, weights, local and global indices,
     grouped by destination rank (the layout `execution._alltoallv_rows`
-    expects). A rank never sends to itself: its own tree already holds its
-    particles, periodic images included.
+    expects), ascending local index within a destination. A rank never sends
+    to itself: its own tree already holds its particles, periodic images
+    included.
     """
     n_local = wrapped_local.shape[0]
     shifts = _shift_vectors(dim, periodic)
@@ -179,13 +182,18 @@ def _select_ghosts_to_send(
                 mask |= np.all(
                     (wrapped_local >= region_min) & (wrapped_local <= region_max), axis=1
                 )
-            if not mask.any():
+            previous = sent.get(a)
+            if previous is not None:
+                mask[previous] = False
+            new = np.flatnonzero(mask)
+            if new.size == 0:
                 continue
-            send_counts[a] = int(mask.sum())
-            pos_chunks.append(wrapped_local[mask])
-            w_chunks.append(local_weights[mask])
-            local_idx_chunks.append(np.flatnonzero(mask))
-            global_idx_chunks.append(local_global_indices[mask])
+            sent[a] = new if previous is None else np.union1d(previous, new)
+            send_counts[a] = new.size
+            pos_chunks.append(wrapped_local[new])
+            w_chunks.append(local_weights[new])
+            local_idx_chunks.append(new)
+            global_idx_chunks.append(local_global_indices[new])
 
     def _concat(chunks, trailing_shape, dtype):
         return (
@@ -222,24 +230,19 @@ def _query_k(tree, points, k, chunk_size=1 << 20):
     return nn_dists, nn_inds
 
 
-def _remap_ghost_indices(nn_inds, n_local, old_ghost_gidx, new_ghost_gidx):
-    """Translate combined [local, ghost] indices from one ghost set to another.
+def _merge_ghosts(ghosts, new):
+    """Merge newly received ghosts into the ghost set.
 
-    Local rows (< n_local) are unchanged; ghost rows are matched by global
-    index. Every old ghost referenced must be present in the new set (true
-    for exchange_ghosts' growing-radius rounds), otherwise this raises.
+    Both are tuples of (positions, weights, source rank, source local index,
+    global index). The result is ordered by (source rank, source local
+    index), the order in which a single exchange of the whole set would have
+    delivered it. Also returns, for each old ghost, its row in the result.
     """
-    nn_inds = nn_inds.copy()
-    is_ghost = nn_inds >= n_local
-    gid = old_ghost_gidx[nn_inds[is_ghost] - n_local]
-    order = np.argsort(new_ghost_gidx, kind="stable")
-    sorted_gidx = new_ghost_gidx[order]
-    pos = np.searchsorted(sorted_gidx, gid)
-    pos = np.minimum(pos, max(len(sorted_gidx) - 1, 0))
-    if gid.size and not np.array_equal(sorted_gidx[pos], gid):
-        raise RuntimeError("ghost set shrank between exchange rounds")
-    nn_inds[is_ghost] = order[pos] + n_local
-    return nn_inds
+    merged = tuple(np.concatenate([old, add], axis=0) for old, add in zip(ghosts, new))
+    order = np.lexsort((merged[3], merged[2]))
+    new_row = np.empty(order.size, dtype=np.int64)
+    new_row[order] = np.arange(order.size)
+    return tuple(a[order] for a in merged), new_row[: ghosts[0].shape[0]]
 
 
 def exchange_ghosts(
@@ -342,9 +345,19 @@ def exchange_ghosts(
     radius = min(radius, radius_cap)
 
     converged_mask = np.zeros(0, dtype=bool)
-    nn_inds = nn_dists = prev_ghost_gidx = None
-    recv_positions = recv_weights = recv_source_rank = None
-    recv_local_idx = recv_global_idx = None
+    nn_inds = nn_dists = tree = None
+    # ghost set: positions, weights, source rank, source local index, global
+    # index. The padded boxes only grow, so each round adds ghosts and never
+    # drops one: only the new ones are sent, and `sent` records per
+    # destination what has gone out already.
+    ghosts = (
+        np.empty((0, dim), dtype=wrapped_local.dtype),
+        np.empty(0, dtype=local_weights.dtype),
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=local_global_indices.dtype),
+    )
+    sent = {}
 
     for _iteration in range(max_iterations):
         # radii grow per rank, so the decision to raise is made collectively
@@ -367,29 +380,37 @@ def exchange_ghosts(
 
         send_counts, send_pos, send_w, send_lidx, send_gidx = _select_ghosts_to_send(
             rank, size, wrapped_local, local_weights, local_global_indices,
-            all_boxes, boxsize_arr, periodic, dim,
+            all_boxes, boxsize_arr, periodic, dim, sent,
         )
         recv_counts = execution._alltoall_counts(comm, send_counts)
-        recv_positions = execution._alltoallv_rows(comm, send_pos, send_counts, recv_counts)
-        recv_weights = execution._alltoallv_rows(comm, send_w, send_counts, recv_counts)
-        recv_local_idx = execution._alltoallv_rows(comm, send_lidx, send_counts, recv_counts)
-        recv_global_idx = execution._alltoallv_rows(comm, send_gidx, send_counts, recv_counts)
-        recv_source_rank = np.repeat(np.arange(size, dtype=np.int64), recv_counts)
+        received = (
+            execution._alltoallv_rows(comm, send_pos, send_counts, recv_counts),
+            execution._alltoallv_rows(comm, send_w, send_counts, recv_counts),
+            np.repeat(np.arange(size, dtype=np.int64), recv_counts),
+            execution._alltoallv_rows(comm, send_lidx, send_counts, recv_counts),
+            execution._alltoallv_rows(comm, send_gidx, send_counts, recv_counts),
+        )
+        n_new = received[0].shape[0]
+        if n_new:
+            ghosts, old_row = _merge_ghosts(ghosts, received)
 
         if has_targets:
-            combined_positions = np.concatenate([wrapped_local, recv_positions], axis=0)
-            tree = build_kdtree(combined_positions, boxsize=boxsize_arr if periodic else None)
+            if tree is None or n_new:
+                combined_positions = np.concatenate([wrapped_local, ghosts[0]], axis=0)
+                tree = build_kdtree(
+                    combined_positions, boxsize=boxsize_arr if periodic else None
+                )
             if nn_inds is None:
                 nn_dists, nn_inds = _query_k(tree, wrapped_target, num_neighbors)
             else:
                 # Targets converged in an earlier round keep their (exact)
-                # neighbors: the radius only grows, so this round's ghost set
-                # is a superset of the one they were solved against -- only
-                # their ghost indices need remapping into the new combined
-                # array. Only the unconverged targets are re-queried.
-                nn_inds[converged_mask] = _remap_ghost_indices(
-                    nn_inds[converged_mask], n_local, prev_ghost_gidx, recv_global_idx
-                )
+                # neighbors; only their ghost rows move to the merged order.
+                # Only the unconverged targets are re-queried.
+                if n_new:
+                    done = nn_inds[converged_mask]
+                    is_ghost = done >= n_local
+                    done[is_ghost] = old_row[done[is_ghost] - n_local] + n_local
+                    nn_inds[converged_mask] = done
                 todo = np.flatnonzero(~converged_mask)
                 if todo.size:
                     new_dists, new_inds = _query_k(
@@ -397,7 +418,6 @@ def exchange_ghosts(
                     )
                     nn_inds = nn_inds.astype(new_inds.dtype, copy=False)
                     nn_dists[todo], nn_inds[todo] = new_dists, new_inds
-            prev_ghost_gidx = recv_global_idx
             d_k = nn_dists[:, -1]
             finite = np.isfinite(d_k)
             if size == 1:
@@ -444,19 +464,28 @@ def exchange_ghosts(
         if rank == 0:
             warnings.warn(message)
 
+    # export manifest over all rounds, grouped by destination and ascending
+    # local index: the order of the receivers' merged ghost sets
+    export_counts = np.zeros(size, dtype=np.int64)
+    for a, indices in sent.items():
+        export_counts[a] = indices.size
+    export_local_index = (
+        np.concatenate([sent[a] for a in sorted(sent)])
+        if sent
+        else np.empty(0, dtype=np.int64)
+    )
     return GhostInfo(
-        ghost_positions=recv_positions,
-        ghost_weights=recv_weights,
-        ghost_source_rank=recv_source_rank,
-        ghost_source_local_index=recv_local_idx,
-        ghost_global_index=recv_global_idx,
+        ghost_positions=ghosts[0],
+        ghost_weights=ghosts[1],
+        ghost_source_rank=ghosts[2],
+        ghost_source_local_index=ghosts[3],
+        ghost_global_index=ghosts[4],
         nn_inds=nn_inds,
         nn_dists=nn_dists,
         radius=radius,
         n_local=n_local,
-        # export manifest of the final round, used by push_to_ghosts
-        export_local_index=send_lidx,
-        export_counts=send_counts,
+        export_local_index=export_local_index,
+        export_counts=export_counts,
     )
 
 
