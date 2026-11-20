@@ -1423,17 +1423,21 @@ def _prepare_radial(
     brick,
     integration_method,
     eta_crit,
+    projected=False,
 ):
     """Prepare an isotropic or covariant deposition.
 
     Both use the same kernel family, cell quadrature and sample table; only
-    the smoothing arrays differ.
+    the smoothing arrays differ. `projected` deposits the 3D kernel integrated
+    along the line of sight (2D grids only).
     """
     DIM = particle_positions.shape[1]
     gridnums = tuple(int(n) for n in gridnums)
     boxsizes = tuple(float(b) for b in boxsizes)
+    if projected and DIM != 2:
+        raise ValueError(f"projected=True needs 2D positions, got {DIM}D")
 
-    kspec = create_spherical_kernel(kernel_name)
+    kspec = create_spherical_kernel(kernel_name, projected)
     support = kspec.support
 
     quad_table = _QUADRATURE_TABLES[DIM]
@@ -1444,7 +1448,7 @@ def _prepare_radial(
         )
     quad_points = quad_table[integration_method]
 
-    grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit)
+    grid = build_kernel_sample_grid(kernel_name, DIM, eta_crit, projected=projected)
     sample_buffer = _sample_buffer_size(eta_crit, DIM)
 
     cell_sizes = tuple(boxsizes[d] / gridnums[d] for d in range(DIM))
@@ -1521,6 +1525,7 @@ def deposit(
     # --- required by adaptive isotropic / covariant deposition ---
     integration_method="midpoint",
     eta_crit=4.0,
+    projected=False,
     brick=False,
 ):
     """Deposit particle data onto a grid covering ``[0, boxsizes)``.
@@ -1554,6 +1559,10 @@ def deposit(
     eta_crit : float
         Kernel diameter in cells below which the sample table is used instead
         of cell quadrature (isotropic and covariant).
+    projected : bool, default False
+        Isotropic and covariant, 2D only: deposit the 3D kernel integrated
+        along the line of sight (plane projection of 3D particles, whose
+        smoothing is the shadow of the 3D one) instead of the 2D kernel.
     brick : bool, default False
         Deposit onto the smallest box of cells (a brick) holding every cell
         the particles touch, instead of the full grid, and also return the
@@ -1625,6 +1634,7 @@ def deposit(
                 **common,
                 integration_method=integration_method,
                 eta_crit=eta_crit,
+                projected=projected,
             )
 
     if prep.grid_weights.size:

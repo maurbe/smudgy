@@ -24,6 +24,7 @@ import numpy as np
 import quadrants as qd
 
 from ..kernel_table import SEPARABLE, SPHERICAL
+from ..projected_kernels import N_TABLE, projected_table
 
 
 def _make_sigma(values):
@@ -1046,13 +1047,16 @@ def create_separable_kernel(name: str) -> SeparableKernelSpec:
         ) from None
 
 
-def create_spherical_kernel(name: str) -> SphericalKernelSpec:
+def create_spherical_kernel(name: str, projected: bool = False) -> SphericalKernelSpec:
     """Create a SphericalKernelSpec from a kernel name.
 
     Parameters
     ----------
     name : str
         The name of the kernel. Must be one of the keys in SPHERICAL_KERNELS.
+    projected : bool, default False
+        Return the kernel integrated along the line of sight instead, a 2D
+        kernel (plane projection of 3D data; see :func:`_projected_specs`).
 
     Returns
     -------
@@ -1065,12 +1069,125 @@ def create_spherical_kernel(name: str) -> SphericalKernelSpec:
         If the kernel name is not found in SPHERICAL_KERNELS.
 
     """
-    try:
-        return SPHERICAL_KERNELS[name]
-    except KeyError:
+    if name not in SPHERICAL_KERNELS:
         raise ValueError(
             f"Unknown spherical kernel: {name!r}. Available: {list(SPHERICAL_KERNELS)}"
-        ) from None
+        )
+    if projected:
+        return _projected_specs()[name]
+    return SPHERICAL_KERNELS[name]
+
+
+# =============================================================================
+# Projected kernels: the 3D kernel integrated along the line of sight
+# =============================================================================
+# The projected profile F(q) (smudgy.backend.projected_kernels) has no
+# float32-stable closed form, so the device interpolates a float64-built,
+# mass-exact table in x = q^2. The tables of all kernels live in one global
+# field, created on first use; a re-initialised runtime gets a new one.
+_PROJECTED_CACHE = {"prog": None, "specs": None}
+
+
+def _make_projected_spec(name, table, offset, n):
+    """SphericalKernelSpec of kernel `name` projected, reading `table` at `offset`.
+
+    Table layout from `offset`: F at the n + 1 nodes, the mean of F over the
+    n intervals, the cumulative mass M at the nodes (see
+    :func:`smudgy.backend.projected_kernels.projected_table`). Only valid
+    with dim = 2; sigma is the 3D normalisation.
+    """
+    support = SPHERICAL[name].support
+    sigma_3d = SPHERICAL[name].sigma[2]
+    inv_dx = n / (support * support)
+    half_dx = 0.5 / inv_dx
+    o_F, o_mean, o_M = offset, offset + n + 1, offset + 2 * n + 1
+
+    @qd.func
+    def locate(q: qd.f32):
+        u = q * q * inv_dx
+        i = qd.min(qd.cast(u, qd.i32), n - 1)
+        return i, u - qd.cast(i, qd.f32)
+
+    @qd.func
+    def evaluate(q: qd.f32, dim: qd.template()) -> qd.f32:
+        result = 0.0
+        if q < support:
+            i, t = locate(q)
+            result = (
+                6.0 * t * (1.0 - t) * table[o_mean + i]
+                + (1.0 - t) * (1.0 - 3.0 * t) * table[o_F + i]
+                + t * (3.0 * t - 2.0) * table[o_F + i + 1]
+            )
+        return result
+
+    @qd.func
+    def F(q_in: qd.f32, dim: qd.template()) -> qd.f32:
+        result = table[o_M + n]
+        if q_in < support:
+            i, t = locate(qd.max(q_in, 0.0))
+            t2 = t * t
+            t3 = t2 * t
+            result = table[o_M + i] + half_dx * (
+                table[o_mean + i] * (3.0 * t2 - 2.0 * t3)
+                + table[o_F + i] * (t - 2.0 * t2 + t3)
+                + table[o_F + i + 1] * (t3 - t2)
+            )
+        return result
+
+    @qd.func
+    def evaluate_integral(q1: qd.f32, q2: qd.f32, dim: qd.template()) -> qd.f32:
+        return _spherical_evaluate_integral_default(F, support, dim, q1, q2)
+
+    @qd.func
+    def gradient(q: qd.f32, grad_q, dim: qd.template()):
+        dFdq = 0.0
+        if q < support:
+            i, t = locate(q)
+            dFdt = (
+                (6.0 - 12.0 * t) * table[o_mean + i]
+                + (6.0 * t - 4.0) * table[o_F + i]
+                + (6.0 * t - 2.0) * table[o_F + i + 1]
+            )
+            dFdq = dFdt * 2.0 * q * inv_dx
+        return dFdq * grad_q
+
+    @qd.func
+    def sigma(dim: qd.template()) -> qd.f32:
+        qd.static_assert(dim == 2, "projected kernels are 2D")
+        return sigma_3d
+
+    return SphericalKernelSpec(
+        evaluate=evaluate,
+        F=F,
+        sigma=sigma,
+        evaluate_integral=evaluate_integral,
+        gradient=gradient,
+        support=support,
+    )
+
+
+def _projected_specs():
+    """{name: projected SphericalKernelSpec}, built once per Quadrants runtime."""
+    from quadrants.lang import impl
+
+    from . import ensure_initialized
+
+    ensure_initialized()
+    prog = impl.get_runtime().prog
+    if _PROJECTED_CACHE["prog"] is not prog:
+        names = list(SPHERICAL_KERNELS)
+        stride = 3 * N_TABLE + 2
+        data = np.concatenate(
+            [np.concatenate(projected_table(name, N_TABLE)) for name in names]
+        ).astype(np.float32)
+        table = qd.field(qd.f32, shape=data.size)
+        table.from_numpy(data)
+        _PROJECTED_CACHE["specs"] = {
+            name: _make_projected_spec(name, table, k * stride, N_TABLE)
+            for k, name in enumerate(names)
+        }
+        _PROJECTED_CACHE["prog"] = prog
+    return _PROJECTED_CACHE["specs"]
 
 
 # =============================================================================
@@ -1283,6 +1400,7 @@ def build_kernel_sample_grid(
     dim: int,
     eta_crit: float,
     nyquist_factor: float = 2.0,
+    projected: bool = False,
 ):
     """Build the pre-computed kernel sample table used for unresolved kernels.
 
@@ -1299,6 +1417,8 @@ def build_kernel_sample_grid(
         sample table is used instead of numerical quadrature.
     nyquist_factor : float, default 2.0
         Samples per cell width; 2.0 is the Nyquist minimum.
+    projected : bool, default False
+        Sample the projected kernel (dim = 2), see :func:`create_spherical_kernel`.
 
     Returns
     -------
@@ -1310,7 +1430,8 @@ def build_kernel_sample_grid(
     """
     return dict(
         _build_kernel_sample_grid_cached(
-            kernel_name, int(dim), float(eta_crit), float(nyquist_factor)
+            kernel_name, int(dim), float(eta_crit), float(nyquist_factor),
+            bool(projected),
         )
     )
 
@@ -1321,13 +1442,16 @@ def _build_kernel_sample_grid_cached(
     dim: int,
     eta_crit: float,
     nyquist_factor: float,
+    projected: bool,
 ):
     if eta_crit < 0:
         raise ValueError("eta_crit must be >= 0")
     if dim not in (1, 2, 3):
         raise ValueError("build_kernel_sample_grid supports only dim = 1, 2 or 3")
+    if projected and dim != 2:
+        raise ValueError("projected kernels are 2D")
 
-    kspec = create_spherical_kernel(kernel_name)
+    kspec = create_spherical_kernel(kernel_name, projected)
     layout_fn = {1: _build_shell_layout_1d, 2: _build_shell_layout_2d,
                  3: _build_shell_layout_3d}[dim]
     n_q, shell_q0, shell_q1, shell_id, layout, n_points_per_shell = layout_fn(

@@ -1592,7 +1592,14 @@ class PointCloud:
             Adaptive smoothing structure. Required only when ``adaptive=True``.
         plane_projection : List[int], optional
             Indices of the two axes spanning the projection plane for 3D to
-            2D deposition, e.g. ``[0, 1]`` for the x-y plane.
+            2D deposition, e.g. ``[0, 1]`` for the x-y plane. The result is
+            the column density: each particle deposits its 3D kernel
+            integrated along the remaining axis (for covariant smoothing,
+            the shadow of its ellipsoid with the projected radial profile),
+            i.e. the 3D deposit summed along that axis, up to cell
+            quadrature. Particles are selected by their centre: with
+            ``extent``, a kernel straddling the slab boundary along the
+            projection axis is counted whole or not at all.
         integration_method : str, default 'midpoint'
             Cell quadrature rule for ``isotropic`` and ``covariant`` kernels:
             ``'midpoint'``, ``'trapezoidal'`` or ``'simpson'``.
@@ -1753,6 +1760,10 @@ class PointCloud:
             "integration_method": integration_method,
             "eta_crit": eta_crit,
         }
+        if plane_projection is not None and structure_temp in ("isotropic", "covariant"):
+            # the line-of-sight integral of the 3D kernel; separable kernels
+            # and fixed-grid stencils project exactly as they are
+            deposit_kwargs["projected"] = True
 
         if adaptive:
             if structure_temp in ("separable", "isotropic"):

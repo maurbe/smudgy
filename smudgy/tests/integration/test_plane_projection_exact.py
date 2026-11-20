@@ -9,13 +9,12 @@ sight gives, in the plane,
 
 `_reference` evaluates this in float64, independently of smudgy's deposition
 code, and integrates it over each pixel. Isotropic and covariant plane
-projection do not do this yet (they deposit the 2D kernel with the shadow
-H_2, not the projected profile F): those cases are marked xfail(strict) until
-the fix (plan Phase P). The Gaussian is its own projection, so it already
-passes; separable and fixed-grid kernels are exact already.
+projection deposit exactly this kernel (H_2 from `project_2d`, F from the
+projected kernel table); separable and fixed-grid kernels project exactly as
+they are.
 
-Tolerances are provisional (max abs error / max of the reference image); they
-are set from measurement once the fix is in.
+Tolerances: max abs error / max of the reference image, set from measurement
+(before the projected kernels: 2.5-5e-2 isotropic, 0.1-0.35 covariant).
 """
 
 import numpy as np
@@ -47,13 +46,17 @@ GRID_2D_REFERENCE = tuple(2 * n for n in GRID_3D)
 N = 10
 R_MIN, R_MAX = 0.10, 0.20  # physical support radius (largest axis); box = 1
 
-# simpson, resolved particles; tophat has an infinite-slope edge in projection
+# simpson, resolved particles: measured <= 6.5e-4 (wendland_c6 covariant);
+# tophat 5e-2: its projection has an infinite-slope edge, which the pixel
+# quadrature samples poorly
 TOL_REFERENCE = {"tophat": 1e-1}
-TOL_REFERENCE_DEFAULT = 5e-3
+TOL_REFERENCE_DEFAULT = 2e-3
+# projection vs 3D deposit summed along the axis: measured <= 1.3e-3
+# (wendland_c6 covariant, plane (1, 2): 3D cell quadrature of the compact
+# kernel); isotropic <= 6e-5
+TOL_COLUMN = 3e-3
 # 3D deposit summed along the axis vs reference: measured <= 7e-3 (gaussian
-# covariant), limited by the 3D cell quadrature; today's isotropic projection
-# is off by 2.5-5e-2 (cubic spline, Lucy), covariant by 0.1-0.2
-TOL_COLUMN = 1e-2
+# covariant), limited by the 3D cell quadrature
 TOL_REFERENCE_GUARD = 1.5e-2
 
 
@@ -138,22 +141,11 @@ def _rel_err(a, ref):
     return np.abs(a - ref).max() / np.abs(ref).max()
 
 
-def _xfail_if_unfixed(request, structure, kernel_name):
-    # the Gaussian is its own projection: exact once H_2 is the shadow
-    if structure in ("isotropic", "covariant") and kernel_name != "gaussian":
-        request.applymarker(pytest.mark.xfail(
-            strict=True,
-            reason="plane projection uses the 2D kernel, not the projected 3D "
-                   "kernel profile (plan Phase P)",
-        ))
-
-
 @pytest.mark.parametrize("plane", PLANES)
 @pytest.mark.parametrize("structure", ["isotropic", "covariant"])
 @pytest.mark.parametrize("kernel_name", SPHERICAL_KERNELS)
-def test_projection_matches_reference(request, kernel_name, structure, plane):
+def test_projection_matches_reference(kernel_name, structure, plane):
     """2D projected deposit == exact column density integrated over each pixel."""
-    _xfail_if_unfixed(request, structure, kernel_name)
     gridnums = [GRID_2D_REFERENCE[a] for a in plane]
     image = _cloud(kernel_name, structure).deposit(
         None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
@@ -194,10 +186,9 @@ def _column_and_projection(kernel_name, structure, plane, **kw):
 
 @pytest.mark.parametrize("plane", PLANES)
 @pytest.mark.parametrize("structure", ["isotropic", "covariant"])
-@pytest.mark.parametrize("kernel_name", ["cubic_spline", "lucy"])
-def test_projection_matches_3d_column(request, kernel_name, structure, plane):
+@pytest.mark.parametrize("kernel_name", ["cubic_spline", "lucy", "wendland_c6"])
+def test_projection_matches_3d_column(kernel_name, structure, plane):
     """2D projected deposit == 3D deposit summed along the projection axis."""
-    _xfail_if_unfixed(request, structure, kernel_name)
     col, image = _column_and_projection(
         kernel_name, structure, plane, integration_method="simpson", eta_crit=0.0
     )
