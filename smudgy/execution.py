@@ -144,9 +144,13 @@ def _sum_bricks(comm, bricks, offset, gridnums, root=0, to_all=False):
         full = None
         if rank == root:
             lead = brick.shape[: brick.ndim - dim]
-            full = np.zeros((*lead, *gridnums), dtype=brick.dtype)
+            # a brick covering the whole grid is the accumulator itself
+            own_is_full = brick.shape == (*lead, *gridnums) and not np.any(offset)
+            full = brick if own_is_full else np.zeros((*lead, *gridnums), dtype=brick.dtype)
             for r, (r_offset, r_shape, r_last) in enumerate(headers):
                 if r == root:
+                    if own_is_full:
+                        continue
                     data = brick
                 else:
                     if not np.prod(r_shape, dtype=np.int64):

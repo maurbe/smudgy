@@ -1621,7 +1621,8 @@ class PointCloud:
             every rank deposits onto a full-size grid and the grids are
             summed with ``MPI.Reduce``/``Allreduce``. Both give the same
             grid up to the order of floating-point additions across ranks
-            (bit for bit on a single rank); bricks need less memory per rank.
+            (on a single rank both use the full grid); bricks need less
+            memory on non-root ranks.
 
         Returns
         -------
@@ -1760,8 +1761,9 @@ class PointCloud:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
-        if brick:
+        if brick and self.size > 1:
             # every rank deposits onto its own brick; root sums the bricks
+            # (on one rank the brick would just be the full grid)
             *grids, offset = execution._dispatch(
                 "deposit", backend=self.backend, brick=True, **deposit_kwargs
             )
