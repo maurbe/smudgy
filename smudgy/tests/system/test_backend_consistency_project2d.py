@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from scipy.linalg import sqrtm
 
 import smudgy as sm
 from smudgy.backend.numpy.tensor_utils import project_2d as project_2d_numpy
@@ -94,3 +95,24 @@ def test_backend_consistency():
 def test_backend_consistency_near_degenerate(plane, gap, scale):
     """Near-isotropic projections, at unit and at typical smoothing-length scale."""
     _assert_projections_agree(_random_tensors(5000, gap, scale), plane)
+
+
+@pytest.mark.parametrize("plane", PLANES)
+def test_projection_is_shadow(plane):
+    """H_2 = (P H H^T P^T)^(1/2): the ellipsoid's outline along the line of sight.
+
+    Tilted, elongated tensors (axis ratios up to 10), where the shadow and the
+    central slice (P H^-1 P^T)^-1 differ most.
+    """
+    H = _random_tensors(200, gap=1.0, scale=1.0, seed=3).astype(np.float64)
+    H = np.einsum("nij,njk->nik", H, H)  # squared: axis ratios up to ~10
+    p = list(plane)
+    expected = np.stack([sqrtm((h @ h.T)[np.ix_(p, p)]).real for h in H])
+    tol = np.broadcast_to(1e-5 * np.linalg.eigvalsh(expected)[:, -1, None, None],
+                          expected.shape)  # measured 4e-7
+    for project in (project_2d_numpy, project_2d_qd):
+        h2d, evals, evecs = project(H.astype(np.float32), plane)
+        np.testing.assert_array_less(np.abs(h2d - expected), tol)
+        recon = np.einsum("nij,nj,nkj->nik", evecs, evals, evecs)
+        np.testing.assert_array_less(np.abs(recon - expected), tol)
+        assert np.all(evals[:, 0] >= evals[:, 1]) and np.all(evals > 0)

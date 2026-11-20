@@ -15,7 +15,11 @@ def _fix_eigvec_sign(eigvecs: np.ndarray) -> np.ndarray:
 
 
 def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
-    """Project 3D smoothing tensors onto a coordinate plane.
+    """Shadow of 3D smoothing tensors on a coordinate plane.
+
+    ``H_2 = (P H H^T P^T)^(1/2)``, with ``P`` the (2, 3) matrix of the plane's
+    basis vectors: the outline of the smoothing ellipsoid seen along the line
+    of sight, i.e. the shape of the 3D kernel integrated along that line.
 
     Parameters
     ----------
@@ -29,20 +33,22 @@ def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
     h2d : np.ndarray
         Projected tensors, shape (N, 2, 2).
     eigvals : np.ndarray
-        Eigenvalues of the projected tensors, shape (N, 2).
+        Eigenvalues (principal semi-axes) of the projected tensors, shape
+        (N, 2), descending.
     eigvecs : np.ndarray
         Eigenvectors of the projected tensors, shape (N, 2, 2).
     """
-    P = BASIS_VECTORS[list(plane)]  # (2, 3)
-    h_tensor_inv = np.linalg.inv(h_tensor)  # (N, D, D)
-    temp = P @ h_tensor_inv @ P.T  # (N, 2, 2), batched matmul
-    h_tensor_2d = np.linalg.inv(temp)
-    eigvals, eigvecs = np.linalg.eigh(h_tensor_2d)  # ascending
+    P = BASIS_VECTORS[list(plane)].astype(np.float64)  # (2, 3)
+    PH = P @ np.asarray(h_tensor, dtype=np.float64)  # (N, 2, 3)
+    # Shadow of the ellipsoid: Sigma_2 = P H H^T P^T, H_2 = Sigma_2^(1/2)
+    sigma_2d = PH @ np.swapaxes(PH, -1, -2)
+    lam, eigvecs = np.linalg.eigh(sigma_2d)  # ascending
     # Descending, matching compute_hmat; columns follow the values.
-    eigvals = eigvals[:, ::-1]
+    eigvals = np.sqrt(np.maximum(lam[:, ::-1], 0.0))
     # Eigenvector sign convention shared with the Quadrants backend
     # (largest-magnitude component of each eigenvector is positive).
     eigvecs = _fix_eigvec_sign(eigvecs[:, :, ::-1])
+    h_tensor_2d = np.einsum("nij,nj,nkj->nik", eigvecs, eigvals, eigvecs)
 
     return (
         h_tensor_2d.astype(np.float32),

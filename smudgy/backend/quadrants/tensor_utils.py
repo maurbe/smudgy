@@ -27,21 +27,38 @@ def _project_2d_kernel(
             for b in qd.static(range(3)):
                 H[a, b] = h_tensor[n, a, b]
 
-        h2d = (P @ H.inverse() @ P.transpose()).inverse()
-        h2d = 0.5 * (h2d + h2d.transpose())  # symmetric up to f32 round-off
+        # Shadow of the ellipsoid: covariance Sigma = H H^T projected onto the
+        # plane. Integrating the 3D kernel along the line of sight leaves a
+        # kernel with this shape (Schur complement of Sigma^-1).
+        PH = P @ H
+        sigma2d = PH @ PH.transpose()
+        sigma2d = 0.5 * (sigma2d + sigma2d.transpose())  # symmetric up to f32 round-off
 
         # Descending, same convention as compute_hmat (and the numpy backend).
-        eigvals, eigvecs = sym_eig_descending(h2d, 2)
+        lam, eigvecs = sym_eig_descending(sigma2d, 2)
 
+        # H_2 = Sigma_2^(1/2): same eigenvectors, square-rooted eigenvalues
+        eigvals = qd.Vector.zero(qd.f32, 2)
+        for a in qd.static(range(2)):
+            eigvals[a] = qd.sqrt(qd.max(lam[a], 0.0))
         for a in qd.static(range(2)):
             eigvals_out[n, a] = eigvals[a]
             for b in qd.static(range(2)):
-                h2d_out[n, a, b] = h2d[a, b]
+                h2d = 0.0
+                for c in qd.static(range(2)):
+                    h2d += eigvecs[a, c] * eigvals[c] * eigvecs[b, c]
+                h2d_out[n, a, b] = h2d
                 eigvecs_out[n, a, b] = eigvecs[a, b]
 
 
 def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
-    """Project a 3D smoothing tensor to 2D and compute its eigenvalues and eigenvectors.
+    """Shadow of 3D smoothing tensors on a coordinate plane, with its eigensystem.
+
+    The projected tensor is ``H_2 = (P H H^T P^T)^(1/2)``, with ``P`` the
+    (2, 3) matrix of the plane's basis vectors: the outline of the smoothing
+    ellipsoid seen along the line of sight. The 3D kernel integrated along
+    that line has this shape (its radial profile is the projected 3D
+    profile, not the 2D kernel).
 
     Parameters
     ----------
@@ -55,7 +72,8 @@ def project_2d(h_tensor: np.ndarray, plane: tuple[int, int] = (0, 1)):
     h2d : np.ndarray
         Array of projected 2D smoothing tensors of shape (N, 2, 2).
     eigvals : np.ndarray
-        Array of eigenvalues of the projected 2D tensors of shape (N, 2).
+        Array of eigenvalues (principal semi-axes) of the projected 2D
+        tensors of shape (N, 2), descending.
     eigvecs : np.ndarray
         Array of eigenvectors of the projected 2D tensors of shape (N, 2, 2).
 

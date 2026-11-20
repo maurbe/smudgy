@@ -9,10 +9,10 @@ sight gives, in the plane,
 
 `_reference` evaluates this in float64, independently of smudgy's deposition
 code, and integrates it over each pixel. Isotropic and covariant plane
-projection do not do this yet (they use the 2D kernel and, for covariant,
-H_2 = (P H^-1 P^T)^-1): those cases are marked xfail(strict) until the fix
-(plan Phase P). The Gaussian is its own projection, so isotropic Gaussian
-already passes; separable and fixed-grid kernels are exact already.
+projection do not do this yet (they deposit the 2D kernel with the shadow
+H_2, not the projected profile F): those cases are marked xfail(strict) until
+the fix (plan Phase P). The Gaussian is its own projection, so it already
+passes; separable and fixed-grid kernels are exact already.
 
 Tolerances are provisional (max abs error / max of the reference image); they
 are set from measurement once the fix is in.
@@ -41,6 +41,9 @@ FIXED_KERNELS = ["ngp", "cic", "tsc", "bspline4"]
 # (2, 0) checks the output axis order follows `plane_projection`
 PLANES = [(0, 1), (2, 0), (1, 2)]
 GRID_3D = (40, 48, 56)  # non-cubic: catches axis mix-ups
+# reference test: finer 2D grid, so the cell-quadrature error (3e-4, Gaussian)
+# stays well below the profile error it must detect (>= 1.7e-2, Wendland C6)
+GRID_2D_REFERENCE = tuple(2 * n for n in GRID_3D)
 N = 10
 R_MIN, R_MAX = 0.10, 0.20  # physical support radius (largest axis); box = 1
 
@@ -136,12 +139,12 @@ def _rel_err(a, ref):
 
 
 def _xfail_if_unfixed(request, structure, kernel_name):
-    gaussian_isotropic = structure == "isotropic" and kernel_name == "gaussian"
-    if structure in ("isotropic", "covariant") and not gaussian_isotropic:
+    # the Gaussian is its own projection: exact once H_2 is the shadow
+    if structure in ("isotropic", "covariant") and kernel_name != "gaussian":
         request.applymarker(pytest.mark.xfail(
             strict=True,
-            reason="plane projection uses the 2D kernel (and the wrong covariant "
-                   "H_2), not the projected 3D kernel (plan Phase P)",
+            reason="plane projection uses the 2D kernel, not the projected 3D "
+                   "kernel profile (plan Phase P)",
         ))
 
 
@@ -151,7 +154,7 @@ def _xfail_if_unfixed(request, structure, kernel_name):
 def test_projection_matches_reference(request, kernel_name, structure, plane):
     """2D projected deposit == exact column density integrated over each pixel."""
     _xfail_if_unfixed(request, structure, kernel_name)
-    gridnums = [GRID_3D[a] for a in plane]
+    gridnums = [GRID_2D_REFERENCE[a] for a in plane]
     image = _cloud(kernel_name, structure).deposit(
         None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
         kernel_name=kernel_name, structure=structure,
