@@ -174,6 +174,21 @@ def test_projected_sample_table_sums_to_one(name, eta_crit):
     assert not np.array_equal(plain["integrals"], grid["integrals"])
 
 
+@pytest.mark.parametrize("name", ["tophat", "tsc", "cubic_spline", "wendland_c6"])
+def test_projected_sample_table_shell_masses(name):
+    """Each shell of the projected sample table carries its exact (float64) mass."""
+    ensure_initialized()
+    grid = build_kernel_sample_grid(name, 2, 30.0, projected=True)
+    R = SPHERICAL[name].support
+    n_q = grid["n_q"]
+    edges = np.linspace(0.0, R, n_q + 1)
+    shell = np.floor(np.linalg.norm(grid["coords"], axis=1) / (R / n_q)).astype(int)
+    mass = np.bincount(shell, weights=grid["integrals"], minlength=n_q)
+    exact = 2 * np.pi * SPHERICAL[name].sigma[2] * np.diff(projected_cumulative(name, edges))
+    # float32 differences of the cumulative mass: measured <= 2e-6
+    np.testing.assert_allclose(mass, exact, rtol=0, atol=5e-6 * exact.max())
+
+
 def test_projected_requires_2d():
     """Projected kernels are 2D only."""
     with pytest.raises(ValueError, match="2D"):

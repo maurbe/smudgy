@@ -23,6 +23,7 @@ from scipy.linalg import sqrtm
 
 from smudgy import PointCloud
 from smudgy.backend.numpy.kernels import get_kernel
+from smudgy.backend.quadrants.deposition import QUADRATURE_POINTS_2D
 
 SPHERICAL_KERNELS = [
     "tophat",
@@ -58,10 +59,17 @@ TOL_COLUMN = 3e-3
 # 3D deposit summed along the axis vs reference: measured <= 7e-3 (gaussian
 # covariant), limited by the 3D cell quadrature
 TOL_REFERENCE_GUARD = 1.5e-2
+# same cell rule on both sides: measured <= 2e-6 (table + float32); TSC 8e-6
+# (x log x at its centre), tophat 1e-4 (infinite-slope edge)
+TOL_SAME_RULE = {"tophat": 5e-4}
+TOL_SAME_RULE_DEFAULT = 2e-5
 
 
-def _particles(kernel_name, seed=0):
-    """Positions, weights, smoothing lengths and tensors (support radius in [R_MIN, R_MAX])."""
+def _particles(kernel_name, seed=0, minor=(0.35, 0.5)):
+    """Positions, weights, smoothing lengths and tensors (support radius in [R_MIN, R_MAX]).
+
+    Tensor axes are h * (1, U(0.5, 0.8), U(*minor)), randomly rotated.
+    """
     rng = np.random.default_rng(seed)
     support = get_kernel(kernel_name if kernel_name not in FIXED_KERNELS else "cubic_spline", 3).support
     pos = rng.uniform(0, 1, (N, 3))
@@ -69,14 +77,14 @@ def _particles(kernel_name, seed=0):
     h = rng.uniform(R_MIN, R_MAX, N) / support
     Q, _ = np.linalg.qr(rng.normal(size=(N, 3, 3)))
     axes = h[:, None] * np.stack(
-        [np.ones(N), rng.uniform(0.5, 0.8, N), rng.uniform(0.35, 0.5, N)], axis=1
+        [np.ones(N), rng.uniform(0.5, 0.8, N), rng.uniform(*minor, N)], axis=1
     )
     H = np.einsum("nij,nj,nkj->nik", Q, axes, Q)
     return pos, weights, h, H
 
 
-def _cloud(kernel_name, structure):
-    pos, weights, h, H = _particles(kernel_name)
+def _cloud(kernel_name, structure, **kw):
+    pos, weights, h, H = _particles(kernel_name, **kw)
     pc = PointCloud(pos, weights=weights, boxsize=1.0, verbose=False)
     if structure == "covariant":
         pc.set_smoothing("covariant", smoothing_tensors=H)
@@ -98,19 +106,25 @@ def _projected_profile(kernel_name, n_rho=4001, n_s=2000):
     return rho, kernel.sigma * F
 
 
-def _reference(kernel_name, structure, plane, gridnums, n_sub=8):
-    """Exact projected image, each particle's pixel integrals normalised to its weight.
-
-    deposit() renormalises every particle to its weight as well, so the
-    comparison tests the shape, not the kernel's truncated normalisation.
-    """
-    pos, weights, h, H = _particles(kernel_name)
-    rho, F = _projected_profile(kernel_name)
+def _gauss_rule(n_sub=8):
+    """Tensor Gauss-Legendre points ((offset_x, offset_y, weight), ...) on a cell."""
     x, wq = np.polynomial.legendre.leggauss(n_sub)
     x, wq = 0.5 * (x + 1.0), 0.5 * wq
-    centers = [
-        (np.arange(n)[:, None] + x[None, :]) / n for n in gridnums
-    ]  # (n_cells, n_sub) sub-point coordinates per axis
+    return [(x[a], x[b], wq[a] * wq[b]) for a in range(n_sub) for b in range(n_sub)]
+
+
+def _reference(kernel_name, structure, plane, gridnums, rule=None, periodic=True, **kw):
+    """Exact projected image, each particle's pixel integrals normalised to its weight.
+
+    Pixel integrals use `rule` (cell offsets and weights, as the deposition's
+    quadrature tables), by default 8x8 Gauss-Legendre (exact pixel
+    integrals). deposit() renormalises every particle to its weight over the
+    grid as well, so the comparison tests the shape, not the kernel's
+    truncated normalisation. periodic=False: grid [0, 1]^2 without wrapping.
+    """
+    pos, weights, h, H = _particles(kernel_name, **kw)
+    rho, F = _projected_profile(kernel_name)
+    rule = _gauss_rule() if rule is None else rule
     image = np.zeros(gridnums)
     for i in range(N):
         y0 = pos[i, list(plane)]
@@ -119,13 +133,16 @@ def _reference(kernel_name, structure, plane, gridnums, n_sub=8):
         else:
             H2 = h[i] * np.eye(2)
         Hi = np.linalg.inv(H2)
-        dx = (centers[0] - y0[0] + 0.5) % 1.0 - 0.5  # minimum image
-        dy = (centers[1] - y0[1] + 0.5) % 1.0 - 0.5
-        DX, DY = dx[:, None, :, None], dy[None, :, None, :]
-        u = Hi[0, 0] * DX + Hi[0, 1] * DY
-        v = Hi[1, 0] * DX + Hi[1, 1] * DY
-        val = np.interp(np.sqrt(u * u + v * v), rho, F, right=0.0)
-        cell = (val * wq[None, None, :, None] * wq[None, None, None, :]).sum(axis=(2, 3))
+        cell = np.zeros(gridnums)
+        for ox, oy, w in rule:
+            dx = (np.arange(gridnums[0]) + ox) / gridnums[0] - y0[0]
+            dy = (np.arange(gridnums[1]) + oy) / gridnums[1] - y0[1]
+            if periodic:  # minimum image
+                dx, dy = (dx + 0.5) % 1.0 - 0.5, (dy + 0.5) % 1.0 - 0.5
+            DX, DY = dx[:, None], dy[None, :]
+            u = Hi[0, 0] * DX + Hi[0, 1] * DY
+            v = Hi[1, 0] * DX + Hi[1, 1] * DY
+            cell += w * np.interp(np.sqrt(u * u + v * v), rho, F, right=0.0)
         image += weights[i] * cell / cell.sum()
     return image
 
@@ -155,6 +172,60 @@ def test_projection_matches_reference(kernel_name, structure, plane):
     ref = _reference(kernel_name, structure, plane, gridnums)
     tol = TOL_REFERENCE.get(kernel_name, TOL_REFERENCE_DEFAULT)
     assert _rel_err(image, ref) < tol
+
+
+@pytest.mark.parametrize("method", ["midpoint", "trapezoidal", "simpson"])
+@pytest.mark.parametrize("structure", ["isotropic", "covariant"])
+@pytest.mark.parametrize("kernel_name", SPHERICAL_KERNELS)
+def test_projection_matches_reference_same_rule(kernel_name, structure, method):
+    """Every cell rule: deposit == the exact profile sampled with that rule.
+
+    Same points and weights on both sides, so the cell quadrature error
+    cancels and only the projected kernel (table, shadow) is tested.
+    """
+    plane = (2, 0)
+    gridnums = [GRID_3D[a] for a in plane]
+    image = _cloud(kernel_name, structure).deposit(
+        None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
+        kernel_name=kernel_name, structure=structure,
+        integration_method=method, eta_crit=0.0,
+    )
+    ref = _reference(
+        kernel_name, structure, plane, gridnums, rule=QUADRATURE_POINTS_2D[method]
+    )
+    assert _rel_err(image, ref) < TOL_SAME_RULE.get(kernel_name, TOL_SAME_RULE_DEFAULT)
+
+
+@pytest.mark.parametrize("plane", PLANES)
+@pytest.mark.parametrize("structure", ["isotropic", "covariant"])
+@pytest.mark.parametrize("kernel_name", ["cubic_spline", "gaussian", "wendland_c6"])
+def test_projection_non_periodic(kernel_name, structure, plane):
+    """`extent` grid (no wrapping): each particle renormalised over the grid."""
+    gridnums = [GRID_2D_REFERENCE[a] for a in plane]
+    image = _cloud(kernel_name, structure).deposit(
+        None, averaged=False, gridnums=gridnums, extent=[[0.0, 1.0]] * 3,
+        plane_projection=list(plane), kernel_name=kernel_name, structure=structure,
+        integration_method="simpson", eta_crit=0.0,
+    )
+    ref = _reference(kernel_name, structure, plane, gridnums, periodic=False)
+    assert _rel_err(image, ref) < TOL_REFERENCE_DEFAULT
+
+
+@pytest.mark.parametrize("plane", PLANES)
+@pytest.mark.parametrize("kernel_name", ["cubic_spline", "wendland_c2", "tsc"])
+def test_projection_elongated(kernel_name, plane):
+    """Covariant, axis ratios up to 5 (minor axis 0.2-0.25 of the major), same rule."""
+    gridnums = [GRID_3D[a] for a in plane]
+    image = _cloud(kernel_name, "covariant", minor=(0.2, 0.25)).deposit(
+        None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
+        kernel_name=kernel_name, structure="covariant",
+        integration_method="simpson", eta_crit=0.0,
+    )
+    ref = _reference(
+        kernel_name, "covariant", plane, gridnums,
+        rule=QUADRATURE_POINTS_2D["simpson"], minor=(0.2, 0.25),
+    )
+    assert _rel_err(image, ref) < TOL_SAME_RULE_DEFAULT
 
 
 @pytest.mark.parametrize("structure", ["isotropic", "covariant"])
