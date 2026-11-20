@@ -176,3 +176,33 @@ def test_divergence_in_1d(rng):
     div = pc.interpolate("f", mode="divergence")
     grad = pc.interpolate("f", mode="gradient")
     np.testing.assert_allclose(div[:, 0], grad[:, 0, 0], rtol=1e-6)
+
+
+# -- interpolation cache ---------------------------------------------------------
+@pytest.mark.parametrize("structure", ["isotropic", "covariant"])
+def test_interpolate_reuses_ghost_smoothing(rng, structure, monkeypatch):
+    import smudgy.pointcloud as pointcloud_module
+
+    pc = _cloud(rng).global_setup(num_neighbors=16, structure=structure,
+                                  kernel_name="cubic_spline")
+    pc.compute_smoothing()
+    pc.compute_density()
+    first = pc.interpolate("f", mode="gradient")
+
+    calls = []
+    real_push = pointcloud_module.push_to_ghosts
+    monkeypatch.setattr(pointcloud_module, "push_to_ghosts",
+                        lambda *a: calls.append(1) or real_push(*a))
+    np.testing.assert_array_equal(pc.interpolate("f", mode="gradient"), first)
+    assert len(calls) == 1  # the fields only; density and h are cached
+
+    # new smoothing/density: the cache must not be reused
+    pc.find_neighbors(num_neighbors=24)
+    pc.compute_smoothing(num_neighbors=24)
+    pc.compute_density()
+    fresh = pc.interpolate("f", mode="gradient")
+    ref = _cloud(np.random.default_rng(0)).global_setup(
+        num_neighbors=24, structure=structure, kernel_name="cubic_spline")
+    ref.compute_smoothing()
+    ref.compute_density()
+    np.testing.assert_array_equal(fresh, ref.interpolate("f", mode="gradient"))

@@ -197,6 +197,7 @@ class PointCloud:
         self.ghosts = GhostInfo()
         self.query_routing = QueryRouting()
         self._fields = set()  # names added via add_fields
+        self._ghost_smoothing_cache = {}  # see _combined_volumes_and_h
 
         if self.verbose and self.rank == 0:
             periodic_str = (
@@ -504,6 +505,7 @@ class PointCloud:
         self.smoothing.density_covariant = None
         self.smoothing.kernel_name = None
         self.smoothing.density_kernel = {}
+        self._ghost_smoothing_cache = {}
 
     def _check_density_computed(self, structure: Structure) -> None:
         """Verify that density has been computed for the requested structure."""
@@ -1282,6 +1284,44 @@ class PointCloud:
 
         raise ValueError(f"Unsupported deposition structure '{structure}'")
 
+    def _combined_volumes_and_h(self, ghost_info, structure, combined_weights):
+        """Local + ghost particle volumes m / rho and smoothing h of `structure`.
+
+        Also returns a scratch dict for the backend's values derived from h
+        (None if not cached).
+
+        For the particle ghost set (``self.ghosts``) the result is cached per
+        structure, density and smoothing: repeated :meth:`interpolate` calls
+        at the particle positions skip the two ghost exchanges. These inputs
+        are replaced, never modified in place, by the calls that change them,
+        so an identity match is a valid hit, and the decision is the same on
+        every rank. Query-position ghost sets are new on every call.
+        """
+        covariant = structure == "covariant"
+        density = (
+            self.smoothing.density_covariant if covariant else self.smoothing.density_isotropic
+        )
+        h_local = (
+            self.smoothing.smoothing_tensors if covariant else self.smoothing.smoothing_lengths
+        )
+        key = (ghost_info, density, h_local, combined_weights)
+        cacheable = ghost_info is self.ghosts
+        cache = self._ghost_smoothing_cache.get(structure)
+        if cacheable and cache is not None and all(a is b for a, b in zip(cache[0], key)):
+            return cache[1]
+
+        ghost_density = push_to_ghosts(self.comm, ghost_info, density)
+        combined_density = self._combined_local_and_ghost(density, ghost_density)
+        # per-particle m_j / rho_j; the backends gather it through nn_inds
+        weights_over_density = combined_weights / (combined_density + 1e-8)
+        ghost_h = push_to_ghosts(self.comm, ghost_info, h_local)
+        combined_h = self._combined_local_and_ghost(h_local, ghost_h)
+        if not cacheable:
+            return weights_over_density, combined_h, None
+        result = (weights_over_density, combined_h, {})
+        self._ghost_smoothing_cache[structure] = (key, result)
+        return result
+
     def _interpolate_local(
         self,
         query_positions_local: npt.NDArray[np.floating],
@@ -1311,25 +1351,9 @@ class PointCloud:
                 combined_fields.shape[0], num_fields, self.dim
             )
 
-        density_local = (
-            self.smoothing.density_covariant
-            if structure_temp == "covariant"
-            else self.smoothing.density_isotropic
+        weights_over_density, combined_h, backend_cache = self._combined_volumes_and_h(
+            ghost_info, structure_temp, combined_weights
         )
-        ghost_density = push_to_ghosts(self.comm, ghost_info, density_local)
-        combined_density = self._combined_local_and_ghost(density_local, ghost_density)
-
-        # per-particle m_j / rho_j; the backends gather it (and the other
-        # per-particle arrays below) through nn_inds themselves
-        weights_over_density = combined_weights / (combined_density + 1e-8)
-
-        h_local = (
-            self.smoothing.smoothing_tensors
-            if structure_temp == "covariant"
-            else self.smoothing.smoothing_lengths
-        )
-        ghost_h = push_to_ghosts(self.comm, ghost_info, h_local)
-        combined_h = self._combined_local_and_ghost(h_local, ghost_h)
 
         return execution._dispatch(
             "interpolate",
@@ -1345,6 +1369,7 @@ class PointCloud:
             boxsize=self.boxsize,
             mode=mode,
             structure=structure_temp,
+            cache=backend_cache,
         )
 
     def interpolate(

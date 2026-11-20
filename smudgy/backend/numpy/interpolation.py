@@ -76,10 +76,12 @@ def interpolate(
     boxsize,
     mode,
     structure,
+    cache=None,
 ):
     """Interpolate fields at query positions (NumPy reference backend).
 
-    Same arguments as :func:`smudgy.backend.quadrants.interpolation.interpolate`.
+    Same arguments as :func:`smudgy.backend.quadrants.interpolation.interpolate`
+    (`cache` is unused).
     """
     check_particle_structure(structure, "interpolation")
     check_interpolation_mode(mode, dim)

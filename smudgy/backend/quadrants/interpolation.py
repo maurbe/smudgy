@@ -97,6 +97,21 @@ def _invert_tensors(
         inv_det[n] = 1.0 / H.determinant()
 
 
+def _cached_smoothing_inputs(h, support, dim, covariant, cache):
+    """`_smoothing_inputs` of the support-scaled `h`.
+
+    With a `cache` dict (owned by the caller, who must drop it when `h`
+    changes), covariant tensor inversions are stored there and reused.
+    """
+    key = ("smoothing_inputs", support)
+    if covariant and cache is not None and key in cache:
+        return cache[key]
+    result = _smoothing_inputs(as_f32(support_scaled(h, support)), dim, covariant)
+    if covariant and cache is not None:
+        cache[key] = result
+    return result
+
+
 def _smoothing_inputs(h, dim, covariant):
     """Return ``(h, inv_det)`` in the form the kernels read.
 
@@ -111,7 +126,7 @@ def _smoothing_inputs(h, dim, covariant):
     return h_inv, inv_det
 
 
-def _common_inputs(query_positions, positions, weights, nn_inds, h, boxsize, dim):
+def _common_inputs(query_positions, positions, weights, nn_inds, boxsize, dim):
     """Contiguous float32/int32 copies (no-ops if already so) + boxsize/periodic."""
     box, periodic = normalize_boxsize(boxsize, dim)
     nn_inds = as_i32(nn_inds)
@@ -121,7 +136,6 @@ def _common_inputs(query_positions, positions, weights, nn_inds, h, boxsize, dim
         as_f32(positions),
         as_f32(weights),
         nn_inds,
-        as_f32(h),
         box,
         periodic,
     )
@@ -183,9 +197,9 @@ def density(
     """
     check_particle_structure(structure, "density")
     kernel = create_spherical_kernel(kernel_name)
-    h = support_scaled(h, kernel.support)
-    query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
-        query_positions, positions, weights, nn_inds, h, boxsize, dim
+    h = as_f32(support_scaled(h, kernel.support))
+    query_positions, positions, weights, nn_inds, box, periodic = _common_inputs(
+        query_positions, positions, weights, nn_inds, boxsize, dim
     )
 
     covariant = structure == "covariant"
@@ -392,6 +406,7 @@ def interpolate(
     boxsize,
     mode,
     structure,
+    cache=None,
 ):
     """Interpolate fields at query positions (Quadrants backend).
 
@@ -413,13 +428,16 @@ def interpolate(
         Smoothing lengths (Nc,) or tensors (Nc, D, D) of the particles.
     boxsize : np.ndarray or None
         Box sizes for periodic boundary conditions.
+    cache : dict, optional
+        Scratch dict for values derived from `h` (the inverted covariant
+        tensors), reused across calls; the caller must replace it whenever
+        `h` changes.
     """
     check_particle_structure(structure, "interpolation")
     check_interpolation_mode(mode, dim)
     kernel = create_spherical_kernel(kernel_name)
-    h = support_scaled(h, kernel.support)
-    query_positions, positions, weights, nn_inds, h, box, periodic = _common_inputs(
-        query_positions, positions, weights, nn_inds, h, boxsize, dim
+    query_positions, positions, weights, nn_inds, box, periodic = _common_inputs(
+        query_positions, positions, weights, nn_inds, boxsize, dim
     )
     fields = as_f32(fields)
     check_index_limits(fields=fields, out=(*nn_inds.shape[:1], *fields.shape[1:]))
@@ -427,7 +445,7 @@ def interpolate(
     N = nn_inds.shape[0]
     F = fields.shape[1]
     covariant = structure == "covariant"
-    h, inv_det = _smoothing_inputs(h, dim, covariant)
+    h, inv_det = _cached_smoothing_inputs(h, kernel.support, dim, covariant, cache)
 
     if mode == "field":
         fn, kernel_fn, out = _field_kernel, kernel.evaluate, np.zeros((N, F), np.float32)
