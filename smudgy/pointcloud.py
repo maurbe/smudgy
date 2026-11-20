@@ -1532,7 +1532,7 @@ class PointCloud:
         return_weights: bool = False,
         gather_to_root: bool = False,
         root: int = 0,
-        brick: bool = True,
+        brick: bool | None = None,
     ) -> (
         npt.NDArray[np.floating]
         | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
@@ -1614,15 +1614,19 @@ class PointCloud:
             ``return_weights=True``).
         root : int, default 0
             Destination rank when ``gather_to_root=True``; unused otherwise.
-        brick : bool, default True
-            If True, every rank deposits onto the smallest box of cells its
-            particles touch (a brick) and `root` sums the bricks into the
-            full grid (then broadcast unless ``gather_to_root``). If False,
-            every rank deposits onto a full-size grid and the grids are
-            summed with ``MPI.Reduce``/``Allreduce``. Both give the same
-            grid up to the order of floating-point additions across ranks
-            (on a single rank both use the full grid); bricks need less
-            memory on non-root ranks.
+        brick : bool or None, default None
+            How the per-rank grids are summed (several ranks only; a single
+            rank deposits onto the full grid and sums nothing). True: every
+            rank deposits onto the smallest box of cells its particles touch
+            (a brick) and `root` sums the bricks into the full grid (then
+            broadcasts it unless ``gather_to_root``). False: every rank
+            deposits onto a full-size grid, summed with
+            ``MPI.Reduce``/``Allreduce``. None picks bricks exactly when
+            ``gather_to_root=True`` and the backend is ``"quadrants"``: there
+            they save memory on non-root ranks and time; when every rank
+            receives the grid, ``Allreduce`` of full grids is faster and every
+            rank holds the full grid anyway. Both give the same grid up to the
+            order of floating-point additions across ranks.
 
         Returns
         -------
@@ -1761,9 +1765,12 @@ class PointCloud:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
-        if brick and self.size > 1:
+        if brick is None:
+            brick = gather_to_root and self.backend == "quadrants"
+        if self.size == 1:
+            grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
+        elif brick:
             # every rank deposits onto its own brick; root sums the bricks
-            # (on one rank the brick would just be the full grid)
             *grids, offset = execution._dispatch(
                 "deposit", backend=self.backend, brick=True, **deposit_kwargs
             )
@@ -1777,7 +1784,7 @@ class PointCloud:
             grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
             if gather_to_root:
                 grids = execution._reduce_sum_to_root(self.comm, grids, root=root)
-            elif self.size > 1:
+            else:
                 grids = execution._reduce_sum(self.comm, grids)
         fields_grid, weights_grid = grids
 

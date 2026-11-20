@@ -1,7 +1,7 @@
 """Brick deposition (``deposit(brick=True)``) against full-grid deposition.
 
-Under ``mpiexec -n 1/3/4``: every deposit method is run with ``brick=True``
-and ``brick=False`` on the same rank count (the two must agree up to the
+Under ``mpiexec -n 1/3/4``: every deposit method is run with ``brick=True``,
+``brick=False`` and the automatic ``brick=None`` on the same rank count (the two must agree up to the
 order of float32 additions), and the brick results are compared across rank
 counts. The particles include a blob straddling a periodic corner (bricks
 extending past the grid edges) and an ``extent`` that leaves some ranks
@@ -55,7 +55,7 @@ def _positions(rng, n):
 def _run_under_mpi():
     from mpi4py import MPI
 
-    from smudgy import PointCloud
+    from smudgy import PointCloud, execution
 
     out_path = sys.argv[1]
     comm = MPI.COMM_WORLD
@@ -79,14 +79,31 @@ def _run_under_mpi():
             pc.compute_smoothing(num_neighbors=16, structure="covariant")
         clouds[backend] = pc
 
+    # count brick reductions, to check which path brick=None takes
+    calls, sum_bricks = [0], execution._sum_bricks
+
+    def counting_sum_bricks(*args, **kw):
+        calls[0] += 1
+        return sum_bricks(*args, **kw)
+
+    execution._sum_bricks = counting_sum_bricks
+
     results, failures = {}, []
     for name, kwargs, backend in _cases():
         pc = clouds[backend]
         for gather in (False, True):
             brick = pc.deposit(**kwargs, brick=True, gather_to_root=gather)
             full = pc.deposit(**kwargs, brick=False, gather_to_root=gather)
+            calls[0] = 0
+            auto = pc.deposit(**kwargs, gather_to_root=gather)  # brick=None
+            uses_bricks = gather and backend == "quadrants" and comm.Get_size() > 1
+            if calls[0] != uses_bricks:
+                failures.append(f"{name} gather={gather}: brick=None took the wrong path")
             brick = brick if isinstance(brick, tuple) else (brick,)
             full = full if isinstance(full, tuple) else (full,)
+            auto = auto if isinstance(auto, tuple) else (auto,)
+            brick = brick + auto
+            full = full + full
             if gather and rank != 0:
                 if any(g is not None for g in brick):
                     failures.append(f"{name}: non-root rank got a grid")

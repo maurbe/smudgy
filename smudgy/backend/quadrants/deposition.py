@@ -302,6 +302,7 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
     @qd.kernel
     def kernel(
         periodic: qd.template(),
+        brick: qd.template(),
         particle_positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
         particle_fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
         particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
@@ -335,7 +336,7 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
                 for ox in qd.static(range(K)):
                     if ok[0, ox]:
                         _grid_add(
-                            grid_weights, grid_fields, particle_fields, dropped, p,
+                            grid_weights, grid_fields, particle_fields, dropped, brick, p,
                             qd.Vector([idx[0, ox]]), wgt[0, ox] * w_particle, dim,
                         )
             elif qd.static(dim == 2):
@@ -343,7 +344,7 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
                     for oy in qd.static(range(K)):
                         if ok[0, ox] and ok[1, oy]:
                             _grid_add(
-                                grid_weights, grid_fields, particle_fields, dropped, p,
+                                grid_weights, grid_fields, particle_fields, dropped, brick, p,
                                 qd.Vector([idx[0, ox], idx[1, oy]]),
                                 wgt[0, ox] * wgt[1, oy] * w_particle, dim,
                             )
@@ -354,7 +355,7 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
                             if ok[0, ox] and ok[1, oy] and ok[2, oz]:
                                 _grid_add(
                                     grid_weights, grid_fields, particle_fields,
-                                    dropped, p,
+                                    dropped, brick, p,
                                     qd.Vector([idx[0, ox], idx[1, oy], idx[2, oz]]),
                                     wgt[0, ox] * wgt[1, oy] * wgt[2, oz] * w_particle,
                                     dim,
@@ -384,6 +385,7 @@ def _grid_add(
     grid_fields: qd.template(),
     quantities: qd.template(),
     dropped: qd.template(),
+    brick: qd.template(),
     n,
     cell,
     w,
@@ -391,13 +393,15 @@ def _grid_add(
 ):
     """Add weight `w` of particle `n` (and its fields times `w`) to grid cell `cell`.
 
-    A cell outside the output grid is not written but counted in `dropped`:
-    the brick bounds computed on the host must contain every cell a particle
-    touches, so a nonzero count is an internal error.
+    With `brick` (compile-time), a cell outside the output grid is not
+    written but counted in `dropped`: the brick bounds computed on the host
+    must contain every cell a particle touches, so a nonzero count is an
+    internal error. A full grid skips the check (callers pass valid cells).
     """
     inside = True
-    for d in qd.static(range(dim)):
-        inside = inside and 0 <= cell[d] < grid_weights.shape[d]
+    if qd.static(brick):
+        for d in qd.static(range(dim)):
+            inside = inside and 0 <= cell[d] < grid_weights.shape[d]
     if not inside:
         qd.atomic_add(dropped[0], 1)
     else:
@@ -613,6 +617,7 @@ def _quadrature_cell_add(
     grid_fields: qd.template(),
     quantities: qd.template(),
     dropped: qd.template(),
+    brick: qd.template(),
 ):
     """Deposit the kernel mass of cell `a`, scaled by wj * correction."""
     integral = _cell_integral(
@@ -625,7 +630,7 @@ def _quadrature_cell_add(
         c, _ok = _brick_index(a[d], N[d], off[d], periodic)
         cell[d] = c
     _grid_add(
-        grid_weights, grid_fields, quantities, dropped, n, cell,
+        grid_weights, grid_fields, quantities, dropped, brick, n, cell,
         wj * integral * correction, dim,
     )
 
@@ -654,6 +659,7 @@ def _quadrature_deposit(
     grid_fields: qd.template(),
     quantities: qd.template(),
     dropped: qd.template(),
+    brick: qd.template(),
 ):
     """Deposit every cell of the box `lo + [0, ext)`, weight wj * integral * correction."""
     if qd.static(dim == 1):
@@ -661,7 +667,7 @@ def _quadrature_deposit(
             _quadrature_cell_add(
                 evaluate_fn, quad_points, dim, covariant, periodic, qd.Vector([i]),
                 x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size, N, off,
-                wj, correction, n, grid_weights, grid_fields, quantities, dropped,
+                wj, correction, n, grid_weights, grid_fields, quantities, dropped, brick,
             )
     elif qd.static(dim == 2):
         for i in range(lo[0], lo[0] + ext[0]):
@@ -670,7 +676,7 @@ def _quadrature_deposit(
                     evaluate_fn, quad_points, dim, covariant, periodic,
                     qd.Vector([i, j]), x_cell, hsm_phys, E, ev, kernel_prefactor,
                     cell_size, N, off, wj, correction, n, grid_weights,
-                    grid_fields, quantities, dropped,
+                    grid_fields, quantities, dropped, brick,
                 )
     else:
         for i in range(lo[0], lo[0] + ext[0]):
@@ -680,7 +686,7 @@ def _quadrature_deposit(
                         evaluate_fn, quad_points, dim, covariant, periodic,
                         qd.Vector([i, j, k]), x_cell, hsm_phys, E, ev,
                         kernel_prefactor, cell_size, N, off, wj, correction,
-                        n, grid_weights, grid_fields, quantities, dropped,
+                        n, grid_weights, grid_fields, quantities, dropped, brick,
                     )
 
 
@@ -699,6 +705,7 @@ def _deposit_sample_buffer(
     grid_fields: qd.template(),
     quantities: qd.template(),
     dropped: qd.template(),
+    brick: qd.template(),
 ):
     """Add a particle's per-cell sample sums `buf` (B**dim cells from `i0`)."""
     if qd.static(dim == 1):
@@ -708,7 +715,7 @@ def _deposit_sample_buffer(
                 ix, ok_x = _brick_index(i0[0] + a, N[0], off[0], periodic)
                 if ok_x:
                     _grid_add(
-                        grid_weights, grid_fields, quantities, dropped, n,
+                        grid_weights, grid_fields, quantities, dropped, brick, n,
                         qd.Vector([ix]), wj * v, dim,
                     )
     elif qd.static(dim == 2):
@@ -720,7 +727,7 @@ def _deposit_sample_buffer(
                     iy, ok_y = _brick_index(i0[1] + b, N[1], off[1], periodic)
                     if ok_x and ok_y:
                         _grid_add(
-                            grid_weights, grid_fields, quantities, dropped, n,
+                            grid_weights, grid_fields, quantities, dropped, brick, n,
                             qd.Vector([ix, iy]), wj * v, dim,
                         )
     else:
@@ -735,7 +742,7 @@ def _deposit_sample_buffer(
                         )
                         if ok_x and ok_y and ok_z:
                             _grid_add(
-                                grid_weights, grid_fields, quantities, dropped, n,
+                                grid_weights, grid_fields, quantities, dropped, brick, n,
                                 qd.Vector([ix, iy, iz]), wj * v, dim,
                             )
 
@@ -750,6 +757,7 @@ def _separable(
     kernel_support: qd.f32,
     dim: qd.template(),
     periodic: qd.template(),
+    brick: qd.template(),
     positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
     quantities: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
     smoothing_lengths: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
@@ -826,7 +834,7 @@ def _separable(
                 # lo + s lies inside the (clipped) grid: always valid
                 c, _ok = _brick_index(lo[d] + s[d], N[d], off[d], periodic)
                 cell[d] = c
-            _grid_add(weights, fields, quantities, dropped, n, cell, w, dim)
+            _grid_add(weights, fields, quantities, dropped, brick, n, cell, w, dim)
             s = _next_offset(s, ext, dim)
 
 
@@ -841,6 +849,7 @@ def _isotropic(
     dim: qd.template(),
     quad_points: qd.template(),
     periodic: qd.template(),
+    brick: qd.template(),
     eta_crit: qd.f32,
     B: qd.template(),
     positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
@@ -921,7 +930,7 @@ def _isotropic(
                     buf[idx] += sample_integrals[s]
             _deposit_sample_buffer(
                 buf, i0, wj, n, N, off, periodic, B, dim, weights, fields,
-                quantities, dropped,
+                quantities, dropped, brick,
             )
 
         elif eta < eta_crit:
@@ -941,7 +950,7 @@ def _isotropic(
                     integral = sample_integrals[s]
                     if integral != 0.0:
                         _grid_add(
-                            weights, fields, quantities, dropped, n, cell,
+                            weights, fields, quantities, dropped, brick, n, cell,
                             wj * integral, dim,
                         )
 
@@ -967,7 +976,7 @@ def _isotropic(
                 _quadrature_deposit(
                     evaluate_fn, quad_points, dim, False, periodic, lo, ext, x_cell,
                     hsm_phys, no_axes, no_ev, kernel_prefactor, cs, N, off, wj,
-                    1.0 / total_integral, n, weights, fields, quantities, dropped,
+                    1.0 / total_integral, n, weights, fields, quantities, dropped, brick,
                 )
 
 
@@ -982,6 +991,7 @@ def _covariant(
     dim: qd.template(),
     quad_points: qd.template(),
     periodic: qd.template(),
+    brick: qd.template(),
     eta_crit: qd.f32,
     B: qd.template(),
     positions: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, D)
@@ -1114,7 +1124,7 @@ def _covariant(
                     buf[idx] += sample_integrals[s]
             _deposit_sample_buffer(
                 buf, i0, wj, n, N, off, periodic, B, dim, weights, fields,
-                quantities, dropped,
+                quantities, dropped, brick,
             )
 
         elif use_samples:
@@ -1136,7 +1146,7 @@ def _covariant(
                     integral = sample_integrals[s]
                     if integral != 0.0:
                         _grid_add(
-                            weights, fields, quantities, dropped, n, cell,
+                            weights, fields, quantities, dropped, brick, n, cell,
                             wj * integral, dim,
                         )
 
@@ -1145,7 +1155,7 @@ def _covariant(
             _quadrature_deposit(
                 evaluate_fn, quad_points, dim, True, periodic, lo, ext, x_cell, 0.0,
                 E, ev, kernel_prefactor, cs, N, off, wj, 1.0 / total_integral,
-                n, weights, fields, quantities, dropped,
+                n, weights, fields, quantities, dropped, brick,
             )
 
 
@@ -1281,6 +1291,7 @@ def _prepare_fixed(
     )
     args = (
         bool(periodic),
+        bool(brick),
         particle_positions,
         particle_fields,
         particle_weights,
@@ -1346,6 +1357,7 @@ def _prepare_separable(
         support,
         DIM,
         bool(periodic),
+        bool(brick),
         particle_positions,
         particle_fields,
         particle_hsml,
@@ -1457,6 +1469,7 @@ def _prepare_radial(
         DIM,
         quad_points,
         bool(periodic),
+        bool(brick),
         float(eta_crit),
         sample_buffer,
         particle_positions,

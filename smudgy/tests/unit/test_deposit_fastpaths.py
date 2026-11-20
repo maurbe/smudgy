@@ -122,10 +122,10 @@ def test_sample_buffer_matches_direct(structure, dim, periodic):
     prep.kernel(*prep.args)
     buffered = prep.grid_weights.copy(), prep.grid_fields.copy()
 
-    # args: (evaluate, sigma, support, dim, quad_points, periodic, eta_crit, B, ...)
+    # args: (evaluate, sigma, support, dim, quad_points, periodic, brick, eta_crit, B, ...)
     args = list(prep.args)
-    assert args[7] == prep.sample_buffer
-    args[7] = 1
+    assert args[8] == prep.sample_buffer
+    args[8] = 1
     prep.grid_weights[:] = 0
     prep.grid_fields[:] = 0
     prep.kernel(*args)
