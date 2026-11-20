@@ -1530,7 +1530,7 @@ class PointCloud:
         integration_method: str = "midpoint",
         eta_crit: float = 4.0,
         return_weights: bool = False,
-        gather_to_root: bool = False,
+        gather_to_root: bool = True,
         root: int = 0,
         brick: bool | None = None,
     ) -> (
@@ -1607,26 +1607,26 @@ class PointCloud:
             (exact-per-cell) quadrature path.
         return_weights : bool, default False
             If True, returns the weights grid as well.
-        gather_to_root : bool, default False
-            If True, the summed grid is delivered to `root` only instead of
-            every rank -- cheaper when only `root` needs the result.
-            Non-`root` ranks then return ``None`` (or ``(None, None)`` if
-            ``return_weights=True``).
+        gather_to_root : bool, default True
+            Only with several MPI ranks. True: the summed grid ends up on
+            `root` only; the other ranks return ``None`` (or ``(None, None)``
+            if ``return_weights=True``). False: every rank receives the full
+            grid (``MPI.Allreduce``) -- slower and more memory; use it only
+            when every rank needs the grid.
         root : int, default 0
             Destination rank when ``gather_to_root=True``; unused otherwise.
         brick : bool or None, default None
-            How the per-rank grids are summed (several ranks only; a single
-            rank deposits onto the full grid and sums nothing). True: every
-            rank deposits onto the smallest box of cells its particles touch
-            (a brick) and `root` sums the bricks into the full grid (then
-            broadcasts it unless ``gather_to_root``). False: every rank
-            deposits onto a full-size grid, summed with
-            ``MPI.Reduce``/``Allreduce``. None picks bricks exactly when
-            ``gather_to_root=True`` and the backend is ``"quadrants"``: there
-            they save memory on non-root ranks and time; when every rank
-            receives the grid, ``Allreduce`` of full grids is faster and every
-            rank holds the full grid anyway. Both give the same grid up to the
-            order of floating-point additions across ranks.
+            Only with several MPI ranks; a single rank always deposits onto
+            the full grid and sums nothing. True: every rank deposits onto the
+            smallest box of cells its particles touch (a brick) and `root`
+            sums the bricks into the full grid (then broadcasts it if
+            ``gather_to_root=False``). False: every rank deposits onto a
+            full-size grid, summed with ``MPI.Reduce``/``Allreduce``. None
+            (default) picks the faster one: bricks with ``gather_to_root=True``
+            and the ``"quadrants"`` backend (less memory on non-root ranks),
+            full grids otherwise (``Allreduce`` beats bricks plus a broadcast
+            when every rank receives the grid). Both give the same grid up to
+            the order of floating-point additions across ranks.
 
         Returns
         -------

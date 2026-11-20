@@ -117,6 +117,13 @@ def _run_under_mpi():
                 if gather and rank == 0:
                     results[f"{name}_{i}"] = b
 
+    # defaults: bricks on several ranks, the grid on rank 0 only
+    calls[0] = 0
+    default = clouds["quadrants"].deposit("sf", averaged=False, gridnums=24,
+                                          structure="isotropic")
+    if calls[0] != (comm.Get_size() > 1) or (default is None) != (rank != 0):
+        failures.append("defaults: not bricks summed onto rank 0 only")
+
     all_failures = comm.gather(failures, root=0)
     if rank == 0:
         flat = [f for r in all_failures for f in r]
