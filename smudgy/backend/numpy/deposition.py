@@ -127,6 +127,7 @@ def deposit(
     *,
     adaptive=False,
     structure=None,
+    brick=False,
     **kwargs,
 ):
     """Deposit particle data onto a grid with a fixed-grid stencil (NumPy backend).
@@ -134,12 +135,15 @@ def deposit(
     Only fixed-grid deposition (``adaptive=False``) with the stencils ``ngp``,
     ``cic``, ``tsc``, ``bspline4``, ``bspline5`` and ``bspline6`` is supported.
     Grid cells cover ``[0, boxsizes)``; stencil cells outside the grid are
-    wrapped (periodic) or dropped.
+    wrapped (periodic) or dropped. With ``brick=True`` the full grid is
+    returned as a brick at offset 0 (the quadrants backend's brick protocol).
 
     Returns
     -------
     grid_fields : ndarray, shape (F, *gridnums)
     grid_weights : ndarray, shape (*gridnums,)
+    offset : ndarray, shape (D,)
+        Only with ``brick=True``: zeros.
     """
     if adaptive:
         raise ValueError(
@@ -210,7 +214,8 @@ def deposit(
             pending = 0
     flush()
 
-    return (
+    grids = (
         grid_f.reshape(F, *gridnums).astype(np.float32),
         grid_w.reshape(gridnums).astype(np.float32),
     )
+    return (*grids, np.zeros(dim, dtype=np.int64)) if brick else grids

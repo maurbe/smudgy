@@ -1532,6 +1532,7 @@ class PointCloud:
         return_weights: bool = False,
         gather_to_root: bool = False,
         root: int = 0,
+        brick: bool = True,
     ) -> (
         npt.NDArray[np.floating]
         | tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
@@ -1607,13 +1608,20 @@ class PointCloud:
         return_weights : bool, default False
             If True, returns the weights grid as well.
         gather_to_root : bool, default False
-            If True, the summed grid is delivered to `root` only (via
-            ``comm.reduce``) instead of every rank (via ``comm.allreduce``,
-            the default) -- cheaper when only `root` needs the result.
+            If True, the summed grid is delivered to `root` only instead of
+            every rank -- cheaper when only `root` needs the result.
             Non-`root` ranks then return ``None`` (or ``(None, None)`` if
             ``return_weights=True``).
         root : int, default 0
             Destination rank when ``gather_to_root=True``; unused otherwise.
+        brick : bool, default True
+            If True, every rank deposits onto the smallest box of cells its
+            particles touch (a brick) and `root` sums the bricks into the
+            full grid (then broadcast unless ``gather_to_root``). If False,
+            every rank deposits onto a full-size grid and the grids are
+            summed with ``MPI.Reduce``/``Allreduce``. Both give the same
+            grid up to the order of floating-point additions across ranks
+            (bit for bit on a single rank); bricks need less memory per rank.
 
         Returns
         -------
@@ -1752,13 +1760,23 @@ class PointCloud:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
             print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
 
-        # every rank deposits its own particles onto a full grid; the grids
-        # are then summed onto `root` only or onto every rank
-        grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
-        if gather_to_root:
-            grids = execution._reduce_sum_to_root(self.comm, grids, root=root)
-        elif self.size > 1:
-            grids = execution._reduce_sum(self.comm, grids)
+        if brick:
+            # every rank deposits onto its own brick; root sums the bricks
+            *grids, offset = execution._dispatch(
+                "deposit", backend=self.backend, brick=True, **deposit_kwargs
+            )
+            grids = execution._sum_bricks(
+                self.comm, grids, offset, gridnums_temp,
+                root=root if gather_to_root else 0, to_all=not gather_to_root,
+            )
+        else:
+            # every rank deposits onto a full grid; the grids are summed onto
+            # `root` only or onto every rank
+            grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
+            if gather_to_root:
+                grids = execution._reduce_sum_to_root(self.comm, grids, root=root)
+            elif self.size > 1:
+                grids = execution._reduce_sum(self.comm, grids)
         fields_grid, weights_grid = grids
 
         if weights_only:

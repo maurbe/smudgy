@@ -108,7 +108,7 @@ def test_sample_buffer_matches_direct(structure, dim, periodic):
     w = rng.uniform(0.5, 1.5, n).astype(np.float32)
     box = np.ones(dim, np.float32)
     h = (rng.uniform(0.2, 3.9, n) / g / 2).astype(np.float32)  # eta < eta_crit=4
-    common = (pos, fld, w, box, (g,) * dim, periodic, "cubic_spline")
+    common = (pos, fld, w, box, (g,) * dim, periodic, "cubic_spline", False)
     if structure == "isotropic":
         prep = qdep._prepare_radial("isotropic", (h,), *common, "midpoint", 4.0)
     else:

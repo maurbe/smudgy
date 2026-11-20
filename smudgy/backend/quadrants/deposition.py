@@ -35,34 +35,34 @@ def _apply_pbc(idx: qd.i32, gridnum: qd.i32) -> qd.i32:
 
 
 @qd.func
-def _cell_index_from_pos(
-    pos: qd.f32, cellSize_inv: qd.f32, gridnum: qd.i32, periodic: qd.template()
-):
-    """Return ``(cell index, valid)`` of a position along one axis.
+def _brick_index(idx: qd.i32, gridnum: qd.i32, offset: qd.i32, periodic: qd.template()):
+    """Return ``(index into the output grid, valid)`` of a global cell index.
 
-    Periodic grids wrap the index (always valid); otherwise positions outside
-    the grid are invalid.
+    `idx` is the unwrapped global cell index along one axis; the output grid
+    (the full grid, or a brick) starts at global cell `offset`. Periodic
+    indices are taken modulo the global grid size relative to `offset` (a
+    brick may wrap around the axis); non-periodic cells outside the global
+    grid are invalid.
     """
-    idx = qd.floor(pos * cellSize_inv, int)
     valid = True
     if qd.static(periodic):
-        idx = _apply_pbc(idx, gridnum)
+        idx = _apply_pbc(idx - offset, gridnum)
     else:
         if idx < 0 or idx >= gridnum:
             valid = False
+        idx -= offset
     return idx, valid
 
 
 @qd.func
-def _cell_index_from_int(idx: qd.i32, gridnum: qd.i32, periodic: qd.template()):
-    """`_cell_index_from_pos` for an already-integer (unwrapped) cell index."""
-    valid = True
-    if qd.static(periodic):
-        idx = _apply_pbc(idx, gridnum)
-    else:
-        if idx < 0 or idx >= gridnum:
-            valid = False
-    return idx, valid
+def _load_grid_spec(grid_spec: qd.template(), dim: qd.template()):
+    """Global grid size and brick offset per axis from `grid_spec` (2, D)."""
+    N = qd.Vector.zero(qd.i32, dim)
+    off = qd.Vector.zero(qd.i32, dim)
+    for d in qd.static(range(dim)):
+        N[d] = grid_spec[0, d]
+        off[d] = grid_spec[1, d]
+    return N, off
 
 
 def _sample_buffer_size(eta_crit, dim):
@@ -306,14 +306,14 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
         particle_fields: qd.types.ndarray(dtype=qd.f32, ndim=2),  # (N, F)
         particle_weights: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (N,)
         boxsizes: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
-        grid_fields: qd.types.ndarray(dtype=qd.f32, ndim=dim + 1),  # (*gridnums, F)
-        grid_weights: qd.types.ndarray(dtype=qd.f32, ndim=dim),  # gridnums
+        grid_spec: qd.types.ndarray(dtype=qd.i32, ndim=2),  # (2, D)
+        dropped: qd.types.ndarray(dtype=qd.i32, ndim=1),  # (1,)
+        grid_fields: qd.types.ndarray(dtype=qd.f32, ndim=dim + 1),  # (*brick, F)
+        grid_weights: qd.types.ndarray(dtype=qd.f32, ndim=dim),  # brick
     ):
-        F = grid_fields.shape[dim]
-        N = qd.Vector.zero(qd.i32, dim)
+        N, off = _load_grid_spec(grid_spec, dim)
         inv_dx = qd.Vector.zero(qd.f32, dim)
         for d in qd.static(range(dim)):
-            N[d] = grid_weights.shape[d]
             inv_dx[d] = N[d] / boxsizes[d]
 
         for p in range(particle_positions.shape[0]):
@@ -323,12 +323,9 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
             for d in qd.static(range(dim)):
                 base, w1d = stencil_fn(particle_positions[p, d] * inv_dx[d])
                 for o in qd.static(range(K)):
-                    i = base + o - SHIFT
-                    if qd.static(periodic):
-                        i = _apply_pbc(i, N[d])
-                        ok[d, o] = 1
-                    else:
-                        ok[d, o] = 0 <= i < N[d]
+                    i, valid = _brick_index(base + o - SHIFT, N[d], off[d], periodic
+                    )
+                    ok[d, o] = valid
                     idx[d, o] = i
                     wgt[d, o] = w1d[o]
 
@@ -337,35 +334,31 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
             if qd.static(dim == 1):
                 for ox in qd.static(range(K)):
                     if ok[0, ox]:
-                        x = idx[0, ox]
-                        w = wgt[0, ox] * w_particle
-                        qd.atomic_add(grid_weights[x], w)
-                        for f in range(F):
-                            qd.atomic_add(grid_fields[x, f], particle_fields[p, f] * w)
+                        _grid_add(
+                            grid_weights, grid_fields, particle_fields, dropped, p,
+                            qd.Vector([idx[0, ox]]), wgt[0, ox] * w_particle, dim,
+                        )
             elif qd.static(dim == 2):
                 for ox in qd.static(range(K)):
                     for oy in qd.static(range(K)):
                         if ok[0, ox] and ok[1, oy]:
-                            x, y = idx[0, ox], idx[1, oy]
-                            w = wgt[0, ox] * wgt[1, oy] * w_particle
-                            qd.atomic_add(grid_weights[x, y], w)
-                            for f in range(F):
-                                qd.atomic_add(
-                                    grid_fields[x, y, f], particle_fields[p, f] * w
-                                )
+                            _grid_add(
+                                grid_weights, grid_fields, particle_fields, dropped, p,
+                                qd.Vector([idx[0, ox], idx[1, oy]]),
+                                wgt[0, ox] * wgt[1, oy] * w_particle, dim,
+                            )
             else:
                 for ox in qd.static(range(K)):
                     for oy in qd.static(range(K)):
                         for oz in qd.static(range(K)):
                             if ok[0, ox] and ok[1, oy] and ok[2, oz]:
-                                x, y, z = idx[0, ox], idx[1, oy], idx[2, oz]
-                                w = wgt[0, ox] * wgt[1, oy] * wgt[2, oz] * w_particle
-                                qd.atomic_add(grid_weights[x, y, z], w)
-                                for f in range(F):
-                                    qd.atomic_add(
-                                        grid_fields[x, y, z, f],
-                                        particle_fields[p, f] * w,
-                                    )
+                                _grid_add(
+                                    grid_weights, grid_fields, particle_fields,
+                                    dropped, p,
+                                    qd.Vector([idx[0, ox], idx[1, oy], idx[2, oz]]),
+                                    wgt[0, ox] * wgt[1, oy] * wgt[2, oz] * w_particle,
+                                    dim,
+                                )
 
     return kernel
 
@@ -390,27 +383,39 @@ def _grid_add(
     grid_weights: qd.template(),
     grid_fields: qd.template(),
     quantities: qd.template(),
+    dropped: qd.template(),
     n,
     cell,
     w,
     dim: qd.template(),
 ):
-    """Add weight `w` of particle `n` (and its fields times `w`) to grid cell `cell`."""
-    F = grid_fields.shape[dim]
-    if qd.static(dim == 1):
-        qd.atomic_add(grid_weights[cell[0]], w)
-        for f in range(F):
-            qd.atomic_add(grid_fields[cell[0], f], quantities[n, f] * w)
-    elif qd.static(dim == 2):
-        qd.atomic_add(grid_weights[cell[0], cell[1]], w)
-        for f in range(F):
-            qd.atomic_add(grid_fields[cell[0], cell[1], f], quantities[n, f] * w)
+    """Add weight `w` of particle `n` (and its fields times `w`) to grid cell `cell`.
+
+    A cell outside the output grid is not written but counted in `dropped`:
+    the brick bounds computed on the host must contain every cell a particle
+    touches, so a nonzero count is an internal error.
+    """
+    inside = True
+    for d in qd.static(range(dim)):
+        inside = inside and 0 <= cell[d] < grid_weights.shape[d]
+    if not inside:
+        qd.atomic_add(dropped[0], 1)
     else:
-        qd.atomic_add(grid_weights[cell[0], cell[1], cell[2]], w)
-        for f in range(F):
-            qd.atomic_add(
-                grid_fields[cell[0], cell[1], cell[2], f], quantities[n, f] * w
-            )
+        F = grid_fields.shape[dim]
+        if qd.static(dim == 1):
+            qd.atomic_add(grid_weights[cell[0]], w)
+            for f in range(F):
+                qd.atomic_add(grid_fields[cell[0], f], quantities[n, f] * w)
+        elif qd.static(dim == 2):
+            qd.atomic_add(grid_weights[cell[0], cell[1]], w)
+            for f in range(F):
+                qd.atomic_add(grid_fields[cell[0], cell[1], f], quantities[n, f] * w)
+        else:
+            qd.atomic_add(grid_weights[cell[0], cell[1], cell[2]], w)
+            for f in range(F):
+                qd.atomic_add(
+                    grid_fields[cell[0], cell[1], cell[2], f], quantities[n, f] * w
+                )
 
 
 @qd.func
@@ -600,12 +605,14 @@ def _quadrature_cell_add(
     kernel_prefactor: qd.f32,
     cell_size,
     N,
+    off,
     wj: qd.f32,
     correction: qd.f32,
     n,
     grid_weights: qd.template(),
     grid_fields: qd.template(),
     quantities: qd.template(),
+    dropped: qd.template(),
 ):
     """Deposit the kernel mass of cell `a`, scaled by wj * correction."""
     integral = _cell_integral(
@@ -614,12 +621,12 @@ def _quadrature_cell_add(
     )
     cell = qd.Vector.zero(qd.i32, dim)
     for d in qd.static(range(dim)):
-        if qd.static(periodic):
-            cell[d] = _apply_pbc(a[d], N[d])
-        else:
-            cell[d] = a[d]
+        # a lies inside the (clipped) grid: always valid
+        c, _ok = _brick_index(a[d], N[d], off[d], periodic)
+        cell[d] = c
     _grid_add(
-        grid_weights, grid_fields, quantities, n, cell, wj * integral * correction, dim
+        grid_weights, grid_fields, quantities, dropped, n, cell,
+        wj * integral * correction, dim,
     )
 
 
@@ -639,20 +646,22 @@ def _quadrature_deposit(
     kernel_prefactor: qd.f32,
     cell_size,
     N,
+    off,
     wj: qd.f32,
     correction: qd.f32,
     n,
     grid_weights: qd.template(),
     grid_fields: qd.template(),
     quantities: qd.template(),
+    dropped: qd.template(),
 ):
     """Deposit every cell of the box `lo + [0, ext)`, weight wj * integral * correction."""
     if qd.static(dim == 1):
         for i in range(lo[0], lo[0] + ext[0]):
             _quadrature_cell_add(
                 evaluate_fn, quad_points, dim, covariant, periodic, qd.Vector([i]),
-                x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size, N, wj,
-                correction, n, grid_weights, grid_fields, quantities,
+                x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size, N, off,
+                wj, correction, n, grid_weights, grid_fields, quantities, dropped,
             )
     elif qd.static(dim == 2):
         for i in range(lo[0], lo[0] + ext[0]):
@@ -660,8 +669,8 @@ def _quadrature_deposit(
                 _quadrature_cell_add(
                     evaluate_fn, quad_points, dim, covariant, periodic,
                     qd.Vector([i, j]), x_cell, hsm_phys, E, ev, kernel_prefactor,
-                    cell_size, N, wj, correction, n, grid_weights, grid_fields,
-                    quantities,
+                    cell_size, N, off, wj, correction, n, grid_weights,
+                    grid_fields, quantities, dropped,
                 )
     else:
         for i in range(lo[0], lo[0] + ext[0]):
@@ -670,8 +679,8 @@ def _quadrature_deposit(
                     _quadrature_cell_add(
                         evaluate_fn, quad_points, dim, covariant, periodic,
                         qd.Vector([i, j, k]), x_cell, hsm_phys, E, ev,
-                        kernel_prefactor, cell_size, N, wj, correction, n,
-                        grid_weights, grid_fields, quantities,
+                        kernel_prefactor, cell_size, N, off, wj, correction,
+                        n, grid_weights, grid_fields, quantities, dropped,
                     )
 
 
@@ -682,48 +691,51 @@ def _deposit_sample_buffer(
     wj: qd.f32,
     n,
     N,
+    off,
     periodic: qd.template(),
     B: qd.template(),
     dim: qd.template(),
     grid_weights: qd.template(),
     grid_fields: qd.template(),
     quantities: qd.template(),
+    dropped: qd.template(),
 ):
     """Add a particle's per-cell sample sums `buf` (B**dim cells from `i0`)."""
     if qd.static(dim == 1):
         for a in range(B):
             v = buf[a]
             if v != 0.0:
-                ix, ok_x = _cell_index_from_int(i0[0] + a, N[0], periodic)
+                ix, ok_x = _brick_index(i0[0] + a, N[0], off[0], periodic)
                 if ok_x:
                     _grid_add(
-                        grid_weights, grid_fields, quantities, n, qd.Vector([ix]),
-                        wj * v, dim,
+                        grid_weights, grid_fields, quantities, dropped, n,
+                        qd.Vector([ix]), wj * v, dim,
                     )
     elif qd.static(dim == 2):
         for a in range(B):
-            ix, ok_x = _cell_index_from_int(i0[0] + a, N[0], periodic)
+            ix, ok_x = _brick_index(i0[0] + a, N[0], off[0], periodic)
             for b in range(B):
                 v = buf[a * B + b]
                 if v != 0.0:
-                    iy, ok_y = _cell_index_from_int(i0[1] + b, N[1], periodic)
+                    iy, ok_y = _brick_index(i0[1] + b, N[1], off[1], periodic)
                     if ok_x and ok_y:
                         _grid_add(
-                            grid_weights, grid_fields, quantities, n,
+                            grid_weights, grid_fields, quantities, dropped, n,
                             qd.Vector([ix, iy]), wj * v, dim,
                         )
     else:
         for a in range(B):
-            ix, ok_x = _cell_index_from_int(i0[0] + a, N[0], periodic)
+            ix, ok_x = _brick_index(i0[0] + a, N[0], off[0], periodic)
             for b in range(B):
-                iy, ok_y = _cell_index_from_int(i0[1] + b, N[1], periodic)
+                iy, ok_y = _brick_index(i0[1] + b, N[1], off[1], periodic)
                 for c in range(B):
                     v = buf[(a * B + b) * B + c]
                     if v != 0.0:
-                        iz, ok_z = _cell_index_from_int(i0[2] + c, N[2], periodic)
+                        iz, ok_z = _brick_index(i0[2] + c, N[2], off[2], periodic
+                        )
                         if ok_x and ok_y and ok_z:
                             _grid_add(
-                                grid_weights, grid_fields, quantities, n,
+                                grid_weights, grid_fields, quantities, dropped, n,
                                 qd.Vector([ix, iy, iz]), wj * v, dim,
                             )
 
@@ -745,15 +757,16 @@ def _separable(
     cell_size_inv: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     max_support: qd.f32,
     MAX_STENCIL: qd.template(),
-    fields: qd.types.ndarray(dtype=qd.f32),  # (*gridnums, F)
-    weights: qd.types.ndarray(dtype=qd.f32),  # gridnums
+    grid_spec: qd.types.ndarray(dtype=qd.i32, ndim=2),  # (2, D)
+    dropped: qd.types.ndarray(dtype=qd.i32, ndim=1),  # (1,)
+    fields: qd.types.ndarray(dtype=qd.f32),  # (*brick, F)
+    weights: qd.types.ndarray(dtype=qd.f32),  # brick
 ):
     """Tensor-product kernel, integrated exactly per cell and axis."""
     sig = sigma_fn(dim)
-    N = qd.Vector.zero(qd.i32, dim)
+    N, off = _load_grid_spec(grid_spec, dim)
     inv = qd.Vector.zero(qd.f32, dim)
     for d in qd.static(range(dim)):
-        N[d] = weights.shape[d]
         inv[d] = cell_size_inv[d]
 
     for n in range(positions.shape[0]):
@@ -810,11 +823,10 @@ def _separable(
             for d in qd.static(range(dim)):
                 if qd.static(d > 0):
                     w = w * wts[d, s[d]]
-                c = lo[d] + s[d]
-                if qd.static(periodic):
-                    c = _apply_pbc(c, N[d])
+                # lo + s lies inside the (clipped) grid: always valid
+                c, _ok = _brick_index(lo[d] + s[d], N[d], off[d], periodic)
                 cell[d] = c
-            _grid_add(weights, fields, quantities, n, cell, w, dim)
+            _grid_add(weights, fields, quantities, dropped, n, cell, w, dim)
             s = _next_offset(s, ext, dim)
 
 
@@ -841,8 +853,10 @@ def _isotropic(
     cell_size: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     cell_size_inv: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     max_support: qd.f32,
-    fields: qd.types.ndarray(dtype=qd.f32),  # (*gridnums, F)
-    weights: qd.types.ndarray(dtype=qd.f32),  # gridnums
+    grid_spec: qd.types.ndarray(dtype=qd.i32, ndim=2),  # (2, D)
+    dropped: qd.types.ndarray(dtype=qd.i32, ndim=1),  # (1,)
+    fields: qd.types.ndarray(dtype=qd.f32),  # (*brick, F)
+    weights: qd.types.ndarray(dtype=qd.f32),  # brick
 ):
     """Radial kernel W(|x - x_n| / h_n).
 
@@ -852,11 +866,10 @@ def _isotropic(
     particle's weight.
     """
     sig = sigma_fn(dim)
-    N = qd.Vector.zero(qd.i32, dim)
+    N, off = _load_grid_spec(grid_spec, dim)
     cs = qd.Vector.zero(qd.f32, dim)
     inv = qd.Vector.zero(qd.f32, dim)
     for d in qd.static(range(dim)):
-        N[d] = weights.shape[d]
         cs[d] = cell_size[d]
         inv[d] = cell_size_inv[d]
     no_axes = qd.Matrix.zero(qd.f32, dim, dim)  # unused by isotropic cells
@@ -907,7 +920,8 @@ def _isotropic(
                 if inside:
                     buf[idx] += sample_integrals[s]
             _deposit_sample_buffer(
-                buf, i0, wj, n, N, periodic, B, dim, weights, fields, quantities
+                buf, i0, wj, n, N, off, periodic, B, dim, weights, fields,
+                quantities, dropped,
             )
 
         elif eta < eta_crit:
@@ -917,14 +931,18 @@ def _isotropic(
                 valid = True
                 for d in qd.static(range(dim)):
                     x_sample = x_phys[d] + sample_coords[s, d] * hsm_phys
-                    c, ok = _cell_index_from_pos(x_sample, inv[d], N[d], periodic)
+                    c, ok = _brick_index(
+                        qd.floor(x_sample * inv[d], int), N[d], off[d],
+                        periodic,
+                    )
                     cell[d] = c
                     valid = valid and ok
                 if valid:
                     integral = sample_integrals[s]
                     if integral != 0.0:
                         _grid_add(
-                            weights, fields, quantities, n, cell, wj * integral, dim
+                            weights, fields, quantities, dropped, n, cell,
+                            wj * integral, dim,
                         )
 
         else:
@@ -948,8 +966,8 @@ def _isotropic(
             if total_integral > 0.0:
                 _quadrature_deposit(
                     evaluate_fn, quad_points, dim, False, periodic, lo, ext, x_cell,
-                    hsm_phys, no_axes, no_ev, kernel_prefactor, cs, N, wj,
-                    1.0 / total_integral, n, weights, fields, quantities,
+                    hsm_phys, no_axes, no_ev, kernel_prefactor, cs, N, off, wj,
+                    1.0 / total_integral, n, weights, fields, quantities, dropped,
                 )
 
 
@@ -977,8 +995,10 @@ def _covariant(
     cell_size: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     cell_size_inv: qd.types.ndarray(dtype=qd.f32, ndim=1),  # (D,)
     max_support: qd.f32,
-    fields: qd.types.ndarray(dtype=qd.f32),  # (*gridnums, F)
-    weights: qd.types.ndarray(dtype=qd.f32),  # gridnums
+    grid_spec: qd.types.ndarray(dtype=qd.i32, ndim=2),  # (2, D)
+    dropped: qd.types.ndarray(dtype=qd.i32, ndim=1),  # (1,)
+    fields: qd.types.ndarray(dtype=qd.f32),  # (*brick, F)
+    weights: qd.types.ndarray(dtype=qd.f32),  # brick
 ):
     """Ellipsoidal kernel W(|diag(ev)^-1 E^T (x - x_n)|).
 
@@ -992,11 +1012,10 @@ def _covariant(
     being dropped.
     """
     sig = sigma_fn(dim)
-    N = qd.Vector.zero(qd.i32, dim)
+    N, off = _load_grid_spec(grid_spec, dim)
     cs = qd.Vector.zero(qd.f32, dim)
     inv = qd.Vector.zero(qd.f32, dim)
     for d in qd.static(range(dim)):
-        N[d] = weights.shape[d]
         cs[d] = cell_size[d]
         inv[d] = cell_size_inv[d]
 
@@ -1094,7 +1113,8 @@ def _covariant(
                 if inside:
                     buf[idx] += sample_integrals[s]
             _deposit_sample_buffer(
-                buf, i0, wj, n, N, periodic, B, dim, weights, fields, quantities
+                buf, i0, wj, n, N, off, periodic, B, dim, weights, fields,
+                quantities, dropped,
             )
 
         elif use_samples:
@@ -1106,22 +1126,26 @@ def _covariant(
                     x_sample = x_phys[d]
                     for c in qd.static(range(dim)):
                         x_sample = x_sample + E[d, c] * (ev[c] * sample_coords[s, c])
-                    cd, ok = _cell_index_from_pos(x_sample, inv[d], N[d], periodic)
+                    cd, ok = _brick_index(
+                        qd.floor(x_sample * inv[d], int), N[d], off[d],
+                        periodic,
+                    )
                     cell[d] = cd
                     valid = valid and ok
                 if valid:
                     integral = sample_integrals[s]
                     if integral != 0.0:
                         _grid_add(
-                            weights, fields, quantities, n, cell, wj * integral, dim
+                            weights, fields, quantities, dropped, n, cell,
+                            wj * integral, dim,
                         )
 
         else:
             # per-cell quadrature, renormalised with the pass-1 total
             _quadrature_deposit(
                 evaluate_fn, quad_points, dim, True, periodic, lo, ext, x_cell, 0.0,
-                E, ev, kernel_prefactor, cs, N, wj, 1.0 / total_integral, n,
-                weights, fields, quantities,
+                E, ev, kernel_prefactor, cs, N, off, wj, 1.0 / total_integral,
+                n, weights, fields, quantities, dropped,
             )
 
 
@@ -1134,16 +1158,139 @@ _ADAPTIVE_KERNELS = {
     "covariant": _covariant,
 }
 
+# Extra cells on each side of a brick: the host bounds below round
+# differently from the kernels, so a particle's first or last cell can differ
+# by one between the two.
+_BRICK_MARGIN = 2
+
+
+def _largest_gap_cover(cells, n):
+    """Return ``(start, length)`` of the shortest periodic run holding `cells`.
+
+    `cells` are integers in ``[0, n)``; the run is the complement of the
+    largest run of absent cells.
+    """
+    present = np.flatnonzero(np.bincount(cells, minlength=n))
+    gaps = np.diff(np.append(present, present[0] + n)) - 1
+    k = int(np.argmax(gaps))
+    return int(present[(k + 1) % present.size]), n - int(gaps[k])
+
+
+def _axis_cover(g, below, above, n, periodic):
+    """Return ``(offset, length)`` of the cells touched along one axis.
+
+    `g` holds the particles' positions in cells; a particle touches cells
+    ``floor(g - below) ... floor(g + above)`` (`below` and `above` scalars or
+    per-particle arrays). Non-periodic covers are clipped to ``[0, n)``. On a
+    periodic axis the cover may run past the end and wrap around; when the
+    direct range is longer than half the axis (particles near both ends), the
+    largest gap between occupied cells is cut out instead.
+    """
+    first = int(np.floor(np.min(g - below))) - _BRICK_MARGIN
+    last = int(np.floor(np.max(g + above))) + _BRICK_MARGIN
+    if not periodic:
+        lo = min(max(first, 0), n)
+        return lo, max(min(last + 1, n) - lo, 0)
+    length = last - first + 1
+    if 2 * length > n:
+        start, span = _largest_gap_cover(np.floor(g).astype(np.int64) % n, n)
+        reach_below = int(np.ceil(np.max(below))) + _BRICK_MARGIN + 1
+        reach_above = int(np.ceil(np.max(above))) + _BRICK_MARGIN + 1
+        if span + reach_below + reach_above < length:
+            first, length = start - reach_below, span + reach_below + reach_above
+    if length >= n:
+        return 0, n
+    return first % n, length
+
+
+def _grid_spec(gridnums, periodic, positions=None, inv=None, reach=None):
+    """Return the ``(2, D)`` grid spec, the brick's offset and its shape.
+
+    Without `reach` the output grid is the full grid. Otherwise
+    ``reach(d)`` gives ``(below, above)``: how many cells (scalars or
+    per-particle arrays) the particles touch below and above their position
+    along axis d, and the output grid is the brick of touched cells (see
+    :func:`_axis_cover`). Grid spec rows: global grid size and brick offset
+    per axis.
+    """
+    gridnums = np.asarray(gridnums, dtype=np.int64)
+    lo = np.zeros(gridnums.size, dtype=np.int64)
+    shape = gridnums.copy()
+    if reach is not None:
+        if positions.shape[0] == 0:
+            shape[:] = 0
+        else:
+            for d in range(gridnums.size):
+                g = positions[:, d] * np.float32(inv[d])
+                below, above = reach(d)
+                lo[d], shape[d] = _axis_cover(g, below, above, int(gridnums[d]), periodic)
+    spec = np.stack([gridnums, lo]).astype(np.int32)
+    return spec, lo, tuple(int(n) for n in shape)
+
 
 @dataclass(slots=True)
 class KernelPreparation:
-    """A prepared adaptive deposition: call ``kernel(*args)``, read the grids."""
+    """A prepared deposition: call ``kernel(*args)``, read the grids."""
 
     kernel: Any
     args: tuple
-    grid_fields: np.ndarray  # (*gridnums, F), filled in place
-    grid_weights: np.ndarray  # gridnums, filled in place
+    grid_fields: np.ndarray  # (*brick, F), filled in place
+    grid_weights: np.ndarray  # brick, filled in place
+    offset: np.ndarray  # global index of the brick's first cell, (D,)
+    dropped: np.ndarray  # (1,) count of writes outside the brick
     sample_buffer: int | None = None  # isotropic / covariant only
+
+
+def _allocate(gridnums, periodic, F, positions, inv, reach):
+    """Grid spec, brick offset, zeroed brick grids and the dropped-write counter.
+
+    `reach` is None for the full grid (see :func:`_grid_spec`).
+    """
+    spec, lo, shape = _grid_spec(gridnums, periodic, positions, inv, reach)
+    grid_fields = np.zeros((*shape, F), dtype=np.float32)
+    grid_weights = np.zeros(shape, dtype=np.float32)
+    return spec, lo, grid_fields, grid_weights, np.zeros(1, dtype=np.int32)
+
+
+def _prepare_fixed(
+    particle_positions,
+    particle_fields,
+    particle_weights,
+    boxsizes,
+    gridnums,
+    periodic,
+    kernel_name,
+    brick,
+):
+    dim = particle_positions.shape[1]
+    try:
+        kernel = _FIXED_GRID_KERNELS[(kernel_name, dim)]
+    except KeyError:
+        raise ValueError(
+            f"Unsupported combination: kernel_name={kernel_name!r}, dim={dim}."
+        ) from None
+    _, K, SHIFT = _FIXED_STENCILS[kernel_name]
+    inv_dx = np.asarray(gridnums, dtype=np.float32) / boxsizes
+
+    def reach(d):  # cells floor(g) - SHIFT + [-1, K - 1]
+        return SHIFT + 1, K - 1 - SHIFT
+
+    spec, lo, grid_fields, grid_weights, dropped = _allocate(
+        gridnums, periodic, particle_fields.shape[1], particle_positions, inv_dx,
+        reach if brick else None,
+    )
+    args = (
+        bool(periodic),
+        particle_positions,
+        particle_fields,
+        particle_weights,
+        boxsizes,
+        spec,
+        dropped,
+        grid_fields,
+        grid_weights,
+    )
+    return KernelPreparation(kernel, args, grid_fields, grid_weights, lo, dropped)
 
 
 def _prepare_separable(
@@ -1154,6 +1301,7 @@ def _prepare_separable(
     gridnums,
     periodic,
     kernel_name,
+    brick,
     particle_hsml,  # (N, D) -- per-axis smoothing length
 ):
     DIM = particle_positions.shape[1]
@@ -1178,9 +1326,19 @@ def _prepare_separable(
         )
     )
 
-    F = particle_fields.shape[1]
-    grid_fields = np.zeros((*gridnums, F), dtype=np.float32)
-    grid_weights = np.zeros(gridnums, dtype=np.float32)
+    scale = 1.0
+    if brick and periodic and particle_hsml.shape[0]:
+        # the kernel's clamp: largest axis at most max_support
+        scale = np.minimum(1.0, max_support / np.maximum(particle_hsml.max(axis=1), 1e-30))
+
+    def reach(d):
+        half = support * (particle_hsml[:, d] * scale) * np.float32(cell_size_invs[d])
+        return half, half
+
+    spec, lo, grid_fields, grid_weights, dropped = _allocate(
+        gridnums, periodic, particle_fields.shape[1], particle_positions,
+        cell_size_invs, reach if brick else None,
+    )
 
     args = (
         kspec.F_1d,
@@ -1195,10 +1353,12 @@ def _prepare_separable(
         np.array(cell_size_invs, dtype=np.float32),
         max_support,
         max_stencil,
+        spec,
+        dropped,
         grid_fields,
         grid_weights,
     )
-    return KernelPreparation(_separable, args, grid_fields, grid_weights)
+    return KernelPreparation(_separable, args, grid_fields, grid_weights, lo, dropped)
 
 
 _QUADRATURE_TABLES = {
@@ -1206,6 +1366,36 @@ _QUADRATURE_TABLES = {
     2: QUADRATURE_POINTS_2D,
     3: QUADRATURE_POINTS_3D,
 }
+
+
+def _radial_reach(structure, smoothing_args, support, max_support, periodic, inv):
+    """``reach(d)`` for :func:`_grid_spec`: the support's half-extent in cells.
+
+    Sample points lie inside the support, so it bounds every branch.
+    """
+    if structure == "isotropic":
+        h = smoothing_args[0]
+        if periodic:
+            h = np.minimum(h, np.float32(max_support))
+
+        def reach(d):
+            half = support * h * np.float32(inv[d])
+            return half, half
+
+        return reach
+
+    eigvecs, eigvals = smoothing_args
+    eigvals = np.abs(eigvals)
+    if periodic and eigvals.shape[0]:  # the kernel's clamp on the largest axis
+        largest = eigvals.max(axis=1, keepdims=True)
+        eigvals = eigvals * np.minimum(1.0, max_support / np.maximum(largest, 1e-30))
+
+    def reach(d):  # axis d: sqrt(sum_c (E[d, c] ev[c])^2)
+        s2 = np.einsum("nc,nc->n", eigvecs[:, d, :] ** 2, eigvals**2)
+        half = support * np.sqrt(s2) * np.float32(inv[d])
+        return half, half
+
+    return reach
 
 
 def _prepare_radial(
@@ -1218,6 +1408,7 @@ def _prepare_radial(
     gridnums,
     periodic,
     kernel_name,
+    brick,
     integration_method,
     eta_crit,
 ):
@@ -1248,9 +1439,16 @@ def _prepare_radial(
     cell_size_invs = tuple(1.0 / c for c in cell_sizes)
     max_support = min(0.5 * boxsizes[d] / support for d in range(DIM))
 
-    F = particle_fields.shape[1]
-    grid_fields = np.zeros((*gridnums, F), dtype=np.float32)
-    grid_weights = np.zeros(gridnums, dtype=np.float32)
+    smoothing_args = tuple(as_f32(a) for a in smoothing_args)
+    reach = None
+    if brick:
+        reach = _radial_reach(
+            structure, smoothing_args, support, max_support, periodic, cell_size_invs
+        )
+    spec, lo, grid_fields, grid_weights, dropped = _allocate(
+        gridnums, periodic, particle_fields.shape[1], particle_positions,
+        cell_size_invs, reach,
+    )
 
     args = (
         kspec.evaluate,
@@ -1263,7 +1461,7 @@ def _prepare_radial(
         sample_buffer,
         particle_positions,
         particle_fields,
-        *(as_f32(a) for a in smoothing_args),
+        *smoothing_args,
         particle_weights,
         grid["coords"],
         grid["integrals"],
@@ -1271,11 +1469,13 @@ def _prepare_radial(
         np.array(cell_sizes, dtype=np.float32),
         np.array(cell_size_invs, dtype=np.float32),
         max_support,
+        spec,
+        dropped,
         grid_fields,
         grid_weights,
     )
     return KernelPreparation(
-        _ADAPTIVE_KERNELS[structure], args, grid_fields, grid_weights,
+        _ADAPTIVE_KERNELS[structure], args, grid_fields, grid_weights, lo, dropped,
         sample_buffer=int(sample_buffer),
     )
 
@@ -1308,6 +1508,7 @@ def deposit(
     # --- required by adaptive isotropic / covariant deposition ---
     integration_method="midpoint",
     eta_crit=4.0,
+    brick=False,
 ):
     """Deposit particle data onto a grid covering ``[0, boxsizes)``.
 
@@ -1340,66 +1541,30 @@ def deposit(
     eta_crit : float
         Kernel diameter in cells below which the sample table is used instead
         of cell quadrature (isotropic and covariant).
+    brick : bool, default False
+        Deposit onto the smallest box of cells (a brick) holding every cell
+        the particles touch, instead of the full grid, and also return the
+        brick's offset. Each cell value equals the full-grid value bit for
+        bit. On a periodic axis the brick may run past the end of the axis
+        and continue at its start (cell ``offset + i`` is global cell
+        ``(offset + i) % gridnum``).
 
     Returns
     -------
-    grid_fields : ndarray, shape (F, *gridnums)
-    grid_weights : ndarray, shape (*gridnums,)
+    grid_fields : ndarray, shape (F, *gridnums) or (F, *brick_shape)
+    grid_weights : ndarray, shape (*gridnums,) or (*brick_shape,)
+    offset : ndarray, shape (D,)
+        Only with ``brick=True``: global index of the brick's first cell.
 
     """
     particle_positions = as_f32(particle_positions)
     particle_fields = as_f32(particle_fields)
     particle_weights = as_f32(particle_weights)
     boxsizes = as_f32(boxsizes)
-    dim = particle_positions.shape[-1]
     check_index_limits(
         particle_fields=particle_fields,
         grid_fields=(*gridnums, particle_fields.shape[1]),
     )
-
-    if not adaptive:
-        check_fixed_grid_kernel(kernel_name, structure)
-        key = (kernel_name, dim)
-        try:
-            kernel = _FIXED_GRID_KERNELS[key]
-        except KeyError:
-            raise ValueError(
-                f"Unsupported combination: kernel_name={kernel_name!r}, dim={dim}."
-            ) from None
-
-        F = particle_fields.shape[1]
-        grid_fields = np.zeros(tuple(gridnums) + (F,), dtype=np.float32)
-        grid_weights = np.zeros(tuple(gridnums), dtype=np.float32)
-
-        kernel(
-            bool(periodic),
-            particle_positions,
-            particle_fields,
-            particle_weights,
-            boxsizes,
-            grid_fields,
-            grid_weights,
-        )
-        return np.moveaxis(grid_fields, -1, 0), grid_weights
-
-    if structure not in ADAPTIVE_STRUCTURES:
-        raise ValueError(
-            f"structure={structure!r} is not available for adaptive deposition. "
-            f"Available: {list(ADAPTIVE_STRUCTURES)}"
-        )
-
-    provided_kwargs = {
-        "particle_hsml": particle_hsml,
-        "particle_hmat_eigvecs": particle_hmat_eigvecs,
-        "particle_hmat_eigvals": particle_hmat_eigvals,
-    }
-    missing = [
-        name for name in _REQUIRED_KWARGS[structure] if provided_kwargs[name] is None
-    ]
-    if missing:
-        raise ValueError(
-            f"structure={structure!r} requires: {', '.join(missing)} (got None)."
-        )
 
     common = dict(
         particle_positions=particle_positions,
@@ -1409,23 +1574,52 @@ def deposit(
         gridnums=gridnums,
         periodic=periodic,
         kernel_name=kernel_name,
+        brick=brick,
     )
 
-    if structure == "separable":
-        prep = _prepare_separable(**common, particle_hsml=particle_hsml)
+    if not adaptive:
+        check_fixed_grid_kernel(kernel_name, structure)
+        prep = _prepare_fixed(**common)
     else:
-        smoothing_args = (
-            (particle_hsml,)
-            if structure == "isotropic"
-            else (particle_hmat_eigvecs, particle_hmat_eigvals)
-        )
-        prep = _prepare_radial(
-            structure,
-            smoothing_args,
-            **common,
-            integration_method=integration_method,
-            eta_crit=eta_crit,
-        )
+        if structure not in ADAPTIVE_STRUCTURES:
+            raise ValueError(
+                f"structure={structure!r} is not available for adaptive deposition. "
+                f"Available: {list(ADAPTIVE_STRUCTURES)}"
+            )
+        provided_kwargs = {
+            "particle_hsml": particle_hsml,
+            "particle_hmat_eigvecs": particle_hmat_eigvecs,
+            "particle_hmat_eigvals": particle_hmat_eigvals,
+        }
+        missing = [
+            name for name in _REQUIRED_KWARGS[structure] if provided_kwargs[name] is None
+        ]
+        if missing:
+            raise ValueError(
+                f"structure={structure!r} requires: {', '.join(missing)} (got None)."
+            )
+        if structure == "separable":
+            prep = _prepare_separable(**common, particle_hsml=particle_hsml)
+        else:
+            smoothing_args = (
+                (particle_hsml,)
+                if structure == "isotropic"
+                else (particle_hmat_eigvecs, particle_hmat_eigvals)
+            )
+            prep = _prepare_radial(
+                structure,
+                smoothing_args,
+                **common,
+                integration_method=integration_method,
+                eta_crit=eta_crit,
+            )
 
-    prep.kernel(*prep.args)
-    return np.moveaxis(prep.grid_fields, -1, 0), prep.grid_weights
+    if prep.grid_weights.size:
+        prep.kernel(*prep.args)
+        if prep.dropped[0]:
+            raise RuntimeError(
+                f"internal error: {int(prep.dropped[0])} deposits fell outside the "
+                "computed brick bounds"
+            )
+    grids = (np.moveaxis(prep.grid_fields, -1, 0), prep.grid_weights)
+    return (*grids, prep.offset) if brick else grids

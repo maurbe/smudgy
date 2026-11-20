@@ -79,6 +79,8 @@ def fake_backend(monkeypatch):
             grid_shape = tuple(int(g) for g in gridnums)
             fields_grid = np.ones((num_fields, *grid_shape), dtype=np.float32)
             weights_grid = np.ones(grid_shape, dtype=np.float32)
+            if kwargs.get("brick"):
+                return fields_grid, weights_grid, np.zeros(len(grid_shape), np.int64)
             return fields_grid, weights_grid
         if name == "project_2d":
             h = kwargs["h_tensor"]

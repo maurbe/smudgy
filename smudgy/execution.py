@@ -5,6 +5,8 @@ not limited by pickle's 2 GB payload size. Only small metadata goes through
 the pickle-based collectives (``comm.bcast``/``comm.gather``).
 """
 
+import itertools
+
 import numpy as np
 from mpi4py import MPI
 
@@ -87,6 +89,87 @@ def _reduce_sum(comm, local_result):
 def _reduce_sum_to_root(comm, local_result, root=0):
     """Sum each array of `local_result` over all ranks onto `root` (None elsewhere)."""
     return _apply_parts(lambda part: _sum_over_ranks(comm, part, root=root), local_result)
+
+
+def _brick_pieces(offset, shape, gridnums):
+    """Yield ``(brick slices, grid slices)`` placing a brick on the global grid.
+
+    The brick covers global cells ``(offset + [0, shape)) % gridnums`` per
+    axis: on a periodic axis it may run past the end and continue at the
+    start (it is never longer than the axis), so each axis splits into at most
+    two pieces. Non-periodic bricks lie inside the grid: one piece per axis.
+    """
+    per_axis = []
+    for first, length, n in zip(offset, shape, gridnums):
+        first, n = int(first), int(n)
+        pieces = []
+        start, stop = first, first + int(length)
+        while start < stop:
+            g = start % n
+            size = min(stop - start, n - g)
+            pieces.append((slice(start - first, start - first + size), slice(g, g + size)))
+            start += size
+        per_axis.append(pieces)
+    for combo in itertools.product(*per_axis):
+        yield tuple(c[0] for c in combo), tuple(c[1] for c in combo)
+
+
+def _chunks(flat):
+    """Consecutive pieces of a flat array, each small enough for one MPI call."""
+    for start in range(0, flat.size, _MAX_COUNT):
+        yield flat[start : start + _MAX_COUNT]
+
+
+def _sum_bricks(comm, bricks, offset, gridnums, root=0, to_all=False):
+    """Sum every rank's bricks into full grids on `root`.
+
+    `bricks` is a tuple of arrays of shape ``(*lead, *brick_shape)`` (grid axes
+    last), all placed at global cell `offset` (see :func:`_brick_pieces`).
+    `root` allocates the full ``(*lead, *gridnums)`` grids and adds the
+    bricks rank by rank, receiving one brick at a time. With ``to_all`` the
+    result is then broadcast to every rank; otherwise non-root ranks get
+    None for every grid.
+    """
+    rank, size = comm.Get_rank(), comm.Get_size()
+    gridnums = tuple(int(n) for n in gridnums)
+    dim = len(gridnums)
+    results = []
+    for brick in bricks:
+        # send the contiguous buffer behind the array without copying it;
+        # it is either the array itself or its channels-last base
+        brick, buf = _writable_contiguous(np.asarray(brick))
+        channels_last = buf is not brick
+        headers = comm.gather((np.asarray(offset), brick.shape, channels_last), root=root)
+
+        full = None
+        if rank == root:
+            lead = brick.shape[: brick.ndim - dim]
+            full = np.zeros((*lead, *gridnums), dtype=brick.dtype)
+            for r, (r_offset, r_shape, r_last) in enumerate(headers):
+                if r == root:
+                    data = brick
+                else:
+                    if not np.prod(r_shape, dtype=np.int64):
+                        continue
+                    recv_shape = (*r_shape[1:], r_shape[0]) if r_last else r_shape
+                    received = np.empty(recv_shape, dtype=brick.dtype)
+                    for chunk in _chunks(received.reshape(-1)):
+                        comm.Recv(chunk, source=r)
+                    data = np.moveaxis(received, -1, 0) if r_last else received
+                for brick_sl, grid_sl in _brick_pieces(r_offset, r_shape[len(lead):], gridnums):
+                    full[(Ellipsis, *grid_sl)] += data[(Ellipsis, *brick_sl)]
+        elif buf.size:
+            for chunk in _chunks(buf.reshape(-1)):
+                comm.Send(chunk, dest=root)
+
+        if to_all and size > 1:
+            shape = comm.bcast(full.shape if rank == root else None, root=root)
+            if rank != root:
+                full = np.empty(shape, dtype=brick.dtype)
+            for chunk in _chunks(full.reshape(-1)):
+                comm.Bcast(chunk, root=root)
+        results.append(full)
+    return tuple(results)
 
 
 # =============================================================================
