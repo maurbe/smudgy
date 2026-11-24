@@ -174,12 +174,88 @@ def _transpose_to_index(
     return code
 
 
+def _quadrants_running() -> bool:
+    """Whether smudgy's Quadrants runtime is initialized in this process."""
+    try:
+        from .backend import quadrants as qd_backend
+    except ImportError:
+        return False
+    return qd_backend._initialized
+
+
+def _use_quadrants(backend: str | None) -> bool:
+    """Resolve the `backend` argument of the Hilbert helpers.
+
+    ``"numpy"``: the numpy reference. ``"quadrants"``: Quadrants kernels (the
+    runtime must be initialized). None: Quadrants if its runtime is running
+    (e.g. a :class:`~smudgy.PointCloud` with the default backend), else numpy.
+    Both give identical results.
+    """
+    if backend == "numpy":
+        return False
+    if backend == "quadrants":
+        return True
+    if backend is None:
+        return _quadrants_running()
+    raise ValueError(f"backend must be 'numpy', 'quadrants' or None, got {backend!r}")
+
+
+def stable_argsort(codes: npt.NDArray[np.uint64]) -> npt.NDArray[np.int64]:
+    """``np.argsort(codes, kind="stable")``, computed 2-3x faster.
+
+    numpy's stable sort of 64-bit integers is a merge sort; its default
+    introsort is much faster but leaves equal keys in arbitrary order. Equal
+    keys (particles in the same Hilbert cell) are rare, so sort unstably and
+    then restore the input order within each run of equal keys only.
+    """
+    order = np.argsort(codes)
+    if order.size < 2:
+        return order
+    sorted_codes = codes[order]
+    dup = sorted_codes[1:] == sorted_codes[:-1]
+    if dup.any():
+        in_run = np.zeros(order.size, dtype=bool)
+        in_run[1:] |= dup
+        in_run[:-1] |= dup
+        idx = np.flatnonzero(in_run)
+        run_id = np.cumsum(np.concatenate(([True], ~dup)))[idx]
+        sub = order[idx]
+        order[idx] = sub[np.lexsort((sub, run_id))]
+    return order
+
+
+def hilbert_argsort(
+    codes: npt.NDArray[np.uint64], backend: str | None = None
+) -> npt.NDArray[np.int64]:
+    """Stable argsort of Hilbert keys (Quadrants radix sort or numpy).
+
+    Parameters
+    ----------
+    codes : np.ndarray
+        Hilbert keys, shape (N,), dtype uint64.
+    backend : {"numpy", "quadrants"} or None, default None
+        See :func:`hilbert_encode`. On archs without Quadrants' radix sort
+        (CPU) numpy sorts anyway.
+
+    Returns
+    -------
+    np.ndarray
+        Permutation sorting `codes` stably, shape (N,).
+    """
+    if _use_quadrants(backend):
+        from .backend.quadrants.hilbert import argsort_keys
+
+        return argsort_keys(codes)
+    return stable_argsort(codes)
+
+
 def hilbert_encode(
     positions: FloatArray,
     domain_min: FloatArray,
     domain_max: FloatArray,
     periodic: bool = False,
     bits_per_dim: int | None = None,
+    backend: str | None = None,
 ) -> npt.NDArray[np.uint64]:
     """Compute Hilbert-curve keys of positions (Skilling 2004).
 
@@ -194,6 +270,12 @@ def hilbert_encode(
     bits_per_dim : int, optional
         Quantization depth per axis. Defaults to the largest value fitting into
         64 bits (64, 32 and 21 for D = 1, 2, 3).
+    backend : {"numpy", "quadrants"} or None, default None
+        Where the keys of 2D/3D points are computed: the vectorized numpy
+        reference, or one Quadrants thread per point (its runtime must be
+        initialized). None picks Quadrants if its runtime is running. The
+        keys are identical either way; the quantization always runs in
+        numpy (float64).
 
     Returns
     -------
@@ -212,6 +294,15 @@ def hilbert_encode(
     if dim == 1:
         return coords[0]
 
+    if _use_quadrants(backend) and bits_per_dim <= 32:
+        from .backend.quadrants.hilbert import hilbert_keys
+
+        coords_u32 = np.empty((positions.shape[0], dim), dtype=np.uint32)
+        for i, c in enumerate(coords):
+            coords_u32[:, i] = c
+        del coords
+        return hilbert_keys(coords_u32, bits_per_dim)
+
     transpose = _axes_to_hilbert_transpose(coords, bits_per_dim)
     return _transpose_to_index(transpose, bits_per_dim)
 
@@ -224,6 +315,7 @@ def hilbert_partition_and_scatter(
     domain_max: FloatArray,
     periodic: bool = False,
     root: int = 0,
+    backend: str | None = None,
 ) -> DecompositionInfo:
     """Sort particles along a Hilbert curve and distribute count-balanced chunks.
 
@@ -241,6 +333,10 @@ def hilbert_partition_and_scatter(
         Whether the domain is periodic.
     root : int, default 0
         Rank holding the input arrays.
+    backend : {"numpy", "quadrants"} or None, default None
+        Where `root` computes and sorts the Hilbert keys; see
+        :func:`hilbert_encode` and :func:`hilbert_argsort`. Same partition
+        either way.
 
     Returns
     -------
@@ -270,8 +366,10 @@ def hilbert_partition_and_scatter(
 
     if rank == root:
         n = positions.shape[0]
-        codes = hilbert_encode(positions, domain_min, domain_max, periodic=periodic)
-        order = np.argsort(codes, kind="stable")
+        codes = hilbert_encode(
+            positions, domain_min, domain_max, periodic=periodic, backend=backend
+        )
+        order = hilbert_argsort(codes, backend=backend)
         counts = execution._balanced_counts(n, size)
         positions_sorted = np.ascontiguousarray(positions[order])
         weights_sorted = np.ascontiguousarray(weights[order])
@@ -336,6 +434,7 @@ def route_query_positions(
     query_positions: FloatArray | None,
     periodic: bool = False,
     root: int = 0,
+    backend: str | None = None,
 ) -> QueryRouting:
     """Distribute query positions to ranks using the particle partition.
 
@@ -351,6 +450,8 @@ def route_query_positions(
         Whether the domain is periodic.
     root : int, default 0
         Rank holding the query positions.
+    backend : {"numpy", "quadrants"} or None, default None
+        Where `root` computes the Hilbert keys; see :func:`hilbert_encode`.
 
     Returns
     -------
@@ -376,6 +477,7 @@ def route_query_positions(
             decomposition.domain_min,
             decomposition.domain_max,
             periodic=periodic,
+            backend=backend,
         )
         owning_rank = np.clip(
             np.searchsorted(decomposition.boundary_codes, codes, side="right") - 1,
