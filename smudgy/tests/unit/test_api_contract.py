@@ -31,7 +31,8 @@ def _cloud(dim=2, periodic=True, backend="quadrants", seed=0):
 def _ready(dim=2, backend="quadrants", periodic=True):
     """Cloud with isotropic and covariant smoothing and densities."""
     pc = _cloud(dim, periodic, backend).global_setup(
-        num_neighbors=12, kernel_name="cubic_spline")
+        num_neighbors=12, kernel_name="cubic_spline"
+    )
     for structure in ("isotropic", "covariant"):
         pc.compute_smoothing(structure=structure)
     for structure in ("isotropic", "covariant"):
@@ -50,8 +51,13 @@ def test_init_combinations(dim, weights, boxsize, backend):
     rng = np.random.default_rng(0)
     w = rng.uniform(size=N) if weights else None
     box = [1.0 + d for d in range(dim)] if boxsize == "per-axis" else boxsize
-    pc = PointCloud(rng.uniform(0, 1, (N, dim)), weights=w, boxsize=box,
-                    backend=backend, verbose=False)
+    pc = PointCloud(
+        rng.uniform(0, 1, (N, dim)),
+        weights=w,
+        boxsize=box,
+        backend=backend,
+        verbose=False,
+    )
     assert pc.positions.shape == (N, dim) and pc.weights.shape == (N,)
     assert pc.periodic == (box is not None)
 
@@ -149,9 +155,11 @@ def test_interpolate_field_forms():
     pc = _ready()
     ref = pc.interpolate(["s", "v"], structure="isotropic")
     np.testing.assert_array_equal(
-        pc.interpolate([pc.s, "v"], structure="isotropic"), ref)
+        pc.interpolate([pc.s, "v"], structure="isotropic"), ref
+    )
     np.testing.assert_array_equal(
-        pc.interpolate(np.column_stack([pc.s, pc.v]), structure="isotropic"), ref)
+        pc.interpolate(np.column_stack([pc.s, pc.v]), structure="isotropic"), ref
+    )
 
 
 def test_interpolate_invalid():
@@ -183,8 +191,15 @@ def test_interpolate_invalid():
 def test_deposit_fixed(backend, dim, kernel, periodic):
     pc = _cloud(dim, periodic, backend)
     ext = None if periodic else [[0.0, 1.0]] * dim
-    f, w = pc.deposit("s", averaged=False, gridnums=8, extent=ext, adaptive=False,
-                      kernel_name=kernel, return_weights=True)
+    f, w = pc.deposit(
+        "s",
+        averaged=False,
+        gridnums=8,
+        extent=ext,
+        adaptive=False,
+        kernel_name=kernel,
+        return_weights=True,
+    )
     assert f.shape == (1,) + (8,) * dim and w.shape == (8,) * dim
 
 
@@ -192,14 +207,25 @@ def test_deposit_fixed(backend, dim, kernel, periodic):
 @pytest.mark.parametrize(
     "structure,kernel",
     [("separable", k) for k in SEPARABLE_KERNELS]
-    + [(s, k) for s in ("isotropic", "covariant") for k in ("tophat", "cubic_spline", "wendland_c6")],
+    + [
+        (s, k)
+        for s in ("isotropic", "covariant")
+        for k in ("tophat", "cubic_spline", "wendland_c6")
+    ],
 )
 @pytest.mark.parametrize("periodic", [True, False])
 def test_deposit_adaptive(dim, structure, kernel, periodic):
     pc = _ready(dim, periodic=periodic)
     ext = None if periodic else [[0.0, 1.0]] * dim
-    f, w = pc.deposit(["s", "v"], averaged=[True, False], gridnums=8, extent=ext,
-                      structure=structure, kernel_name=kernel, return_weights=True)
+    f, w = pc.deposit(
+        ["s", "v"],
+        averaged=[True, False],
+        gridnums=8,
+        extent=ext,
+        structure=structure,
+        kernel_name=kernel,
+        return_weights=True,
+    )
     assert f.shape == (1 + dim,) + (8,) * dim and w.shape == (8,) * dim
     assert np.isfinite(f).all()
 
@@ -215,15 +241,22 @@ def test_deposit_adaptive(dim, structure, kernel, periodic):
 )
 def test_deposit_plane_projection(kw):
     pc = _ready(dim=3)
-    grid = pc.deposit("s", averaged=False, gridnums=(8, 6), plane_projection=[2, 0], **kw)
+    grid = pc.deposit(
+        "s", averaged=False, gridnums=(8, 6), plane_projection=[2, 0], **kw
+    )
     assert grid.shape == (1, 8, 6)
 
 
 @pytest.mark.parametrize("method", ["midpoint", "trapezoidal", "simpson"])
 def test_deposit_integration_methods(method):
     pc = _ready()
-    pc.deposit("s", averaged=False, gridnums=8, structure="isotropic",
-               integration_method=method)
+    pc.deposit(
+        "s",
+        averaged=False,
+        gridnums=8,
+        structure="isotropic",
+        integration_method=method,
+    )
 
 
 def test_deposit_output_forms():
@@ -277,8 +310,9 @@ def test_deposit_requirements():
     with pytest.raises(ValueError):  # neither boxsize nor extent
         pc.deposit("s", averaged=False, gridnums=8, adaptive=False, kernel_name="cic")
     with pytest.raises(AttributeError):  # no smoothing yet
-        pc.deposit("s", averaged=False, gridnums=8, extent=[[0, 1]] * 2,
-                   structure="isotropic")
+        pc.deposit(
+            "s", averaged=False, gridnums=8, extent=[[0, 1]] * 2, structure="isotropic"
+        )
 
 
 # =============================================================================

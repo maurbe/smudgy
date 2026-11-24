@@ -57,24 +57,37 @@ class TestBoxesOverlap:
         )
 
     def test_multidim(self):
-        assert _boxes_overlap(
-            np.array([0.0, 0.0]), np.array([1.0, 1.0]),
-            np.array([0.5, 5.0]), np.array([1.5, 6.0]),
-        ) is False  # overlaps on x, disjoint on y -> no overlap overall
+        assert (
+            _boxes_overlap(
+                np.array([0.0, 0.0]),
+                np.array([1.0, 1.0]),
+                np.array([0.5, 5.0]),
+                np.array([1.5, 6.0]),
+            )
+            is False
+        )  # overlaps on x, disjoint on y -> no overlap overall
 
 
 class TestOverlapShifts:
     def test_non_periodic_reduces_to_single_direct_check(self):
         shifts = _shift_vectors(1, periodic=False)
         hits = _overlap_shifts(
-            np.array([0.0]), np.array([1.0]), np.array([5.0]), np.array([6.0]),
-            None, shifts,
+            np.array([0.0]),
+            np.array([1.0]),
+            np.array([5.0]),
+            np.array([6.0]),
+            None,
+            shifts,
         )
         assert hits == []
 
         hits = _overlap_shifts(
-            np.array([0.0]), np.array([1.0]), np.array([0.5]), np.array([1.5]),
-            None, shifts,
+            np.array([0.0]),
+            np.array([1.0]),
+            np.array([0.5]),
+            np.array([1.5]),
+            None,
+            shifts,
         )
         assert len(hits) == 1
         assert np.all(hits[0] == 0)
@@ -91,7 +104,9 @@ class TestOverlapShifts:
         # sanity: no overlap without shifting
         assert not _boxes_overlap(query_min, query_max, target_min, target_max)
 
-        hits = _overlap_shifts(query_min, query_max, target_min, target_max, boxsize, shifts)
+        hits = _overlap_shifts(
+            query_min, query_max, target_min, target_max, boxsize, shifts
+        )
         assert len(hits) >= 1
         assert any(s[0] == -1 for s in hits)
 
@@ -99,8 +114,12 @@ class TestOverlapShifts:
         boxsize = np.array([10.0])
         shifts = _shift_vectors(1, periodic=True)
         hits = _overlap_shifts(
-            np.array([4.0]), np.array([5.0]), np.array([1.0]), np.array([2.0]),
-            boxsize, shifts,
+            np.array([4.0]),
+            np.array([5.0]),
+            np.array([1.0]),
+            np.array([2.0]),
+            boxsize,
+            shifts,
         )
         assert hits == []
 
@@ -110,20 +129,31 @@ class TestInitialRadius:
         # 1D unit interval, 10 particles -> volume=1, density=10,
         # unit-ball-volume(1D)=2 -> r_k = (num_neighbors / (10*2))**1
         r = _initial_radius(
-            n_local=10, local_min=np.array([0.0]), local_max=np.array([1.0]),
-            num_neighbors=4, dim=1,
-            domain_min=np.array([0.0]), domain_max=np.array([1.0]),
-            boxsize=None, periodic=False, safety_factor=1.0,
+            n_local=10,
+            local_min=np.array([0.0]),
+            local_max=np.array([1.0]),
+            num_neighbors=4,
+            dim=1,
+            domain_min=np.array([0.0]),
+            domain_max=np.array([1.0]),
+            boxsize=None,
+            periodic=False,
+            safety_factor=1.0,
         )
         expected = 4 / (10 * 2.0)
         assert r == pytest.approx(expected)
 
     def test_safety_factor_scales_linearly(self):
         kwargs = dict(
-            n_local=10, local_min=np.array([0.0]), local_max=np.array([1.0]),
-            num_neighbors=4, dim=1,
-            domain_min=np.array([0.0]), domain_max=np.array([1.0]),
-            boxsize=None, periodic=False,
+            n_local=10,
+            local_min=np.array([0.0]),
+            local_max=np.array([1.0]),
+            num_neighbors=4,
+            dim=1,
+            domain_min=np.array([0.0]),
+            domain_max=np.array([1.0]),
+            boxsize=None,
+            periodic=False,
         )
         r1 = _initial_radius(safety_factor=1.0, **kwargs)
         r2 = _initial_radius(safety_factor=2.0, **kwargs)
@@ -132,20 +162,30 @@ class TestInitialRadius:
     @pytest.mark.parametrize("n_local", [0, 1])
     def test_fallback_for_too_few_local_particles(self, n_local):
         r = _initial_radius(
-            n_local=n_local, local_min=np.zeros(3), local_max=np.zeros(3),
-            num_neighbors=8, dim=3,
-            domain_min=np.zeros(3), domain_max=np.array([4.0, 4.0, 4.0]),
-            boxsize=None, periodic=False,
+            n_local=n_local,
+            local_min=np.zeros(3),
+            local_max=np.zeros(3),
+            num_neighbors=8,
+            dim=3,
+            domain_min=np.zeros(3),
+            domain_max=np.array([4.0, 4.0, 4.0]),
+            boxsize=None,
+            periodic=False,
         )
         assert np.isfinite(r)
         assert r > 0
 
     def test_periodic_fallback_uses_boxsize(self):
         r = _initial_radius(
-            n_local=0, local_min=np.zeros(2), local_max=np.zeros(2),
-            num_neighbors=8, dim=2,
-            domain_min=np.zeros(2), domain_max=np.array([1.0, 1.0]),
-            boxsize=np.array([2.0, 2.0]), periodic=True,
+            n_local=0,
+            local_min=np.zeros(2),
+            local_max=np.zeros(2),
+            num_neighbors=8,
+            dim=2,
+            domain_min=np.zeros(2),
+            domain_max=np.array([1.0, 1.0]),
+            boxsize=np.array([2.0, 2.0]),
+            periodic=True,
         )
         assert r == pytest.approx(2.0 / 4.0)
 

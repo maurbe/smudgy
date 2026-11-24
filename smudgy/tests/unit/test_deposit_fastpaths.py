@@ -18,7 +18,9 @@ def _cloud(dim, n=2000, boxsize=1.0, backend="quadrants"):
     rng = np.random.default_rng(SEED)
     pos = rng.uniform(0.0, 1.0, size=(n, dim))
     w = rng.uniform(0.5, 1.5, size=n)
-    pc = PointCloud(positions=pos, weights=w, boxsize=boxsize, backend=backend, verbose=False)
+    pc = PointCloud(
+        positions=pos, weights=w, boxsize=boxsize, backend=backend, verbose=False
+    )
     return pc, pos, w
 
 
@@ -38,7 +40,9 @@ def test_fields_none_is_weights_grid(backend, dim, kernel_name):
 def test_fields_none_rejects_averaged():
     pc, _, _ = _cloud(2)
     with pytest.raises(ValueError):
-        pc.deposit(fields=None, averaged=True, gridnums=8, adaptive=False, kernel_name="cic")
+        pc.deposit(
+            fields=None, averaged=True, gridnums=8, adaptive=False, kernel_name="cic"
+        )
 
 
 @pytest.mark.parametrize("structure", ["separable", "isotropic", "covariant"])
@@ -61,14 +65,28 @@ def test_extent_selects_inside_particles(dim, kernel_name):
     pc, pos, w = _cloud(dim)
     lo, hi = 0.2, 0.7
     extent = [[lo, hi]] * dim
-    fg, wg = pc.deposit(fields=w, averaged=False, gridnums=10, extent=extent, adaptive=False,
-                        kernel_name=kernel_name, return_weights=True)
+    fg, wg = pc.deposit(
+        fields=w,
+        averaged=False,
+        gridnums=10,
+        extent=extent,
+        adaptive=False,
+        kernel_name=kernel_name,
+        return_weights=True,
+    )
 
     p32 = pc.decomposition.local_positions
     inside = np.all((p32 >= lo) & (p32 <= hi), axis=1)
-    ref_f, ref_w = qdep.deposit(p32[inside] - np.float32(lo), w[inside, None], w[inside],
-                                np.full(dim, hi - lo, np.float32), [10] * dim, adaptive=False,
-                                kernel_name=kernel_name, periodic=False)
+    ref_f, ref_w = qdep.deposit(
+        p32[inside] - np.float32(lo),
+        w[inside, None],
+        w[inside],
+        np.full(dim, hi - lo, np.float32),
+        [10] * dim,
+        adaptive=False,
+        kernel_name=kernel_name,
+        periodic=False,
+    )
     np.testing.assert_allclose(wg, ref_w, rtol=1e-5, atol=1e-6)
     np.testing.assert_allclose(fg, ref_f, rtol=1e-5, atol=1e-6)
 
@@ -78,8 +96,14 @@ def test_extent_selects_inside_particles(dim, kernel_name):
 def test_extent_ignores_boxsize(backend, extent):
     """An explicit extent gives the same non-periodic grid whether the cloud
     has a periodic boxsize or none (even when the extent is the full box)."""
-    kw = dict(fields=None, averaged=False, gridnums=12, extent=extent, adaptive=False,
-              kernel_name="tsc")
+    kw = dict(
+        fields=None,
+        averaged=False,
+        gridnums=12,
+        extent=extent,
+        adaptive=False,
+        kernel_name="tsc",
+    )
     pc_box, _, _ = _cloud(2, boxsize=1.0, backend=backend)
     pc_free, _, _ = _cloud(2, boxsize=None, backend=backend)
     # quadrants: float32 atomic summation order differs (Hilbert order
@@ -91,8 +115,14 @@ def test_extent_ignores_boxsize(backend, extent):
 def test_extent_validation(extent):
     pc, _, _ = _cloud(2)
     with pytest.raises(ValueError):
-        pc.deposit(fields=None, averaged=False, gridnums=8, extent=extent, adaptive=False,
-                   kernel_name="cic")
+        pc.deposit(
+            fields=None,
+            averaged=False,
+            gridnums=8,
+            extent=extent,
+            adaptive=False,
+            kernel_name="cic",
+        )
 
 
 @pytest.mark.parametrize("structure", ["isotropic", "covariant"])
@@ -114,9 +144,7 @@ def test_sample_buffer_matches_direct(structure, dim, periodic):
     else:
         vecs = np.linalg.qr(rng.normal(size=(n, dim, dim)))[0].astype(np.float32)
         vals = (h[:, None] * rng.uniform(0.3, 1.0, (n, dim))).astype(np.float32)
-        prep = qdep._prepare_radial(
-            "covariant", (vecs, vals), *common, "midpoint", 4.0
-        )
+        prep = qdep._prepare_radial("covariant", (vecs, vals), *common, "midpoint", 4.0)
     assert prep.sample_buffer > 1
 
     prep.kernel(*prep.args)
@@ -135,7 +163,9 @@ def test_sample_buffer_matches_direct(structure, dim, periodic):
     assert buffered[0].sum() == pytest.approx(prep.grid_weights.sum(), rel=1e-5)
 
 
-@pytest.mark.parametrize("kernel_name", ["cubic_spline", "wendland_c4", "gaussian", "tophat"])
+@pytest.mark.parametrize(
+    "kernel_name", ["cubic_spline", "wendland_c4", "gaussian", "tophat"]
+)
 @pytest.mark.parametrize("method", ["midpoint", "trapezoidal", "simpson"])
 @pytest.mark.parametrize("periodic", [True, False])
 def test_covariant_1d_equals_isotropic_1d(kernel_name, method, periodic):
@@ -150,11 +180,26 @@ def test_covariant_1d_equals_isotropic_1d(kernel_name, method, periodic):
     box = np.ones(1, np.float32)
     h = (rng.uniform(0.2, 8.0, n) / g / 2).astype(np.float32)  # both branches
     sign = rng.choice([-1.0, 1.0], n).astype(np.float32)
-    kw = dict(adaptive=True, kernel_name=kernel_name, periodic=periodic, integration_method=method)
-    fi, wi = qdep.deposit(pos, fld, w, box, (g,), structure="isotropic", particle_hsml=h, **kw)
-    fc, wc = qdep.deposit(pos, fld, w, box, (g,), structure="covariant",
-                          particle_hmat_eigvecs=sign[:, None, None],
-                          particle_hmat_eigvals=h[:, None], **kw)
+    kw = dict(
+        adaptive=True,
+        kernel_name=kernel_name,
+        periodic=periodic,
+        integration_method=method,
+    )
+    fi, wi = qdep.deposit(
+        pos, fld, w, box, (g,), structure="isotropic", particle_hsml=h, **kw
+    )
+    fc, wc = qdep.deposit(
+        pos,
+        fld,
+        w,
+        box,
+        (g,),
+        structure="covariant",
+        particle_hmat_eigvecs=sign[:, None, None],
+        particle_hmat_eigvals=h[:, None],
+        **kw,
+    )
     np.testing.assert_allclose(wc, wi, rtol=1e-5, atol=1e-6 * wi.max())
     np.testing.assert_allclose(fc, fi, rtol=1e-5, atol=1e-6 * np.abs(fi).max())
 
@@ -169,6 +214,13 @@ def test_index_limit_guard():
         check_index_limits(grid=(2**11, 2**11, 2**10))
     pos = np.zeros((4, 3), np.float32)
     with pytest.raises(ValueError, match="int32 indexing limit"):
-        qdep.deposit(pos, np.zeros((4, 1), np.float32), np.ones(4, np.float32),
-                     np.ones(3, np.float32), [2048, 2048, 1024], adaptive=False,
-                     kernel_name="cic", periodic=True)
+        qdep.deposit(
+            pos,
+            np.zeros((4, 1), np.float32),
+            np.ones(4, np.float32),
+            np.ones(3, np.float32),
+            [2048, 2048, 1024],
+            adaptive=False,
+            kernel_name="cic",
+            periodic=True,
+        )

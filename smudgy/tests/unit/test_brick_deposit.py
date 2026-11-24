@@ -31,7 +31,11 @@ def _particles(rng, n, dim, where):
 def _smoothing(rng, n, dim, structure, scale):
     h = (scale * rng.uniform(0.3, 1.5, n)).astype(np.float32)
     if structure == "separable":
-        return dict(particle_hsml=(h[:, None] * rng.uniform(0.5, 1.5, (n, dim))).astype(np.float32))
+        return dict(
+            particle_hsml=(h[:, None] * rng.uniform(0.5, 1.5, (n, dim))).astype(
+                np.float32
+            )
+        )
     if structure == "isotropic":
         return dict(particle_hsml=h)
     vecs = np.linalg.qr(rng.normal(size=(n, dim, dim)))[0].astype(np.float32)
@@ -40,10 +44,16 @@ def _smoothing(rng, n, dim, structure, scale):
 
 
 METHODS = [
-    ("cic", None), ("tsc", None), ("bspline5", None), ("bspline6", None),
-    ("tsc", "separable"), ("gaussian", "separable"),
-    ("cubic_spline", "isotropic"), ("wendland_c2", "isotropic"),
-    ("cubic_spline", "covariant"), ("gaussian", "covariant"),
+    ("cic", None),
+    ("tsc", None),
+    ("bspline5", None),
+    ("bspline6", None),
+    ("tsc", "separable"),
+    ("gaussian", "separable"),
+    ("cubic_spline", "isotropic"),
+    ("wendland_c2", "isotropic"),
+    ("cubic_spline", "covariant"),
+    ("gaussian", "covariant"),
 ]
 
 
@@ -60,8 +70,12 @@ def test_brick_equals_full_grid(kernel_name, structure, dim, periodic, where, sc
     pos = _particles(rng, n, dim, where)
     fields = rng.random((n, 2), dtype=np.float32)
     weights = rng.uniform(0.5, 1.5, n).astype(np.float32)
-    kw = dict(adaptive=structure is not None, kernel_name=kernel_name,
-              structure=structure, periodic=periodic)
+    kw = dict(
+        adaptive=structure is not None,
+        kernel_name=kernel_name,
+        structure=structure,
+        periodic=periodic,
+    )
     if structure is not None:
         kw.update(_smoothing(rng, n, dim, structure, scale))
     args = (pos, fields, weights, np.ones(dim, np.float32), gridnums)
@@ -81,9 +95,15 @@ def test_corner_brick_wraps_around():
     rng = np.random.default_rng(1)
     pos = _particles(rng, 300, 2, "corner")
     *bricks, offset = qdep.deposit(
-        pos, np.zeros((300, 0), np.float32), np.ones(300, np.float32),
-        np.ones(2, np.float32), (64, 64), adaptive=False, kernel_name="cic",
-        periodic=True, brick=True,
+        pos,
+        np.zeros((300, 0), np.float32),
+        np.ones(300, np.float32),
+        np.ones(2, np.float32),
+        (64, 64),
+        adaptive=False,
+        kernel_name="cic",
+        periodic=True,
+        brick=True,
     )
     shape = np.array(bricks[1].shape)
     assert np.all(shape < 32) and np.all(offset + shape > 64)
@@ -91,10 +111,17 @@ def test_corner_brick_wraps_around():
 
 def test_empty_particle_set():
     *bricks, offset = qdep.deposit(
-        np.zeros((0, 3), np.float32), np.zeros((0, 1), np.float32),
-        np.zeros(0, np.float32), np.ones(3, np.float32), (8, 8, 8),
-        adaptive=True, kernel_name="cubic_spline", structure="isotropic",
-        periodic=False, particle_hsml=np.zeros(0, np.float32), brick=True,
+        np.zeros((0, 3), np.float32),
+        np.zeros((0, 1), np.float32),
+        np.zeros(0, np.float32),
+        np.ones(3, np.float32),
+        (8, 8, 8),
+        adaptive=True,
+        kernel_name="cubic_spline",
+        structure="isotropic",
+        periodic=False,
+        particle_hsml=np.zeros(0, np.float32),
+        brick=True,
     )
     assert bricks[1].size == 0
     placed = _place(tuple(bricks), offset, (8, 8, 8))
@@ -125,15 +152,21 @@ def test_pointcloud_brick_keyword(structure, extent):
     rng = np.random.default_rng(2)
     pos = rng.uniform(0, 1, (600, 3)).astype(np.float32)
     pc = PointCloud(pos, boxsize=1.0, verbose=False).global_setup(
-        num_neighbors=16, structure=structure, kernel_name="cubic_spline")
+        num_neighbors=16, structure=structure, kernel_name="cubic_spline"
+    )
     pc.add_fields("f", rng.random(600).astype(np.float32))
     pc.compute_smoothing()
-    kw = dict(fields="f", averaged=True, gridnums=16, extent=extent, return_weights=True)
+    kw = dict(
+        fields="f", averaged=True, gridnums=16, extent=extent, return_weights=True
+    )
     for b, f in zip(pc.deposit(**kw, brick=True), pc.deposit(**kw, brick=False)):
         np.testing.assert_allclose(b, f, rtol=1e-5, atol=1e-7)
     weights = pc.deposit(None, averaged=False, gridnums=16, plane_projection=[0, 2])
     np.testing.assert_allclose(
         weights,
-        pc.deposit(None, averaged=False, gridnums=16, plane_projection=[0, 2], brick=False),
-        rtol=1e-6, atol=1e-7,
+        pc.deposit(
+            None, averaged=False, gridnums=16, plane_projection=[0, 2], brick=False
+        ),
+        rtol=1e-6,
+        atol=1e-7,
     )

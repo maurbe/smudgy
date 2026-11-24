@@ -106,7 +106,9 @@ def test_backend_consistency_periodic_wrap(dim, kernel_name):
     args = (positions, fields, weights, np.ones(dim, np.float32), [32] * dim)
 
     f_np, w_np = deposit_np(*args, periodic=True, kernel_name=kernel_name)
-    f_qd, w_qd = deposit_qd(*args, periodic=True, kernel_name=kernel_name, adaptive=False)
+    f_qd, w_qd = deposit_qd(
+        *args, periodic=True, kernel_name=kernel_name, adaptive=False
+    )
 
     np.testing.assert_allclose(f_np, f_qd, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(w_np, w_qd, rtol=1e-5, atol=1e-5)

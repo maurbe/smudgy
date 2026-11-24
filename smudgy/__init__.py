@@ -43,5 +43,5 @@ __all__ = [
     "compute_total_integral_separable",
     "compute_total_integral_spherical",
     "get_kernel_shapes_1D",
-    "get_kernel"
+    "get_kernel",
 ]

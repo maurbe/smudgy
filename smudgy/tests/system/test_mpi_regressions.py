@@ -36,8 +36,14 @@ def _run_under_mpi():
     # a corner of the domain: most ranks of the Hilbert partition own nothing in it
     extent = [[0.0, 0.2], [0.0, 0.2]]
     for structure in ("separable", "isotropic"):
-        grid = pc.deposit("a", averaged=False, gridnums=8, extent=extent,
-                          structure=structure, gather_to_root=True)
+        grid = pc.deposit(
+            "a",
+            averaged=False,
+            gridnums=8,
+            extent=extent,
+            structure=structure,
+            gather_to_root=True,
+        )
         if rank == 0:
             inside = np.all((pos >= 0.0) & (pos <= 0.2), axis=1)
             assert grid.shape == (1, 8, 8) and np.isfinite(grid).all()

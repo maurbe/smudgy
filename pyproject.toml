@@ -9,9 +9,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smudgy"
 version = "0.3.0"
-description = "Point Cloud smoothing and interpolation package with Numpy and Quadrants backends."
+description = "Point Cloud interpolation and deposition package with Numpy and Quadrants backends."
 readme = "README.md"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12"
 dependencies = [
   "numpy", 
   "scipy", 
@@ -35,7 +35,7 @@ Repository = "https://github.com/maurbe/smudgy"
 Documentation = "https://smudgy.readthedocs.io/en/latest/start/quickstart.html"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-timeout"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -46,7 +46,7 @@ testpaths = ["smudgy/tests"]
 
 [tool.black]
 line-length = 88
-target-version = ['py312', 'py313']
+target-version = ['py312', 'py313', 'py314']
 
 [tool.ruff]
 extend-exclude = ["smudgy/tests"]

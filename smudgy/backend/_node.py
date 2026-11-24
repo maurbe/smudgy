@@ -102,7 +102,11 @@ def gpu_env(arch, device="auto"):
     dict
         Variables to set (empty if nothing to do).
     """
-    if device is None or arch not in ("gpu", "cuda", "vulkan") or sys.platform == "darwin":
+    if (
+        device is None
+        or arch not in ("gpu", "cuda", "vulkan")
+        or sys.platform == "darwin"
+    ):
         return {}
     if device == "auto":
         local_rank, local_size = node_local()

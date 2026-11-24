@@ -88,7 +88,9 @@ def _reduce_sum(comm, local_result):
 
 def _reduce_sum_to_root(comm, local_result, root=0):
     """Sum each array of `local_result` over all ranks onto `root` (None elsewhere)."""
-    return _apply_parts(lambda part: _sum_over_ranks(comm, part, root=root), local_result)
+    return _apply_parts(
+        lambda part: _sum_over_ranks(comm, part, root=root), local_result
+    )
 
 
 def _brick_pieces(offset, shape, gridnums):
@@ -107,7 +109,9 @@ def _brick_pieces(offset, shape, gridnums):
         while start < stop:
             g = start % n
             size = min(stop - start, n - g)
-            pieces.append((slice(start - first, start - first + size), slice(g, g + size)))
+            pieces.append(
+                (slice(start - first, start - first + size), slice(g, g + size))
+            )
             start += size
         per_axis.append(pieces)
     for combo in itertools.product(*per_axis):
@@ -139,14 +143,20 @@ def _sum_bricks(comm, bricks, offset, gridnums, root=0, to_all=False):
         # it is either the array itself or its channels-last base
         brick, buf = _writable_contiguous(np.asarray(brick))
         channels_last = buf is not brick
-        headers = comm.gather((np.asarray(offset), brick.shape, channels_last), root=root)
+        headers = comm.gather(
+            (np.asarray(offset), brick.shape, channels_last), root=root
+        )
 
         full = None
         if rank == root:
             lead = brick.shape[: brick.ndim - dim]
             # a brick covering the whole grid is the accumulator itself
             own_is_full = brick.shape == (*lead, *gridnums) and not np.any(offset)
-            full = brick if own_is_full else np.zeros((*lead, *gridnums), dtype=brick.dtype)
+            full = (
+                brick
+                if own_is_full
+                else np.zeros((*lead, *gridnums), dtype=brick.dtype)
+            )
             for r, (r_offset, r_shape, r_last) in enumerate(headers):
                 if r == root:
                     if own_is_full:
@@ -160,7 +170,9 @@ def _sum_bricks(comm, bricks, offset, gridnums, root=0, to_all=False):
                     for chunk in _chunks(received.reshape(-1)):
                         comm.Recv(chunk, source=r)
                     data = np.moveaxis(received, -1, 0) if r_last else received
-                for brick_sl, grid_sl in _brick_pieces(r_offset, r_shape[len(lead):], gridnums):
+                for brick_sl, grid_sl in _brick_pieces(
+                    r_offset, r_shape[len(lead) :], gridnums
+                ):
                     full[(Ellipsis, *grid_sl)] += data[(Ellipsis, *brick_sl)]
         elif buf.size:
             for chunk in _chunks(buf.reshape(-1)):
@@ -261,7 +273,9 @@ def _gather_to_root(comm, global_index, local_array, n_total, root=0):
     Row ``i`` of `local_array` goes to row ``global_index[i]`` of the
     ``(n_total, ...)`` result, which is returned on `root` (None elsewhere).
     """
-    recv_global = _gatherv_rows(comm, np.asarray(global_index, dtype=np.int64), root=root)
+    recv_global = _gatherv_rows(
+        comm, np.asarray(global_index, dtype=np.int64), root=root
+    )
     recv_array = _gatherv_rows(comm, local_array, root=root)
     if comm.Get_rank() != root:
         return None

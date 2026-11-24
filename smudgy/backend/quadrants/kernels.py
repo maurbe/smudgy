@@ -1430,7 +1430,10 @@ def build_kernel_sample_grid(
     """
     return dict(
         _build_kernel_sample_grid_cached(
-            kernel_name, int(dim), float(eta_crit), float(nyquist_factor),
+            kernel_name,
+            int(dim),
+            float(eta_crit),
+            float(nyquist_factor),
             bool(projected),
         )
     )
@@ -1452,8 +1455,11 @@ def _build_kernel_sample_grid_cached(
         raise ValueError("projected kernels are 2D")
 
     kspec = create_spherical_kernel(kernel_name, projected)
-    layout_fn = {1: _build_shell_layout_1d, 2: _build_shell_layout_2d,
-                 3: _build_shell_layout_3d}[dim]
+    layout_fn = {
+        1: _build_shell_layout_1d,
+        2: _build_shell_layout_2d,
+        3: _build_shell_layout_3d,
+    }[dim]
     n_q, shell_q0, shell_q1, shell_id, layout, n_points_per_shell = layout_fn(
         kspec.support, eta_crit, nyquist_factor
     )

@@ -53,7 +53,8 @@ def _run_under_mpi():
 
         for root in (0, size - 1):
             f, w = execution._reduce_sum_to_root(
-                comm, (np.moveaxis(local(rank, (5, 6, 3)), -1, 0), local(rank, (5, 6))),
+                comm,
+                (np.moveaxis(local(rank, (5, 6, 3)), -1, 0), local(rank, (5, 6))),
                 root=root,
             )
             if rank == root:

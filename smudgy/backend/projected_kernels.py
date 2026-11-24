@@ -67,9 +67,7 @@ PIECES = {
 }
 
 # Interior breakpoints of w (kinks of the profile); table nodes fall on them.
-BREAKPOINTS = {
-    name: [lo for lo, _, _ in pieces[1:]] for name, pieces in PIECES.items()
-}
+BREAKPOINTS = {name: [lo for lo, _, _ in pieces[1:]] for name, pieces in PIECES.items()}
 BREAKPOINTS["gaussian"] = []
 
 # Table intervals in x = q^2. 1152 = 2^7 * 3^2 puts every breakpoint on a

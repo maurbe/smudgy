@@ -79,7 +79,6 @@ def _sample_buffer_size(eta_crit, dim):
     return max(1, min(b, {1: 64, 2: 16, 3: 6}[dim]))
 
 
-
 def _round_up_stencil(n, bucket=8):
     """Round the stencil size up to the nearest multiple of `bucket`.
 
@@ -207,9 +206,7 @@ def _tsc_stencil(g: qd.f32):
     gx = g - 0.5
     ix = qd.round(gx, int)
     dx = gx - ix
-    return ix, qd.Vector(
-        [0.5 * (0.5 - dx) ** 2, 0.75 - dx * dx, 0.5 * (0.5 + dx) ** 2]
-    )
+    return ix, qd.Vector([0.5 * (0.5 - dx) ** 2, 0.75 - dx * dx, 0.5 * (0.5 + dx) ** 2])
 
 
 @qd.func
@@ -269,8 +266,7 @@ def _bspline6_stencil(g: qd.f32):
         [
             (1.0 - dx) ** 5 / 120.0,
             ((2.0 - dx) ** 5 - 6.0 * (1.0 - dx) ** 5) / 120.0,
-            ((3.0 - dx) ** 5 - 6.0 * (2.0 - dx) ** 5 + 15.0 * (1.0 - dx) ** 5)
-            / 120.0,
+            ((3.0 - dx) ** 5 - 6.0 * (2.0 - dx) ** 5 + 15.0 * (1.0 - dx) ** 5) / 120.0,
             ((2.0 + dx) ** 5 - 6.0 * (1.0 + dx) ** 5 + 15.0 * dx**5) / 120.0,
             ((1.0 + dx) ** 5 - 6.0 * dx**5) / 120.0,
             dx**5 / 120.0,
@@ -324,8 +320,7 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
             for d in qd.static(range(dim)):
                 base, w1d = stencil_fn(particle_positions[p, d] * inv_dx[d])
                 for o in qd.static(range(K)):
-                    i, valid = _brick_index(base + o - SHIFT, N[d], off[d], periodic
-                    )
+                    i, valid = _brick_index(base + o - SHIFT, N[d], off[d], periodic)
                     ok[d, o] = valid
                     idx[d, o] = i
                     wgt[d, o] = w1d[o]
@@ -336,17 +331,30 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
                 for ox in qd.static(range(K)):
                     if ok[0, ox]:
                         _grid_add(
-                            grid_weights, grid_fields, particle_fields, dropped, brick, p,
-                            qd.Vector([idx[0, ox]]), wgt[0, ox] * w_particle, dim,
+                            grid_weights,
+                            grid_fields,
+                            particle_fields,
+                            dropped,
+                            brick,
+                            p,
+                            qd.Vector([idx[0, ox]]),
+                            wgt[0, ox] * w_particle,
+                            dim,
                         )
             elif qd.static(dim == 2):
                 for ox in qd.static(range(K)):
                     for oy in qd.static(range(K)):
                         if ok[0, ox] and ok[1, oy]:
                             _grid_add(
-                                grid_weights, grid_fields, particle_fields, dropped, brick, p,
+                                grid_weights,
+                                grid_fields,
+                                particle_fields,
+                                dropped,
+                                brick,
+                                p,
                                 qd.Vector([idx[0, ox], idx[1, oy]]),
-                                wgt[0, ox] * wgt[1, oy] * w_particle, dim,
+                                wgt[0, ox] * wgt[1, oy] * w_particle,
+                                dim,
                             )
             else:
                 for ox in qd.static(range(K)):
@@ -354,8 +362,12 @@ def _make_fixed_grid_kernel(dim, stencil_fn, K, SHIFT):
                         for oz in qd.static(range(K)):
                             if ok[0, ox] and ok[1, oy] and ok[2, oz]:
                                 _grid_add(
-                                    grid_weights, grid_fields, particle_fields,
-                                    dropped, brick, p,
+                                    grid_weights,
+                                    grid_fields,
+                                    particle_fields,
+                                    dropped,
+                                    brick,
+                                    p,
                                     qd.Vector([idx[0, ox], idx[1, oy], idx[2, oz]]),
                                     wgt[0, ox] * wgt[1, oy] * wgt[2, oz] * w_particle,
                                     dim,
@@ -543,7 +555,13 @@ def _cell_integral(
         )
     else:
         result = _isotropic_cell_integral(
-            evaluate_fn, quad_points, dim, a, x_cell, hsm_phys, kernel_prefactor,
+            evaluate_fn,
+            quad_points,
+            dim,
+            a,
+            x_cell,
+            hsm_phys,
+            kernel_prefactor,
             cell_size,
         )
     return result
@@ -572,24 +590,50 @@ def _quadrature_total(
     if qd.static(dim == 1):
         for i in range(lo[0], lo[0] + ext[0]):
             total += _cell_integral(
-                evaluate_fn, quad_points, dim, covariant, qd.Vector([i]), x_cell,
-                hsm_phys, E, ev, kernel_prefactor, cell_size,
+                evaluate_fn,
+                quad_points,
+                dim,
+                covariant,
+                qd.Vector([i]),
+                x_cell,
+                hsm_phys,
+                E,
+                ev,
+                kernel_prefactor,
+                cell_size,
             )
     elif qd.static(dim == 2):
         for i in range(lo[0], lo[0] + ext[0]):
             for j in range(lo[1], lo[1] + ext[1]):
                 total += _cell_integral(
-                    evaluate_fn, quad_points, dim, covariant, qd.Vector([i, j]),
-                    x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size,
+                    evaluate_fn,
+                    quad_points,
+                    dim,
+                    covariant,
+                    qd.Vector([i, j]),
+                    x_cell,
+                    hsm_phys,
+                    E,
+                    ev,
+                    kernel_prefactor,
+                    cell_size,
                 )
     else:
         for i in range(lo[0], lo[0] + ext[0]):
             for j in range(lo[1], lo[1] + ext[1]):
                 for k in range(lo[2], lo[2] + ext[2]):
                     total += _cell_integral(
-                        evaluate_fn, quad_points, dim, covariant,
-                        qd.Vector([i, j, k]), x_cell, hsm_phys, E, ev,
-                        kernel_prefactor, cell_size,
+                        evaluate_fn,
+                        quad_points,
+                        dim,
+                        covariant,
+                        qd.Vector([i, j, k]),
+                        x_cell,
+                        hsm_phys,
+                        E,
+                        ev,
+                        kernel_prefactor,
+                        cell_size,
                     )
     return total
 
@@ -621,8 +665,17 @@ def _quadrature_cell_add(
 ):
     """Deposit the kernel mass of cell `a`, scaled by wj * correction."""
     integral = _cell_integral(
-        evaluate_fn, quad_points, dim, covariant, a, x_cell, hsm_phys, E, ev,
-        kernel_prefactor, cell_size,
+        evaluate_fn,
+        quad_points,
+        dim,
+        covariant,
+        a,
+        x_cell,
+        hsm_phys,
+        E,
+        ev,
+        kernel_prefactor,
+        cell_size,
     )
     cell = qd.Vector.zero(qd.i32, dim)
     for d in qd.static(range(dim)):
@@ -630,8 +683,15 @@ def _quadrature_cell_add(
         c, _ok = _brick_index(a[d], N[d], off[d], periodic)
         cell[d] = c
     _grid_add(
-        grid_weights, grid_fields, quantities, dropped, brick, n, cell,
-        wj * integral * correction, dim,
+        grid_weights,
+        grid_fields,
+        quantities,
+        dropped,
+        brick,
+        n,
+        cell,
+        wj * integral * correction,
+        dim,
     )
 
 
@@ -665,28 +725,83 @@ def _quadrature_deposit(
     if qd.static(dim == 1):
         for i in range(lo[0], lo[0] + ext[0]):
             _quadrature_cell_add(
-                evaluate_fn, quad_points, dim, covariant, periodic, qd.Vector([i]),
-                x_cell, hsm_phys, E, ev, kernel_prefactor, cell_size, N, off,
-                wj, correction, n, grid_weights, grid_fields, quantities, dropped, brick,
+                evaluate_fn,
+                quad_points,
+                dim,
+                covariant,
+                periodic,
+                qd.Vector([i]),
+                x_cell,
+                hsm_phys,
+                E,
+                ev,
+                kernel_prefactor,
+                cell_size,
+                N,
+                off,
+                wj,
+                correction,
+                n,
+                grid_weights,
+                grid_fields,
+                quantities,
+                dropped,
+                brick,
             )
     elif qd.static(dim == 2):
         for i in range(lo[0], lo[0] + ext[0]):
             for j in range(lo[1], lo[1] + ext[1]):
                 _quadrature_cell_add(
-                    evaluate_fn, quad_points, dim, covariant, periodic,
-                    qd.Vector([i, j]), x_cell, hsm_phys, E, ev, kernel_prefactor,
-                    cell_size, N, off, wj, correction, n, grid_weights,
-                    grid_fields, quantities, dropped, brick,
+                    evaluate_fn,
+                    quad_points,
+                    dim,
+                    covariant,
+                    periodic,
+                    qd.Vector([i, j]),
+                    x_cell,
+                    hsm_phys,
+                    E,
+                    ev,
+                    kernel_prefactor,
+                    cell_size,
+                    N,
+                    off,
+                    wj,
+                    correction,
+                    n,
+                    grid_weights,
+                    grid_fields,
+                    quantities,
+                    dropped,
+                    brick,
                 )
     else:
         for i in range(lo[0], lo[0] + ext[0]):
             for j in range(lo[1], lo[1] + ext[1]):
                 for k in range(lo[2], lo[2] + ext[2]):
                     _quadrature_cell_add(
-                        evaluate_fn, quad_points, dim, covariant, periodic,
-                        qd.Vector([i, j, k]), x_cell, hsm_phys, E, ev,
-                        kernel_prefactor, cell_size, N, off, wj, correction,
-                        n, grid_weights, grid_fields, quantities, dropped, brick,
+                        evaluate_fn,
+                        quad_points,
+                        dim,
+                        covariant,
+                        periodic,
+                        qd.Vector([i, j, k]),
+                        x_cell,
+                        hsm_phys,
+                        E,
+                        ev,
+                        kernel_prefactor,
+                        cell_size,
+                        N,
+                        off,
+                        wj,
+                        correction,
+                        n,
+                        grid_weights,
+                        grid_fields,
+                        quantities,
+                        dropped,
+                        brick,
                     )
 
 
@@ -715,8 +830,15 @@ def _deposit_sample_buffer(
                 ix, ok_x = _brick_index(i0[0] + a, N[0], off[0], periodic)
                 if ok_x:
                     _grid_add(
-                        grid_weights, grid_fields, quantities, dropped, brick, n,
-                        qd.Vector([ix]), wj * v, dim,
+                        grid_weights,
+                        grid_fields,
+                        quantities,
+                        dropped,
+                        brick,
+                        n,
+                        qd.Vector([ix]),
+                        wj * v,
+                        dim,
                     )
     elif qd.static(dim == 2):
         for a in range(B):
@@ -727,8 +849,15 @@ def _deposit_sample_buffer(
                     iy, ok_y = _brick_index(i0[1] + b, N[1], off[1], periodic)
                     if ok_x and ok_y:
                         _grid_add(
-                            grid_weights, grid_fields, quantities, dropped, brick, n,
-                            qd.Vector([ix, iy]), wj * v, dim,
+                            grid_weights,
+                            grid_fields,
+                            quantities,
+                            dropped,
+                            brick,
+                            n,
+                            qd.Vector([ix, iy]),
+                            wj * v,
+                            dim,
                         )
     else:
         for a in range(B):
@@ -738,12 +867,18 @@ def _deposit_sample_buffer(
                 for c in range(B):
                     v = buf[(a * B + b) * B + c]
                     if v != 0.0:
-                        iz, ok_z = _brick_index(i0[2] + c, N[2], off[2], periodic
-                        )
+                        iz, ok_z = _brick_index(i0[2] + c, N[2], off[2], periodic)
                         if ok_x and ok_y and ok_z:
                             _grid_add(
-                                grid_weights, grid_fields, quantities, dropped, brick, n,
-                                qd.Vector([ix, iy, iz]), wj * v, dim,
+                                grid_weights,
+                                grid_fields,
+                                quantities,
+                                dropped,
+                                brick,
+                                n,
+                                qd.Vector([ix, iy, iz]),
+                                wj * v,
+                                dim,
                             )
 
 
@@ -929,8 +1064,20 @@ def _isotropic(
                 if inside:
                     buf[idx] += sample_integrals[s]
             _deposit_sample_buffer(
-                buf, i0, wj, n, N, off, periodic, B, dim, weights, fields,
-                quantities, dropped, brick,
+                buf,
+                i0,
+                wj,
+                n,
+                N,
+                off,
+                periodic,
+                B,
+                dim,
+                weights,
+                fields,
+                quantities,
+                dropped,
+                brick,
             )
 
         elif eta < eta_crit:
@@ -941,7 +1088,9 @@ def _isotropic(
                 for d in qd.static(range(dim)):
                     x_sample = x_phys[d] + sample_coords[s, d] * hsm_phys
                     c, ok = _brick_index(
-                        qd.floor(x_sample * inv[d], int), N[d], off[d],
+                        qd.floor(x_sample * inv[d], int),
+                        N[d],
+                        off[d],
                         periodic,
                     )
                     cell[d] = c
@@ -950,8 +1099,15 @@ def _isotropic(
                     integral = sample_integrals[s]
                     if integral != 0.0:
                         _grid_add(
-                            weights, fields, quantities, dropped, brick, n, cell,
-                            wj * integral, dim,
+                            weights,
+                            fields,
+                            quantities,
+                            dropped,
+                            brick,
+                            n,
+                            cell,
+                            wj * integral,
+                            dim,
                         )
 
         else:
@@ -969,14 +1125,44 @@ def _isotropic(
                 ext[d] = i_max - i_min + 1
             # pass 1: total over the cells, to renormalise to the particle weight
             total_integral = _quadrature_total(
-                evaluate_fn, quad_points, dim, False, lo, ext, x_cell, hsm_phys,
-                no_axes, no_ev, kernel_prefactor, cs,
+                evaluate_fn,
+                quad_points,
+                dim,
+                False,
+                lo,
+                ext,
+                x_cell,
+                hsm_phys,
+                no_axes,
+                no_ev,
+                kernel_prefactor,
+                cs,
             )
             if total_integral > 0.0:
                 _quadrature_deposit(
-                    evaluate_fn, quad_points, dim, False, periodic, lo, ext, x_cell,
-                    hsm_phys, no_axes, no_ev, kernel_prefactor, cs, N, off, wj,
-                    1.0 / total_integral, n, weights, fields, quantities, dropped, brick,
+                    evaluate_fn,
+                    quad_points,
+                    dim,
+                    False,
+                    periodic,
+                    lo,
+                    ext,
+                    x_cell,
+                    hsm_phys,
+                    no_axes,
+                    no_ev,
+                    kernel_prefactor,
+                    cs,
+                    N,
+                    off,
+                    wj,
+                    1.0 / total_integral,
+                    n,
+                    weights,
+                    fields,
+                    quantities,
+                    dropped,
+                    brick,
                 )
 
 
@@ -1100,8 +1286,18 @@ def _covariant(
                 det_h = det_h * ev[c]
             kernel_prefactor = sig / det_h
             total_integral = _quadrature_total(
-                evaluate_fn, quad_points, dim, True, lo, ext, x_cell, 0.0, E, ev,
-                kernel_prefactor, cs,
+                evaluate_fn,
+                quad_points,
+                dim,
+                True,
+                lo,
+                ext,
+                x_cell,
+                0.0,
+                E,
+                ev,
+                kernel_prefactor,
+                cs,
             )
             if total_integral <= 0.0:
                 use_samples = True
@@ -1123,8 +1319,20 @@ def _covariant(
                 if inside:
                     buf[idx] += sample_integrals[s]
             _deposit_sample_buffer(
-                buf, i0, wj, n, N, off, periodic, B, dim, weights, fields,
-                quantities, dropped, brick,
+                buf,
+                i0,
+                wj,
+                n,
+                N,
+                off,
+                periodic,
+                B,
+                dim,
+                weights,
+                fields,
+                quantities,
+                dropped,
+                brick,
             )
 
         elif use_samples:
@@ -1137,7 +1345,9 @@ def _covariant(
                     for c in qd.static(range(dim)):
                         x_sample = x_sample + E[d, c] * (ev[c] * sample_coords[s, c])
                     cd, ok = _brick_index(
-                        qd.floor(x_sample * inv[d], int), N[d], off[d],
+                        qd.floor(x_sample * inv[d], int),
+                        N[d],
+                        off[d],
                         periodic,
                     )
                     cell[d] = cd
@@ -1146,16 +1356,43 @@ def _covariant(
                     integral = sample_integrals[s]
                     if integral != 0.0:
                         _grid_add(
-                            weights, fields, quantities, dropped, brick, n, cell,
-                            wj * integral, dim,
+                            weights,
+                            fields,
+                            quantities,
+                            dropped,
+                            brick,
+                            n,
+                            cell,
+                            wj * integral,
+                            dim,
                         )
 
         else:
             # per-cell quadrature, renormalised with the pass-1 total
             _quadrature_deposit(
-                evaluate_fn, quad_points, dim, True, periodic, lo, ext, x_cell, 0.0,
-                E, ev, kernel_prefactor, cs, N, off, wj, 1.0 / total_integral,
-                n, weights, fields, quantities, dropped, brick,
+                evaluate_fn,
+                quad_points,
+                dim,
+                True,
+                periodic,
+                lo,
+                ext,
+                x_cell,
+                0.0,
+                E,
+                ev,
+                kernel_prefactor,
+                cs,
+                N,
+                off,
+                wj,
+                1.0 / total_integral,
+                n,
+                weights,
+                fields,
+                quantities,
+                dropped,
+                brick,
             )
 
 
@@ -1233,7 +1470,9 @@ def _grid_spec(gridnums, periodic, positions=None, inv=None, reach=None):
             for d in range(gridnums.size):
                 g = positions[:, d] * np.float32(inv[d])
                 below, above = reach(d)
-                lo[d], shape[d] = _axis_cover(g, below, above, int(gridnums[d]), periodic)
+                lo[d], shape[d] = _axis_cover(
+                    g, below, above, int(gridnums[d]), periodic
+                )
     spec = np.stack([gridnums, lo]).astype(np.int32)
     return spec, lo, tuple(int(n) for n in shape)
 
@@ -1286,7 +1525,11 @@ def _prepare_fixed(
         return SHIFT + 1, K - 1 - SHIFT
 
     spec, lo, grid_fields, grid_weights, dropped = _allocate(
-        gridnums, periodic, particle_fields.shape[1], particle_positions, inv_dx,
+        gridnums,
+        periodic,
+        particle_fields.shape[1],
+        particle_positions,
+        inv_dx,
         reach if brick else None,
     )
     args = (
@@ -1340,15 +1583,21 @@ def _prepare_separable(
     scale = 1.0
     if brick and periodic and particle_hsml.shape[0]:
         # the kernel's clamp: largest axis at most max_support
-        scale = np.minimum(1.0, max_support / np.maximum(particle_hsml.max(axis=1), 1e-30))
+        scale = np.minimum(
+            1.0, max_support / np.maximum(particle_hsml.max(axis=1), 1e-30)
+        )
 
     def reach(d):
         half = support * (particle_hsml[:, d] * scale) * np.float32(cell_size_invs[d])
         return half, half
 
     spec, lo, grid_fields, grid_weights, dropped = _allocate(
-        gridnums, periodic, particle_fields.shape[1], particle_positions,
-        cell_size_invs, reach if brick else None,
+        gridnums,
+        periodic,
+        particle_fields.shape[1],
+        particle_positions,
+        cell_size_invs,
+        reach if brick else None,
     )
 
     args = (
@@ -1462,8 +1711,12 @@ def _prepare_radial(
             structure, smoothing_args, support, max_support, periodic, cell_size_invs
         )
     spec, lo, grid_fields, grid_weights, dropped = _allocate(
-        gridnums, periodic, particle_fields.shape[1], particle_positions,
-        cell_size_invs, reach,
+        gridnums,
+        periodic,
+        particle_fields.shape[1],
+        particle_positions,
+        cell_size_invs,
+        reach,
     )
 
     args = (
@@ -1492,7 +1745,12 @@ def _prepare_radial(
         grid_weights,
     )
     return KernelPreparation(
-        _ADAPTIVE_KERNELS[structure], args, grid_fields, grid_weights, lo, dropped,
+        _ADAPTIVE_KERNELS[structure],
+        args,
+        grid_fields,
+        grid_weights,
+        lo,
+        dropped,
         sample_buffer=int(sample_buffer),
     )
 
@@ -1614,7 +1872,9 @@ def deposit(
             "particle_hmat_eigvals": particle_hmat_eigvals,
         }
         missing = [
-            name for name in _REQUIRED_KWARGS[structure] if provided_kwargs[name] is None
+            name
+            for name in _REQUIRED_KWARGS[structure]
+            if provided_kwargs[name] is None
         ]
         if missing:
             raise ValueError(

@@ -28,18 +28,41 @@ def _cases():
         ("cic", dict(base, adaptive=False, kernel_name="cic"), "quadrants"),
         ("bspline6", dict(base, adaptive=False, kernel_name="bspline6"), "quadrants"),
         ("numpy_tsc", dict(base, adaptive=False, kernel_name="tsc"), "numpy"),
-        ("separable", dict(base, structure="separable", kernel_name="tsc"), "quadrants"),
+        (
+            "separable",
+            dict(base, structure="separable", kernel_name="tsc"),
+            "quadrants",
+        ),
         ("isotropic", dict(base, structure="isotropic"), "quadrants"),
-        ("isotropic_simpson", dict(base, structure="isotropic", gridnums=[8, 12, 10],
-                                   integration_method="simpson"), "quadrants"),
+        (
+            "isotropic_simpson",
+            dict(
+                base,
+                structure="isotropic",
+                gridnums=[8, 12, 10],
+                integration_method="simpson",
+            ),
+            "quadrants",
+        ),
         ("covariant", dict(base, structure="covariant"), "quadrants"),
         ("covariant_fine", dict(base, structure="covariant", gridnums=64), "quadrants"),
-        ("covariant_extent", dict(base, structure="covariant",
-                                  extent=[[0.0, 0.3], [0.7, 1.0], [0.3, 0.7]]), "quadrants"),
-        ("isotropic_plane", dict(base, structure="isotropic", plane_projection=[0, 1]),
-         "quadrants"),
-        ("weights_only", dict(fields=None, averaged=False, gridnums=24,
-                              structure="isotropic"), "quadrants"),
+        (
+            "covariant_extent",
+            dict(
+                base, structure="covariant", extent=[[0.0, 0.3], [0.7, 1.0], [0.3, 0.7]]
+            ),
+            "quadrants",
+        ),
+        (
+            "isotropic_plane",
+            dict(base, structure="isotropic", plane_projection=[0, 1]),
+            "quadrants",
+        ),
+        (
+            "weights_only",
+            dict(fields=None, averaged=False, gridnums=24, structure="isotropic"),
+            "quadrants",
+        ),
         ("averaged", dict(base, averaged=True, structure="covariant"), "quadrants"),
     ]
     return cases
@@ -69,8 +92,9 @@ def _run_under_mpi():
 
     clouds = {}
     for backend in ("quadrants", "numpy"):
-        pc = PointCloud(positions, weights=weights, boxsize=1.0, verbose=False,
-                        backend=backend)
+        pc = PointCloud(
+            positions, weights=weights, boxsize=1.0, verbose=False, backend=backend
+        )
         pc.add_fields("sf", field)
         pc.find_neighbors(num_neighbors=16)
         if backend == "quadrants":
@@ -98,7 +122,9 @@ def _run_under_mpi():
             auto = pc.deposit(**kwargs, gather_to_root=gather)  # brick=None
             uses_bricks = gather and backend == "quadrants" and comm.Get_size() > 1
             if calls[0] != uses_bricks:
-                failures.append(f"{name} gather={gather}: brick=None took the wrong path")
+                failures.append(
+                    f"{name} gather={gather}: brick=None took the wrong path"
+                )
             brick = brick if isinstance(brick, tuple) else (brick,)
             full = full if isinstance(full, tuple) else (full,)
             auto = auto if isinstance(auto, tuple) else (auto,)
@@ -119,8 +145,9 @@ def _run_under_mpi():
 
     # defaults: bricks on several ranks, the grid on rank 0 only
     calls[0] = 0
-    default = clouds["quadrants"].deposit("sf", averaged=False, gridnums=24,
-                                          structure="isotropic")
+    default = clouds["quadrants"].deposit(
+        "sf", averaged=False, gridnums=24, structure="isotropic"
+    )
     if calls[0] != (comm.Get_size() > 1) or (default is None) != (rank != 0):
         failures.append("defaults: not bricks summed onto rank 0 only")
 
@@ -141,8 +168,11 @@ def _run(tmp_path, n_ranks):
         timeout=600,
     )
     assert result.returncode == 0, result.stderr
-    seen = {int(line.split()[1]) for line in result.stdout.splitlines()
-            if line.startswith("RANK")}
+    seen = {
+        int(line.split()[1])
+        for line in result.stdout.splitlines()
+        if line.startswith("RANK")
+    }
     assert seen == set(range(n_ranks)), (seen, result.stdout)
     return np.load(out_path)
 
@@ -158,8 +188,9 @@ def test_brick_matches_full_grid(tmp_path, single_rank, n_ranks):
     assert list(result["failures"]) == []
     for key in single_rank.files:
         if key != "failures":
-            np.testing.assert_allclose(result[key], single_rank[key], rtol=RTOL,
-                                       atol=ATOL, err_msg=key)
+            np.testing.assert_allclose(
+                result[key], single_rank[key], rtol=RTOL, atol=ATOL, err_msg=key
+            )
 
 
 if __name__ == "__main__":

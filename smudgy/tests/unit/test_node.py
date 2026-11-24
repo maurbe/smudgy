@@ -22,11 +22,15 @@ def test_single_rank_uses_all_cores():
 
 def test_cores_split_between_ranks(two_ranks, monkeypatch):
     monkeypatch.setattr(_node.os, "cpu_count", lambda: 16)
-    monkeypatch.setattr(_node.os, "sched_getaffinity", lambda pid: range(16), raising=False)
+    monkeypatch.setattr(
+        _node.os, "sched_getaffinity", lambda pid: range(16), raising=False
+    )
     assert _node.cpu_threads() == 8
     assert _node.kdtree_workers() == 8
     # launcher already pinned the rank to 3 cores: use those
-    monkeypatch.setattr(_node.os, "sched_getaffinity", lambda pid: range(3), raising=False)
+    monkeypatch.setattr(
+        _node.os, "sched_getaffinity", lambda pid: range(3), raising=False
+    )
     assert _node.cpu_threads() == 3
 
 

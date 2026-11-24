@@ -78,7 +78,9 @@ class TestHilbertEncodeProperties:
         'correct' 3D ordering in advance."""
         bits = 4
         n = 1 << bits
-        gx, gy, gz = np.meshgrid(np.arange(n), np.arange(n), np.arange(n), indexing="ij")
+        gx, gy, gz = np.meshgrid(
+            np.arange(n), np.arange(n), np.arange(n), indexing="ij"
+        )
         positions = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1).astype(
             np.float64
         )
@@ -306,7 +308,9 @@ class TestSizeOneFastPath:
 
         query = rng.uniform(0, 1, size=(5, dim)).astype(np.float32)
         routing = decomposition.route_query_positions(
-            _FakeSingleRankComm(), info, query,
+            _FakeSingleRankComm(),
+            info,
+            query,
         )
 
         np.testing.assert_array_equal(routing.local_positions, query)

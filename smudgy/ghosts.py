@@ -115,14 +115,24 @@ def _overlap_shifts(query_min, query_max, target_min, target_max, boxsize, shift
     hits = []
     for s in shifts:
         offset = s * boxsize if boxsize is not None else 0.0
-        if _boxes_overlap(query_min, query_max, target_min + offset, target_max + offset):
+        if _boxes_overlap(
+            query_min, query_max, target_min + offset, target_max + offset
+        ):
             hits.append(s)
     return hits
 
 
 def _initial_radius(
-    n_local, local_min, local_max, num_neighbors, dim,
-    domain_min, domain_max, boxsize, periodic, safety_factor=2.0,
+    n_local,
+    local_min,
+    local_max,
+    num_neighbors,
+    dim,
+    domain_min,
+    domain_max,
+    boxsize,
+    periodic,
+    safety_factor=2.0,
 ) -> float:
     """Return the first search radius of the ghost exchange.
 
@@ -141,8 +151,16 @@ def _initial_radius(
 
 
 def _select_ghosts_to_send(
-    rank, size, wrapped_local, local_weights, local_global_indices,
-    all_boxes, boxsize, periodic, dim, sent,
+    rank,
+    size,
+    wrapped_local,
+    local_weights,
+    local_global_indices,
+    all_boxes,
+    boxsize,
+    periodic,
+    dim,
+    sent,
 ):
     """Select this rank's particles newly inside the other ranks' padded target boxes.
 
@@ -180,7 +198,8 @@ def _select_ghosts_to_send(
                 # a's padded box in this rank's (unshifted) coordinates
                 region_min, region_max = a_min_padded - offset, a_max_padded - offset
                 mask |= np.all(
-                    (wrapped_local >= region_min) & (wrapped_local <= region_max), axis=1
+                    (wrapped_local >= region_min) & (wrapped_local <= region_max),
+                    axis=1,
                 )
             previous = sent.get(a)
             if previous is not None:
@@ -330,8 +349,15 @@ def exchange_ghosts(
     # from the particle density, not the target density: the radius must
     # reach num_neighbors particles, however many targets there are
     radius = _initial_radius(
-        n_local, local_min, local_max, num_neighbors, dim,
-        decomposition.domain_min, decomposition.domain_max, boxsize, periodic,
+        n_local,
+        local_min,
+        local_max,
+        num_neighbors,
+        dim,
+        decomposition.domain_min,
+        decomposition.domain_max,
+        boxsize,
+        periodic,
     )
     # Ghosts are only well defined for radii below half the periodic box
     # (minimum-image metric). The initial guess is capped there; only a
@@ -379,8 +405,16 @@ def exchange_ghosts(
         all_boxes = comm.allgather((target_min, target_max, radius, has_targets))
 
         send_counts, send_pos, send_w, send_lidx, send_gidx = _select_ghosts_to_send(
-            rank, size, wrapped_local, local_weights, local_global_indices,
-            all_boxes, boxsize_arr, periodic, dim, sent,
+            rank,
+            size,
+            wrapped_local,
+            local_weights,
+            local_global_indices,
+            all_boxes,
+            boxsize_arr,
+            periodic,
+            dim,
+            sent,
         )
         recv_counts = execution._alltoall_counts(comm, send_counts)
         received = (
@@ -446,7 +480,9 @@ def exchange_ghosts(
             grow_deficit = (~finite) & unconverged
             new_radius = radius
             if np.any(grow_finite):
-                new_radius = max(new_radius, float(np.max(d_k[grow_finite])) * (1.0 + 1e-5))
+                new_radius = max(
+                    new_radius, float(np.max(d_k[grow_finite])) * (1.0 + 1e-5)
+                )
             if np.any(grow_deficit):
                 new_radius = max(new_radius, radius * 2.0)
             # try the cap itself once before giving up

@@ -2,18 +2,67 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+  # release.yml calls this workflow so publishing is gated on the full matrix
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Never cancel a run that gates a release.
+  cancel-in-progress: ${{ github.event_name != 'release' }}
 
 jobs:
+  # ==========================================================
+  # Lint (non-blocking until the codebase is ruff-clean)
+  # ==========================================================
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff
+        run: python -m pip install ruff
+
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      - name: ruff format
+        run: ruff format --check .
+
+  # ==========================================================
+  # Tests: every OS x every Python version Quadrants ships wheels for
+  # ==========================================================
   test:
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
+        # macos-latest is arm64: Quadrants has no macOS x86_64 wheels,
+        # so Intel runners (macos-13) must not be used.
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.12", "3.13"]
+        # Lower bound = Quadrants' requires-python; extend as Quadrants adds wheels.
+        python-version: ["3.12", "3.13", "3.14"]
+
+    env:
+      # MPICH: the default libfabric `sock` provider can hang collectives when
+      # ranks are launched from an MPI-initialised parent (see
+      # smudgy/tests/system/_mpi_launch.py). No effect on MS-MPI.
+      FI_PROVIDER: tcp
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - uses: actions/checkout@v5
@@ -22,15 +71,66 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Set up MPI
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip build
+
+      # ------------------------------------------------------
+      # MPI runtime
+      # ------------------------------------------------------
+      # Linux/macOS: MPICH from PyPI installs `mpiexec` next to the
+      # interpreter, which is what the MPI tests' launcher prefers, and the
+      # mpi4py binary wheel picks the library up at runtime.
+      - name: Install MPICH (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: python -m pip install mpich
+
+      # Windows: MS-MPI (runtime + mpiexec on PATH), supported by the
+      # mpi4py Windows wheels.
+      - name: Install MS-MPI (Windows)
+        if: runner.os == 'Windows'
         uses: mpi4py/setup-mpi@v1
+        with:
+          mpi: msmpi
 
-      - name: Install package
+      # ------------------------------------------------------
+      # Build the wheel and test the installed package, not the source tree
+      # ------------------------------------------------------
+      - name: Build wheel
+        run: python -m build --wheel --outdir dist
+
+      - name: Install wheel with test extras
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install .[test]
+          wheel=$(ls dist/*.whl)
+          python -m pip install "${wheel}[test]"
+
+      - name: Show environment
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          python -m pip list
+          which mpiexec || true
+          python -c "import mpi4py.MPI as M; print(M.Get_library_version())"
+          python -c "import smudgy; print('smudgy imported from', smudgy.__file__)"
 
       - name: Run tests
-        run: |
-          python -c "import os, subprocess, sys, tempfile; os.chdir(tempfile.gettempdir()); sys.exit(subprocess.call([sys.executable, '-m', 'pytest', '-rs', os.path.join(os.environ['GITHUB_WORKSPACE'], 'smudgy', 'tests')]))"
+        # Run from outside the checkout so `import smudgy` resolves to the
+        # installed wheel rather than the source directory.
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: >
+          python -m pytest "${GITHUB_WORKSPACE}/smudgy/tests"
+          -rs
+          --timeout=900
+          --durations=20
+          --junitxml=junit.xml
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: junit-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: ${{ runner.temp }}/junit.xml

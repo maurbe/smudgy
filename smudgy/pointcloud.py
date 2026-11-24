@@ -307,9 +307,7 @@ class PointCloud:
             on_max_iterations=on_max_iterations,
         )
         if self.verbose and self.rank == 0:
-            print(
-                f"[smudgy] Found {num_neighbors_temp} neighbors per particle"
-            )
+            print(f"[smudgy] Found {num_neighbors_temp} neighbors per particle")
         return self
 
     def gather_particles(
@@ -339,8 +337,11 @@ class PointCloud:
                 "decomposition.local_positions (this rank's local particles)."
             )
         return execution._gather_to_root(
-            self.comm, local_global_indices, local_array,
-            int(self.decomposition.counts.sum()), root=root,
+            self.comm,
+            local_global_indices,
+            local_array,
+            int(self.decomposition.counts.sum()),
+            root=root,
         )
 
     def gather_queries(
@@ -375,7 +376,11 @@ class PointCloud:
             )
         n_total = int(self.query_routing.counts.sum())
         return execution._gather_to_root(
-            self.comm, local_global_indices, local_array, n_total, root=root,
+            self.comm,
+            local_global_indices,
+            local_array,
+            n_total,
+            root=root,
         )
 
     def get(self, name: str, root: int = 0) -> npt.NDArray[Any] | None:
@@ -590,7 +595,9 @@ class PointCloud:
             self._check_property("kernel_name")
             return self.kernel_name
         if not isinstance(kernel_name, str):
-            raise TypeError(f"'kernel_name' must be a string but found {type(kernel_name)}")
+            raise TypeError(
+                f"'kernel_name' must be a string but found {type(kernel_name)}"
+            )
         return kernel_name
 
     def _resolve_num_neighbors(self, num_neighbors: int | None = None) -> int:
@@ -613,7 +620,9 @@ class PointCloud:
         try:
             return operator.index(value)
         except TypeError:
-            raise TypeError(f"'{name}' must be an int but found {type(value)}") from None
+            raise TypeError(
+                f"'{name}' must be an int but found {type(value)}"
+            ) from None
 
     def _resolve_fields(
         self,
@@ -1299,15 +1308,23 @@ class PointCloud:
         """
         covariant = structure == "covariant"
         density = (
-            self.smoothing.density_covariant if covariant else self.smoothing.density_isotropic
+            self.smoothing.density_covariant
+            if covariant
+            else self.smoothing.density_isotropic
         )
         h_local = (
-            self.smoothing.smoothing_tensors if covariant else self.smoothing.smoothing_lengths
+            self.smoothing.smoothing_tensors
+            if covariant
+            else self.smoothing.smoothing_lengths
         )
         key = (ghost_info, density, h_local, combined_weights)
         cacheable = ghost_info is self.ghosts
         cache = self._ghost_smoothing_cache.get(structure)
-        if cacheable and cache is not None and all(a is b for a, b in zip(cache[0], key)):
+        if (
+            cacheable
+            and cache is not None
+            and all(a is b for a, b in zip(cache[0], key))
+        ):
             return cache[1]
 
         ghost_density = push_to_ghosts(self.comm, ghost_info, density)
@@ -1658,7 +1675,9 @@ class PointCloud:
         if weights_only:
             if np.any(averaged):
                 raise ValueError("'averaged' must be False when fields=None")
-            fields = np.empty((self.decomposition.local_positions.shape[0], 0), np.float32)
+            fields = np.empty(
+                (self.decomposition.local_positions.shape[0], 0), np.float32
+            )
             fields_sizes = []
         else:
             fields, fields_sizes = self._resolve_fields(fields, dtype=np.float32)
@@ -1687,7 +1706,9 @@ class PointCloud:
                     f"'extent' must have shape ({self.dim}, 2), got {ext.shape}"
                 )
             if np.any(ext[:, 1] <= ext[:, 0]):
-                raise ValueError(f"'extent' needs max > min on every axis, got {ext.tolist()}")
+                raise ValueError(
+                    f"'extent' needs max > min on every axis, got {ext.tolist()}"
+                )
             domain_min, domain_max, periodic = ext[:, 0], ext[:, 1], False
 
         d_lens = domain_max - domain_min
@@ -1760,7 +1781,10 @@ class PointCloud:
             "integration_method": integration_method,
             "eta_crit": eta_crit,
         }
-        if plane_projection is not None and structure_temp in ("isotropic", "covariant"):
+        if plane_projection is not None and structure_temp in (
+            "isotropic",
+            "covariant",
+        ):
             # the line-of-sight integral of the 3D kernel; separable kernels
             # and fixed-grid stencils project exactly as they are
             deposit_kwargs["projected"] = True
@@ -1774,25 +1798,35 @@ class PointCloud:
 
         if self.verbose and self.rank == 0:
             structure_prefix = f"{structure_temp} " if structure_temp else ""
-            print(f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel")
+            print(
+                f"[smudgy] Depositing using {structure_prefix}'{kernel_name_temp}' kernel"
+            )
 
         if brick is None:
             brick = gather_to_root and self.backend == "quadrants"
         if self.size == 1:
-            grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
+            grids = execution._dispatch(
+                "deposit", backend=self.backend, **deposit_kwargs
+            )
         elif brick:
             # every rank deposits onto its own brick; root sums the bricks
             *grids, offset = execution._dispatch(
                 "deposit", backend=self.backend, brick=True, **deposit_kwargs
             )
             grids = execution._sum_bricks(
-                self.comm, grids, offset, gridnums_temp,
-                root=root if gather_to_root else 0, to_all=not gather_to_root,
+                self.comm,
+                grids,
+                offset,
+                gridnums_temp,
+                root=root if gather_to_root else 0,
+                to_all=not gather_to_root,
             )
         else:
             # every rank deposits onto a full grid; the grids are summed onto
             # `root` only or onto every rank
-            grids = execution._dispatch("deposit", backend=self.backend, **deposit_kwargs)
+            grids = execution._dispatch(
+                "deposit", backend=self.backend, **deposit_kwargs
+            )
             if gather_to_root:
                 grids = execution._reduce_sum_to_root(self.comm, grids, root=root)
             else:

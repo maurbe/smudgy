@@ -46,11 +46,19 @@ def _make_dataset(mode, rng, dim=3):
     elif mode == "wraparound":
         n_a, n_b = 40, 40
         a = np.stack(
-            [rng.uniform(0.0, 0.02, n_a), rng.uniform(0.0, 1.0, n_a), rng.uniform(0.0, 1.0, n_a)],
+            [
+                rng.uniform(0.0, 0.02, n_a),
+                rng.uniform(0.0, 1.0, n_a),
+                rng.uniform(0.0, 1.0, n_a),
+            ],
             axis=1,
         )
         b = np.stack(
-            [rng.uniform(0.98, 1.0, n_b), rng.uniform(0.0, 1.0, n_b), rng.uniform(0.0, 1.0, n_b)],
+            [
+                rng.uniform(0.98, 1.0, n_b),
+                rng.uniform(0.0, 1.0, n_b),
+                rng.uniform(0.0, 1.0, n_b),
+            ],
             axis=1,
         )
         filler = rng.uniform(0.0, 1.0, size=(220, dim))
@@ -61,7 +69,9 @@ def _make_dataset(mode, rng, dim=3):
     return positions, weights
 
 
-def _run_pipeline_under_mpi(out_path, dist_mode, structure, periodic, n_query, extrapolate):
+def _run_pipeline_under_mpi(
+    out_path, dist_mode, structure, periodic, n_query, extrapolate
+):
     from mpi4py import MPI
 
     from smudgy import PointCloud
@@ -78,18 +88,28 @@ def _run_pipeline_under_mpi(out_path, dist_mode, structure, periodic, n_query, e
     boxsize = 1.0 if periodic else None
 
     qrng = np.random.default_rng(43)
-    lo, hi = (0.0, 1.0) if periodic else (-0.05 if extrapolate else 0.0, 1.05 if extrapolate else 1.0)
+    lo, hi = (
+        (0.0, 1.0)
+        if periodic
+        else (-0.05 if extrapolate else 0.0, 1.05 if extrapolate else 1.0)
+    )
     query = qrng.uniform(lo, hi, size=(n_query, dim)).astype(np.float32)
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
-        verbose=False, backend="quadrants", arch="cpu",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=boxsize,
+        verbose=False,
+        backend="quadrants",
+        arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure=structure)
     pc.find_neighbors()
     pc.compute_smoothing()
     pc.compute_density()
     pc.add_fields("sf", scalar_field)
-    interp_local = pc.interpolate("sf", query_positions=query.copy(), structure=structure)
+    interp_local = pc.interpolate(
+        "sf", query_positions=query.copy(), structure=structure
+    )
     interp_full = pc.gather_queries(interp_local)
 
     if rank == 0:
@@ -115,14 +135,20 @@ def _run_zero_query_ranks_under_mpi(out_path):
     query = np.array([[0.2, 0.3, 0.4], [0.6, 0.5, 0.5]], dtype=np.float32)
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=1.0,
-        verbose=False, backend="quadrants", arch="cpu",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=1.0,
+        verbose=False,
+        backend="quadrants",
+        arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure="isotropic")
     pc.find_neighbors()
     pc.compute_smoothing()
     pc.compute_density()
     pc.add_fields("sf", scalar_field)
-    interp_local = pc.interpolate("sf", query_positions=query.copy(), structure="isotropic")
+    interp_local = pc.interpolate(
+        "sf", query_positions=query.copy(), structure="isotropic"
+    )
     interp_full = pc.gather_queries(interp_local)
 
     if rank == 0:
@@ -134,7 +160,12 @@ def _run_under_mpi():
     mode = sys.argv[1]
     if mode == "pipeline":
         _run_pipeline_under_mpi(
-            sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], int(sys.argv[6]), sys.argv[7]
+            sys.argv[2],
+            sys.argv[3],
+            sys.argv[4],
+            sys.argv[5],
+            int(sys.argv[6]),
+            sys.argv[7],
         )
     elif mode == "zero_query_ranks":
         _run_zero_query_ranks_under_mpi(sys.argv[2])
@@ -183,7 +214,10 @@ def test_query_positions_local_path_matches_single_rank_reference(
     ref_path = tmp_path / "ref.npz"
     out_path = tmp_path / "result.npz"
     args_tail = [
-        dist_mode, structure, "1" if periodic else "0", str(n_query),
+        dist_mode,
+        structure,
+        "1" if periodic else "0",
+        str(n_query),
         "1" if extrapolate else "0",
     ]
     _mpiexec(1, ["pipeline", str(ref_path), *args_tail])

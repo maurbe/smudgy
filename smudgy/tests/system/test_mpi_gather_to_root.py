@@ -51,8 +51,12 @@ def _run_pipeline_under_mpi(out_path, periodic):
     query = qrng.uniform(0.0, 1.0, size=(n_query, dim)).astype(np.float32)
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
-        verbose=False, backend="quadrants", arch="cpu",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=boxsize,
+        verbose=False,
+        backend="quadrants",
+        arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=10, structure="isotropic")
     pc.find_neighbors()
     pc.compute_smoothing()
@@ -67,8 +71,14 @@ def _run_pipeline_under_mpi(out_path, periodic):
         pc.interpolate("sf", query_positions=query.copy(), structure="isotropic")
     )
     fgrid_root, wgrid_root = pc.deposit(
-        "sf", averaged=True, gridnums=6, adaptive=True, structure="isotropic",
-        return_weights=True, gather_to_root=True, extent=deposit_extent,
+        "sf",
+        averaged=True,
+        gridnums=6,
+        adaptive=True,
+        structure="isotropic",
+        return_weights=True,
+        gather_to_root=True,
+        extent=deposit_extent,
     )
 
     # Every rank must call the same collective the same number of times, so
@@ -117,7 +127,10 @@ def _run_negative_tests_under_mpi(out_path):
     weights = np.ones(n, dtype=np.float32)
 
     pc = PointCloud(
-        positions=positions, weights=weights, boxsize=1.0, verbose=False,
+        positions=positions,
+        weights=weights,
+        boxsize=1.0,
+        verbose=False,
         backend="numpy",
     )
 
@@ -129,13 +142,16 @@ def _run_negative_tests_under_mpi(out_path):
 
     raised_on_shape_mismatch = False
     try:
-        wrong_shape = np.zeros(pc.decomposition.local_global_indices.shape[0] + 7, dtype=np.float32)
+        wrong_shape = np.zeros(
+            pc.decomposition.local_global_indices.shape[0] + 7, dtype=np.float32
+        )
         pc.gather_particles(wrong_shape)
     except ValueError:
         raised_on_shape_mismatch = True
 
     all_ok = comm.allreduce(
-        raised_without_query_routing and raised_on_shape_mismatch, op=MPI.LAND,
+        raised_without_query_routing and raised_on_shape_mismatch,
+        op=MPI.LAND,
     )
     if rank == 0:
         np.savez(out_path, all_ok=np.asarray(all_ok))
@@ -160,8 +176,12 @@ def _run_zero_local_rows_under_mpi(out_path):
     query = np.array([[0.2, 0.3, 0.4], [0.6, 0.5, 0.5]], dtype=np.float32)
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=None,
-        verbose=False, backend="quadrants", arch="cpu",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=None,
+        verbose=False,
+        backend="quadrants",
+        arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=2, structure="isotropic")
     pc.find_neighbors()
     pc.compute_smoothing()
@@ -246,7 +266,9 @@ def test_zero_local_rows_no_deadlock(tmp_path):
     ref = np.load(ref_path)
     result = np.load(out_path)
     assert np.allclose(ref["density"], result["density"], rtol=1e-5, atol=1e-6)
-    assert np.allclose(ref["interp_query"], result["interp_query"], rtol=1e-5, atol=1e-6)
+    assert np.allclose(
+        ref["interp_query"], result["interp_query"], rtol=1e-5, atol=1e-6
+    )
 
 
 if __name__ == "__main__":

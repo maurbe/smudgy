@@ -383,7 +383,9 @@ def hilbert_partition_and_scatter(
         (counts, boundary_codes) if rank == root else None, root=root
     )
 
-    local_positions = execution._scatterv_rows(comm, positions_sorted, counts, root=root)
+    local_positions = execution._scatterv_rows(
+        comm, positions_sorted, counts, root=root
+    )
     local_weights = execution._scatterv_rows(comm, weights_sorted, counts, root=root)
     local_global_indices = execution._scatterv_rows(
         comm, global_indices_sorted, counts, root=root
@@ -421,7 +423,9 @@ def _partition_boundary_codes(
     boundary_codes = np.full(size + 1, max_code, dtype=np.uint64)
     boundary_codes[0] = 0
     if n > 0:
-        starts = np.cumsum(counts)[:-1]  # rank i's chunk starts at starts[i-1], i=1..size-1
+        starts = np.cumsum(counts)[
+            :-1
+        ]  # rank i's chunk starts at starts[i-1], i=1..size-1
         valid = starts < n
         clipped_starts = np.clip(starts, 0, n - 1)
         boundary_codes[1:size] = np.where(valid, codes_sorted[clipped_starts], max_code)
@@ -493,7 +497,9 @@ def route_query_positions(
 
     counts = comm.bcast(counts if rank == root else None, root=root)
 
-    local_positions = execution._scatterv_rows(comm, positions_sorted, counts, root=root)
+    local_positions = execution._scatterv_rows(
+        comm, positions_sorted, counts, root=root
+    )
     local_global_indices = execution._scatterv_rows(
         comm, global_indices_sorted, counts, root=root
     )

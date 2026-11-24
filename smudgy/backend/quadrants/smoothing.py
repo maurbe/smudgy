@@ -83,7 +83,9 @@ def _compute_hmat_kernel(
         for k in range(K):
             j = nn_inds[q, k]
             w = weights[j]
-            d = _neighbor_offset(query_positions, q, positions, j, boxsize, dim, periodic)
+            d = _neighbor_offset(
+                query_positions, q, positions, j, boxsize, dim, periodic
+            )
             Sigma += w * d.outer_product(d)
             wsum += w
         Sigma /= wsum

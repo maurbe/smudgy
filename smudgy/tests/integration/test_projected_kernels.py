@@ -33,7 +33,12 @@ def _profile_quad(name, rho):
     pts = [np.sqrt(b * b - rho * rho) for b in BREAKPOINTS[name] if b > rho]
     val, _ = quad(
         lambda s: float(k._kernel_values(np.array(np.sqrt(rho * rho + s * s)))),
-        0.0, s_max, points=pts or None, epsabs=1e-14, epsrel=1e-13, limit=200,
+        0.0,
+        s_max,
+        points=pts or None,
+        epsabs=1e-14,
+        epsrel=1e-13,
+        limit=200,
     )
     return 2.0 * val
 
@@ -59,8 +64,14 @@ def test_closed_form_matches_quadrature(name):
 
     q = rho[1:]
     M_ref = [
-        quad(lambda r: float(projected_profile(name, r)) * r, 0.0, qq, limit=200,
-             points=[b for b in BREAKPOINTS[name] if b < qq] or None, epsabs=1e-14)[0]
+        quad(
+            lambda r: float(projected_profile(name, r)) * r,
+            0.0,
+            qq,
+            limit=200,
+            points=[b for b in BREAKPOINTS[name] if b < qq] or None,
+            epsabs=1e-14,
+        )[0]
         for qq in q
     ]
     M = projected_cumulative(name, q)
@@ -73,8 +84,11 @@ def test_projection_conserves_3d_mass(name):
     R = SPHERICAL[name].support
     k = get_kernel(name, 3)
     mass_3d = quad(
-        lambda r: float(k._kernel_values(np.array(r))) * r * r, 0.0, R,
-        points=BREAKPOINTS[name] or None, epsabs=1e-14,
+        lambda r: float(k._kernel_values(np.array(r))) * r * r,
+        0.0,
+        R,
+        points=BREAKPOINTS[name] or None,
+        epsabs=1e-14,
     )[0]
     np.testing.assert_allclose(projected_cumulative(name, R), 2.0 * mass_3d, rtol=1e-11)
 
@@ -88,7 +102,10 @@ def test_table_is_mass_exact(name):
     for b in BREAKPOINTS[name]:  # kinks of F fall on nodes
         assert np.isclose(x_nodes, b * b, rtol=0, atol=1e-12).any()
     np.testing.assert_allclose(
-        interpolate_table(name, np.sqrt(x_nodes[:-1])), F[:-1], rtol=0, atol=1e-13 * F[0]
+        interpolate_table(name, np.sqrt(x_nodes[:-1])),
+        F[:-1],
+        rtol=0,
+        atol=1e-13 * F[0],
     )
     t, wt = np.polynomial.legendre.leggauss(4)  # exact for the quadratic in t
     t, wt = 0.5 * (t + 1.0), 0.5 * wt
@@ -147,9 +164,13 @@ def test_device_lookup(name):
     # float32 t = q^2 / dx - i is good to ~1e-4 near the edge; that only
     # shows where F is steep there (tophat, measured 2.5e-6)
     atol = (1e-5 if name == "tophat" else 2e-6) * peak
-    np.testing.assert_allclose(out[:, 0], interpolate_table(name, q64), rtol=0, atol=atol)
+    np.testing.assert_allclose(
+        out[:, 0], interpolate_table(name, q64), rtol=0, atol=atol
+    )
     total = projected_cumulative(name, R)
-    np.testing.assert_allclose(out[:, 1], projected_cumulative(name, q64), rtol=0, atol=2e-6 * total)
+    np.testing.assert_allclose(
+        out[:, 1], projected_cumulative(name, q64), rtol=0, atol=2e-6 * total
+    )
     assert np.all(out[:, 3] == np.float32(SPHERICAL[name].sigma[2]))
     # gradient: central differences of the host interpolant, away from nodes
     # (dF/dq jumps there) and the singular end intervals
@@ -157,18 +178,27 @@ def test_device_lookup(name):
     t = u - np.floor(u)
     ok = (t > 0.05) & (t < 0.95) & (u > 1) & (u < N_TABLE - 1)
     eps = 1e-7 * R
-    fd = (interpolate_table(name, q64 + eps) - interpolate_table(name, q64 - eps)) / (2 * eps)
+    fd = (interpolate_table(name, q64 + eps) - interpolate_table(name, q64 - eps)) / (
+        2 * eps
+    )
     scale = np.abs(fd[ok]).max()
     np.testing.assert_allclose(out[ok, 2], fd[ok], rtol=0, atol=2e-3 * scale)
 
 
 @pytest.mark.parametrize("eta_crit", [4.0, 30.0])
-@pytest.mark.parametrize("name", ["tophat", "cubic_spline", "quintic_spline", "wendland_c6"])
+@pytest.mark.parametrize(
+    "name", ["tophat", "cubic_spline", "quintic_spline", "wendland_c6"]
+)
 def test_projected_sample_table_sums_to_one(name, eta_crit):
     """The projected sample table carries the projected kernel's mass."""
     ensure_initialized()
     grid = build_kernel_sample_grid(name, 2, eta_crit, projected=True)
-    expected = 2 * np.pi * SPHERICAL[name].sigma[2] * projected_cumulative(name, SPHERICAL[name].support)
+    expected = (
+        2
+        * np.pi
+        * SPHERICAL[name].sigma[2]
+        * projected_cumulative(name, SPHERICAL[name].support)
+    )
     np.testing.assert_allclose(grid["integrals"].sum(), expected, rtol=2e-6)
     plain = build_kernel_sample_grid(name, 2, eta_crit)
     assert not np.array_equal(plain["integrals"], grid["integrals"])
@@ -184,7 +214,12 @@ def test_projected_sample_table_shell_masses(name):
     edges = np.linspace(0.0, R, n_q + 1)
     shell = np.floor(np.linalg.norm(grid["coords"], axis=1) / (R / n_q)).astype(int)
     mass = np.bincount(shell, weights=grid["integrals"], minlength=n_q)
-    exact = 2 * np.pi * SPHERICAL[name].sigma[2] * np.diff(projected_cumulative(name, edges))
+    exact = (
+        2
+        * np.pi
+        * SPHERICAL[name].sigma[2]
+        * np.diff(projected_cumulative(name, edges))
+    )
     # float32 differences of the cumulative mass: measured <= 2e-6
     np.testing.assert_allclose(mass, exact, rtol=0, atol=5e-6 * exact.max())
 

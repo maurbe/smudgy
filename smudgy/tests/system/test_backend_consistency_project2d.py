@@ -108,8 +108,9 @@ def test_projection_is_shadow(plane):
     H = np.einsum("nij,njk->nik", H, H)  # squared: axis ratios up to ~10
     p = list(plane)
     expected = np.stack([sqrtm((h @ h.T)[np.ix_(p, p)]).real for h in H])
-    tol = np.broadcast_to(1e-5 * np.linalg.eigvalsh(expected)[:, -1, None, None],
-                          expected.shape)  # measured 4e-7
+    tol = np.broadcast_to(
+        1e-5 * np.linalg.eigvalsh(expected)[:, -1, None, None], expected.shape
+    )  # measured 4e-7
     for project in (project_2d_numpy, project_2d_qd):
         h2d, evals, evecs = project(H.astype(np.float32), plane)
         np.testing.assert_array_less(np.abs(h2d - expected), tol)

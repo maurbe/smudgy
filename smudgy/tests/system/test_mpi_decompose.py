@@ -45,7 +45,10 @@ def _run_props_under_mpi(out_path, n, dist_mode, periodic):
     boxsize = 1.0 if periodic else None
 
     pc = PointCloud(
-        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        positions=positions,
+        weights=weights,
+        boxsize=boxsize,
+        verbose=False,
         backend="numpy",
     )
     # `positions`/`weights` above are the ground truth to reconstruct against
@@ -129,7 +132,10 @@ def _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodi
     boxsize = 1.0 if periodic else None
 
     pc = PointCloud(
-        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        positions=positions,
+        weights=weights,
+        boxsize=boxsize,
+        verbose=False,
         backend="numpy",
     )
 
@@ -180,7 +186,9 @@ def _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodi
 
         # Same identity-permutation check as `_run_props_under_mpi`, for
         # `route_query_positions`'s own size==1 fast path.
-        identity_order_ok = size != 1 or np.array_equal(concatenated, np.arange(n_query))
+        identity_order_ok = size != 1 or np.array_equal(
+            concatenated, np.arange(n_query)
+        )
 
         result = {
             "bijection_ok": bijection_ok,
@@ -197,11 +205,19 @@ def _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodi
 def _run_under_mpi():
     mode = sys.argv[1]
     if mode == "props":
-        out_path, n, dist_mode, periodic = sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5] == "1"
+        out_path, n, dist_mode, periodic = (
+            sys.argv[2],
+            int(sys.argv[3]),
+            sys.argv[4],
+            sys.argv[5] == "1",
+        )
         _run_props_under_mpi(out_path, n, dist_mode, periodic)
     elif mode == "route_query":
         out_path, n_particles, n_query, periodic = (
-            sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5] == "1"
+            sys.argv[2],
+            int(sys.argv[3]),
+            int(sys.argv[4]),
+            sys.argv[5] == "1",
         )
         _run_route_query_positions_under_mpi(out_path, n_particles, n_query, periodic)
     else:
@@ -261,11 +277,19 @@ def test_decomposition_properties(tmp_path, n_particles, n_ranks, dist_mode, per
         (5, 3, 5, False),  # N < P AND M < P: some ranks get zero of both
     ],
 )
-def test_route_query_positions_properties(tmp_path, n_particles, n_query, n_ranks, periodic):
+def test_route_query_positions_properties(
+    tmp_path, n_particles, n_query, n_ranks, periodic
+):
     out_path = tmp_path / "result.npz"
     _mpiexec(
         n_ranks,
-        ["route_query", str(out_path), str(n_particles), str(n_query), "1" if periodic else "0"],
+        [
+            "route_query",
+            str(out_path),
+            str(n_particles),
+            str(n_query),
+            "1" if periodic else "0",
+        ],
     )
     result = np.load(out_path)
 

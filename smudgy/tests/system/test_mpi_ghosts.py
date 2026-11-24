@@ -43,11 +43,19 @@ def _make_dataset(mode, rng):
     elif mode == "wraparound":
         n_a, n_b = 40, 40
         a = np.stack(
-            [rng.uniform(0.0, 0.02, n_a), rng.uniform(0.0, 1.0, n_a), rng.uniform(0.0, 1.0, n_a)],
+            [
+                rng.uniform(0.0, 0.02, n_a),
+                rng.uniform(0.0, 1.0, n_a),
+                rng.uniform(0.0, 1.0, n_a),
+            ],
             axis=1,
         )
         b = np.stack(
-            [rng.uniform(0.98, 1.0, n_b), rng.uniform(0.0, 1.0, n_b), rng.uniform(0.0, 1.0, n_b)],
+            [
+                rng.uniform(0.98, 1.0, n_b),
+                rng.uniform(0.0, 1.0, n_b),
+                rng.uniform(0.0, 1.0, n_b),
+            ],
             axis=1,
         )
         filler = rng.uniform(0.0, 1.0, size=(200, dim))
@@ -72,7 +80,10 @@ def _run_knn_under_mpi(out_path, mode, k):
     positions, weights, boxsize = _make_dataset(mode, rng)
 
     pc = PointCloud(
-        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        positions=positions,
+        weights=weights,
+        boxsize=boxsize,
+        verbose=False,
         backend="numpy",
     )
     pc.find_neighbors(num_neighbors=k)
@@ -86,7 +97,11 @@ def _run_knn_under_mpi(out_path, mode, k):
     for row in pc.ghosts.nn_inds:
         s = set()
         for idx in row:
-            s.add(int(local_global[idx]) if idx < n_local else int(ghost_global[idx - n_local]))
+            s.add(
+                int(local_global[idx])
+                if idx < n_local
+                else int(ghost_global[idx - n_local])
+            )
         global_sets.append(s)
 
     # reference: full-dataset tree, built from the original (pre-decomposition)
@@ -152,7 +167,13 @@ def _run_deadlock_check_under_mpi(out_path):
     positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
     weights = np.ones(n, dtype=np.float32)
 
-    pc = PointCloud(positions=positions, weights=weights, boxsize=None, verbose=False, backend="numpy")
+    pc = PointCloud(
+        positions=positions,
+        weights=weights,
+        boxsize=None,
+        verbose=False,
+        backend="numpy",
+    )
     pc.find_neighbors(num_neighbors=k)
 
     shape_ok = pc.ghosts.nn_inds.shape == (pc.ghosts.n_local, k)
@@ -182,7 +203,13 @@ def _run_half_box_guard_under_mpi():
     positions = np.array([[0.1, 0.1, 0.1], [0.6, 0.6, 0.6]], dtype=np.float32)
     weights = np.ones(n, dtype=np.float32)
 
-    pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")
+    pc = PointCloud(
+        positions=positions,
+        weights=weights,
+        boxsize=1.0,
+        verbose=False,
+        backend="numpy",
+    )
     try:
         pc.find_neighbors(num_neighbors=k)
         raised = False
@@ -207,7 +234,13 @@ def _run_negative_test_under_mpi():
     positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
     weights = np.ones(n, dtype=np.float32)
 
-    pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")
+    pc = PointCloud(
+        positions=positions,
+        weights=weights,
+        boxsize=1.0,
+        verbose=False,
+        backend="numpy",
+    )
     try:
         pc.find_neighbors(num_neighbors=n + 5)
         raised = False
@@ -238,7 +271,13 @@ def _run_push_to_ghosts_under_mpi(out_path):
     positions = rng.uniform(0.0, 1.0, size=(n, dim)).astype(np.float32)
     weights = np.ones(n, dtype=np.float32)
 
-    pc = PointCloud(positions=positions, weights=weights, boxsize=1.0, verbose=False, backend="numpy")
+    pc = PointCloud(
+        positions=positions,
+        weights=weights,
+        boxsize=1.0,
+        verbose=False,
+        backend="numpy",
+    )
     pc.find_neighbors(num_neighbors=8)
 
     # a synthetic local array that unambiguously encodes both which particle
@@ -289,21 +328,33 @@ def _run_target_positions_under_mpi(out_path, mode):
     periodic = mode == "periodic"
 
     pc = PointCloud(
-        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        positions=positions,
+        weights=weights,
+        boxsize=boxsize,
+        verbose=False,
         backend="numpy",
     )
 
     default_ghosts = exchange_ghosts(
-        comm, pc.decomposition, k, dim, periodic, boxsize,
+        comm,
+        pc.decomposition,
+        k,
+        dim,
+        periodic,
+        boxsize,
     )
     explicit_self_ghosts = exchange_ghosts(
-        comm, pc.decomposition, k, dim, periodic, boxsize,
+        comm,
+        pc.decomposition,
+        k,
+        dim,
+        periodic,
+        boxsize,
         target_positions=pc.decomposition.local_positions,
     )
-    equivalence_ok = (
-        np.array_equal(default_ghosts.nn_inds, explicit_self_ghosts.nn_inds)
-        and np.array_equal(default_ghosts.nn_dists, explicit_self_ghosts.nn_dists)
-    )
+    equivalence_ok = np.array_equal(
+        default_ghosts.nn_inds, explicit_self_ghosts.nn_inds
+    ) and np.array_equal(default_ghosts.nn_dists, explicit_self_ghosts.nn_dists)
 
     # a separate, unrelated query-point set (not particles at all) -- a
     # different draw per rank (via the rank-offset seed), all still owned/
@@ -320,7 +371,13 @@ def _run_target_positions_under_mpi(out_path, mode):
     query = qrng.uniform(0.3, 0.4, size=(n_query_local, dim)).astype(np.float32)
 
     query_ghosts = exchange_ghosts(
-        comm, pc.decomposition, k, dim, periodic, boxsize, target_positions=query,
+        comm,
+        pc.decomposition,
+        k,
+        dim,
+        periodic,
+        boxsize,
+        target_positions=query,
     )
     shape_ok = query_ghosts.nn_inds.shape == (n_query_local, k)
 
@@ -337,14 +394,20 @@ def _run_target_positions_under_mpi(out_path, mode):
         mine = set()
         for idx in query_ghosts.nn_inds[i]:
             mine.add(
-                int(local_global[idx]) if idx < n_local else int(ghost_global[idx - n_local])
+                int(local_global[idx])
+                if idx < n_local
+                else int(ghost_global[idx - n_local])
             )
         ref = set(int(x) for x in ref_inds[i])
         if mine != ref:
             all_match = False
         max_dist_err = max(
             max_dist_err,
-            float(np.max(np.abs(np.sort(query_ghosts.nn_dists[i]) - np.sort(ref_dists[i])))),
+            float(
+                np.max(
+                    np.abs(np.sort(query_ghosts.nn_dists[i]) - np.sort(ref_dists[i]))
+                )
+            ),
         )
 
     result = {
@@ -398,7 +461,10 @@ def _run_sparse_target_density_under_mpi(out_path):
     boxsize = 1.0
 
     pc = PointCloud(
-        positions=positions, weights=weights, boxsize=boxsize, verbose=False,
+        positions=positions,
+        weights=weights,
+        boxsize=boxsize,
+        verbose=False,
         backend="numpy",
     )
 
@@ -413,7 +479,13 @@ def _run_sparse_target_density_under_mpi(out_path):
     query_ghosts = None
     try:
         query_ghosts = exchange_ghosts(
-            comm, pc.decomposition, k, dim, True, boxsize, target_positions=query,
+            comm,
+            pc.decomposition,
+            k,
+            dim,
+            True,
+            boxsize,
+            target_positions=query,
         )
     except ValueError:
         raised = True
@@ -430,7 +502,9 @@ def _run_sparse_target_density_under_mpi(out_path):
             mine = set()
             for idx in query_ghosts.nn_inds[i]:
                 mine.add(
-                    int(local_global[idx]) if idx < n_local else int(ghost_global[idx - n_local])
+                    int(local_global[idx])
+                    if idx < n_local
+                    else int(ghost_global[idx - n_local])
                 )
             ref = set(int(x) for x in ref_inds[i])
             if mine != ref:
@@ -468,10 +542,14 @@ def _run_multi_round_under_mpi(out_path, periodic, n, dim):
         positions = rng.uniform(0.0, 1.0, (n, dim)).astype(np.float32)
     else:
         centers = rng.uniform(0.1, 0.9, (6, dim))
-        positions = centers[rng.integers(0, 6, n)] + 0.04 * rng.standard_normal((n, dim))
+        positions = centers[rng.integers(0, 6, n)] + 0.04 * rng.standard_normal(
+            (n, dim)
+        )
         positions = np.mod(positions, 1.0).astype(np.float32)
     boxsize = 1.0 if periodic else None
-    pc = PointCloud(positions=positions, boxsize=boxsize, verbose=False, backend="numpy")
+    pc = PointCloud(
+        positions=positions, boxsize=boxsize, verbose=False, backend="numpy"
+    )
 
     rounds = [0]
     real_select = ghosts_module._select_ghosts_to_send
@@ -499,31 +577,41 @@ def _run_multi_round_under_mpi(out_path, periodic, n, dim):
         set(combined_global[row].tolist()) == set(ref.tolist())
         for row, ref in zip(g.nn_inds, ref_inds)
     )
-    dist_err = float(np.max(np.abs(np.sort(g.nn_dists, axis=1) - ref_dists), initial=0.0))
+    dist_err = float(
+        np.max(np.abs(np.sort(g.nn_dists, axis=1) - ref_dists), initial=0.0)
+    )
 
     # ghosts ordered by (source rank, source local index), as one exchange
     # of the whole set delivers them
-    order_ok = bool(np.all(np.diff(g.ghost_source_rank * (n + 1) + g.ghost_source_local_index) > 0))
+    order_ok = bool(
+        np.all(np.diff(g.ghost_source_rank * (n + 1) + g.ghost_source_local_index) > 0)
+    )
     pushed = ghosts_module.push_to_ghosts(
         comm, g, local_global.astype(np.float64) * 10.0 + rank
     )
-    push_ok = bool(np.array_equal(
-        pushed, g.ghost_global_index * 10.0 + g.ghost_source_rank
-    ))
+    push_ok = bool(
+        np.array_equal(pushed, g.ghost_global_index * 10.0 + g.ghost_source_rank)
+    )
 
     ok = comm.allreduce(sets_ok and order_ok and push_ok, op=MPI.LAND)
     max_err = comm.allreduce(dist_err, op=MPI.MAX)
     max_rounds = comm.allreduce(rounds[0], op=MPI.MAX)
     if rank == 0:
-        np.savez(out_path, ok=np.asarray(ok), max_err=np.asarray(max_err),
-                 rounds=np.asarray(max_rounds))
+        np.savez(
+            out_path,
+            ok=np.asarray(ok),
+            max_err=np.asarray(max_err),
+            rounds=np.asarray(max_rounds),
+        )
     print(f"RANK {rank} DONE")
 
 
 def _run_under_mpi():
     mode = sys.argv[1]
     if mode == "multi_round":
-        _run_multi_round_under_mpi(sys.argv[2], sys.argv[3] == "periodic", int(sys.argv[4]), int(sys.argv[5]))
+        _run_multi_round_under_mpi(
+            sys.argv[2], sys.argv[3] == "periodic", int(sys.argv[4]), int(sys.argv[5])
+        )
     elif mode == "target_positions":
         _run_target_positions_under_mpi(sys.argv[2], sys.argv[3])
     elif mode == "sparse_target_density":
@@ -614,8 +702,6 @@ def test_half_box_guard_raises_on_every_rank_without_deadlock():
     # synchronized (see the fix in ghosts.py), a non-raising rank would hang
     # forever waiting on a peer that already exited, and this would time out.
     _mpiexec(5, ["half_box_guard"], timeout=30)
-
-
 
 
 @pytest.mark.parametrize(

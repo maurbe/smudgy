@@ -76,7 +76,9 @@ def _run_under_mpi():
         # via local_global_indices/query_routing before comparing across
         # rank counts.
         density_full = pc.gather_particles(density)
-        interp_self_full = pc.gather_particles(pc.interpolate("sf", structure=structure))
+        interp_self_full = pc.gather_particles(
+            pc.interpolate("sf", structure=structure)
+        )
         interp_query_local = pc.interpolate(
             "sf", query_positions=query_positions, structure=structure
         )

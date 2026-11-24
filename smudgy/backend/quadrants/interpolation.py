@@ -170,13 +170,24 @@ def _density_kernel(
             r_vec = _relative_position(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
-            q, _, scale = _kernel_inputs(r_vec, h, inv_det, n, dim, covariant, sigma_val, eps)
+            q, _, scale = _kernel_inputs(
+                r_vec, h, inv_det, n, dim, covariant, sigma_val, eps
+            )
             acc += weights[j] * evaluate_fn(q, dim) * scale
         density_out[n] = acc
 
 
 def density(
-    *, kernel_name, dim, query_positions, positions, weights, nn_inds, h, boxsize, structure
+    *,
+    kernel_name,
+    dim,
+    query_positions,
+    positions,
+    weights,
+    nn_inds,
+    h,
+    boxsize,
+    structure,
 ):
     """Compute SPH densities (Quadrants backend).
 
@@ -258,7 +269,9 @@ def _field_kernel(
             r_vec = _relative_position(
                 query_positions, n, positions, j, boxsize, dim, periodic
             )
-            q, _, scale = _kernel_inputs(r_vec, h, inv_det, j, dim, covariant, sigma_val, eps)
+            q, _, scale = _kernel_inputs(
+                r_vec, h, inv_det, j, dim, covariant, sigma_val, eps
+            )
             w = evaluate_fn(q, dim) * scale * weights[j]
             for f in qd.static(range(F)):
                 acc[f] += fields[j, f] * w
@@ -382,7 +395,9 @@ def _curl_kernel(
             grad_w = gradient_fn(q, grad_q, dim) * scale * weights[j]
             for f in qd.static(range(F)):
                 if qd.static(dim == 2):
-                    acc[f, 0] += fields[j, f, 0] * grad_w[1] - fields[j, f, 1] * grad_w[0]
+                    acc[f, 0] += (
+                        fields[j, f, 0] * grad_w[1] - fields[j, f, 1] * grad_w[0]
+                    )
                 else:
                     fv = qd.Vector([fields[j, f, a] for a in qd.static(range(3))])
                     c = fv.cross(grad_w)
@@ -448,12 +463,20 @@ def interpolate(
     h, inv_det = _cached_smoothing_inputs(h, kernel.support, dim, covariant, cache)
 
     if mode == "field":
-        fn, kernel_fn, out = _field_kernel, kernel.evaluate, np.zeros((N, F), np.float32)
+        fn, kernel_fn, out = (
+            _field_kernel,
+            kernel.evaluate,
+            np.zeros((N, F), np.float32),
+        )
     elif mode == "gradient":
         fn, kernel_fn = _gradient_kernel, kernel.gradient
         out = np.zeros((N, F, dim), dtype=np.float32)
     elif mode == "divergence":
-        fn, kernel_fn, out = _divergence_kernel, kernel.gradient, np.zeros((N, F), np.float32)
+        fn, kernel_fn, out = (
+            _divergence_kernel,
+            kernel.gradient,
+            np.zeros((N, F), np.float32),
+        )
     else:  # "curl" (validated above)
         C = 1 if dim == 2 else dim
         fn, kernel_fn = _curl_kernel, kernel.gradient

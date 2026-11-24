@@ -43,8 +43,11 @@ def _run_get_under_mpi(out_path):
     scalar_field = np.random.default_rng(72).uniform(size=n).astype(np.float32)
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=None,
-        verbose=False, backend="numpy",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=None,
+        verbose=False,
+        backend="numpy",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure="isotropic")
     pc.find_neighbors()
     pc.compute_smoothing()
@@ -83,8 +86,11 @@ def _run_get_under_mpi(out_path):
 
     # not-yet-computed error path: a fresh PointCloud, density never computed
     pc2 = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=None,
-        verbose=False, backend="numpy",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=None,
+        verbose=False,
+        backend="numpy",
     )
     not_computed_raised = False
     try:

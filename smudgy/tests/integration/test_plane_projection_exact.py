@@ -71,7 +71,9 @@ def _particles(kernel_name, seed=0, minor=(0.35, 0.5)):
     Tensor axes are h * (1, U(0.5, 0.8), U(*minor)), randomly rotated.
     """
     rng = np.random.default_rng(seed)
-    support = get_kernel(kernel_name if kernel_name not in FIXED_KERNELS else "cubic_spline", 3).support
+    support = get_kernel(
+        kernel_name if kernel_name not in FIXED_KERNELS else "cubic_spline", 3
+    ).support
     pos = rng.uniform(0, 1, (N, 3))
     weights = rng.uniform(0.5, 1.5, N)
     h = rng.uniform(R_MIN, R_MAX, N) / support
@@ -102,7 +104,9 @@ def _projected_profile(kernel_name, n_rho=4001, n_s=2000):
     s_max = np.sqrt(np.maximum(R * R - rho * rho, 0.0))[:, None]
     s = 0.5 * (x + 1.0) * s_max
     ws = 0.5 * wq * s_max
-    F = 2.0 * (ws * kernel._kernel_values(np.sqrt(rho[:, None] ** 2 + s**2))).sum(axis=1)
+    F = 2.0 * (ws * kernel._kernel_values(np.sqrt(rho[:, None] ** 2 + s**2))).sum(
+        axis=1
+    )
     return rho, kernel.sigma * F
 
 
@@ -165,9 +169,14 @@ def test_projection_matches_reference(kernel_name, structure, plane):
     """2D projected deposit == exact column density integrated over each pixel."""
     gridnums = [GRID_2D_REFERENCE[a] for a in plane]
     image = _cloud(kernel_name, structure).deposit(
-        None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
-        kernel_name=kernel_name, structure=structure,
-        integration_method="simpson", eta_crit=0.0,
+        None,
+        averaged=False,
+        gridnums=gridnums,
+        plane_projection=list(plane),
+        kernel_name=kernel_name,
+        structure=structure,
+        integration_method="simpson",
+        eta_crit=0.0,
     )
     ref = _reference(kernel_name, structure, plane, gridnums)
     tol = TOL_REFERENCE.get(kernel_name, TOL_REFERENCE_DEFAULT)
@@ -186,9 +195,14 @@ def test_projection_matches_reference_same_rule(kernel_name, structure, method):
     plane = (2, 0)
     gridnums = [GRID_3D[a] for a in plane]
     image = _cloud(kernel_name, structure).deposit(
-        None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
-        kernel_name=kernel_name, structure=structure,
-        integration_method=method, eta_crit=0.0,
+        None,
+        averaged=False,
+        gridnums=gridnums,
+        plane_projection=list(plane),
+        kernel_name=kernel_name,
+        structure=structure,
+        integration_method=method,
+        eta_crit=0.0,
     )
     ref = _reference(
         kernel_name, structure, plane, gridnums, rule=QUADRATURE_POINTS_2D[method]
@@ -203,9 +217,15 @@ def test_projection_non_periodic(kernel_name, structure, plane):
     """`extent` grid (no wrapping): each particle renormalised over the grid."""
     gridnums = [GRID_2D_REFERENCE[a] for a in plane]
     image = _cloud(kernel_name, structure).deposit(
-        None, averaged=False, gridnums=gridnums, extent=[[0.0, 1.0]] * 3,
-        plane_projection=list(plane), kernel_name=kernel_name, structure=structure,
-        integration_method="simpson", eta_crit=0.0,
+        None,
+        averaged=False,
+        gridnums=gridnums,
+        extent=[[0.0, 1.0]] * 3,
+        plane_projection=list(plane),
+        kernel_name=kernel_name,
+        structure=structure,
+        integration_method="simpson",
+        eta_crit=0.0,
     )
     ref = _reference(kernel_name, structure, plane, gridnums, periodic=False)
     assert _rel_err(image, ref) < TOL_REFERENCE_DEFAULT
@@ -217,13 +237,22 @@ def test_projection_elongated(kernel_name, plane):
     """Covariant, axis ratios up to 5 (minor axis 0.2-0.25 of the major), same rule."""
     gridnums = [GRID_3D[a] for a in plane]
     image = _cloud(kernel_name, "covariant", minor=(0.2, 0.25)).deposit(
-        None, averaged=False, gridnums=gridnums, plane_projection=list(plane),
-        kernel_name=kernel_name, structure="covariant",
-        integration_method="simpson", eta_crit=0.0,
+        None,
+        averaged=False,
+        gridnums=gridnums,
+        plane_projection=list(plane),
+        kernel_name=kernel_name,
+        structure="covariant",
+        integration_method="simpson",
+        eta_crit=0.0,
     )
     ref = _reference(
-        kernel_name, "covariant", plane, gridnums,
-        rule=QUADRATURE_POINTS_2D["simpson"], minor=(0.2, 0.25),
+        kernel_name,
+        "covariant",
+        plane,
+        gridnums,
+        rule=QUADRATURE_POINTS_2D["simpson"],
+        minor=(0.2, 0.25),
     )
     assert _rel_err(image, ref) < TOL_SAME_RULE_DEFAULT
 
@@ -234,8 +263,13 @@ def test_reference_matches_3d_column(kernel_name, structure):
     """Guards the reference itself: the 3D deposit summed along z agrees with it."""
     plane = (2, 0)
     grid3d = _cloud(kernel_name, structure).deposit(
-        None, averaged=False, gridnums=GRID_3D, kernel_name=kernel_name,
-        structure=structure, integration_method="simpson", eta_crit=0.0,
+        None,
+        averaged=False,
+        gridnums=GRID_3D,
+        kernel_name=kernel_name,
+        structure=structure,
+        integration_method="simpson",
+        eta_crit=0.0,
     )
     ref = _reference(kernel_name, structure, plane, [GRID_3D[a] for a in plane])
     assert _rel_err(_column(grid3d, plane), ref) < TOL_REFERENCE_GUARD
@@ -282,7 +316,9 @@ def test_fixed_grid_projection_is_exact(kernel_name, plane):
     assert _rel_err(image, col) < 1e-5  # measured 1e-7 (cic)
 
 
-@pytest.mark.parametrize("eta_crit", [0.0, 30.0])  # quadrature only / sample table (all particles)
+@pytest.mark.parametrize(
+    "eta_crit", [0.0, 30.0]
+)  # quadrature only / sample table (all particles)
 @pytest.mark.parametrize("structure", ["isotropic", "covariant"])
 @pytest.mark.parametrize("kernel_name", ["cubic_spline", "wendland_c2"])
 def test_projection_conserves_mass(kernel_name, structure, eta_crit):
@@ -293,7 +329,12 @@ def test_projection_conserves_mass(kernel_name, structure, eta_crit):
     """
     _, weights, _, _ = _particles(kernel_name)
     image = _cloud(kernel_name, structure).deposit(
-        None, averaged=False, gridnums=(40, 56), plane_projection=[2, 0],
-        kernel_name=kernel_name, structure=structure, eta_crit=eta_crit,
+        None,
+        averaged=False,
+        gridnums=(40, 56),
+        plane_projection=[2, 0],
+        kernel_name=kernel_name,
+        structure=structure,
+        eta_crit=eta_crit,
     )
     np.testing.assert_allclose(image.sum(), weights.sum(), rtol=1e-5)

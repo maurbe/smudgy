@@ -22,9 +22,17 @@ def test_covariant_noncubic_cells_conserve_weight(gridnums, eta_crit):
     vecs = np.linalg.qr(rng.normal(size=(n, dim, dim)))[0].astype(np.float32)
     vals = np.sort(rng.uniform(0.005, 0.06, (n, dim)), axis=1)[:, ::-1]
     _, grid = dep.deposit(
-        pos, np.ones((n, 1), np.float32), np.ones(n, np.float32),
-        np.ones(dim, np.float32), gridnums, adaptive=True, structure="covariant",
-        kernel_name="cubic_spline", periodic=True, particle_hmat_eigvecs=vecs,
-        particle_hmat_eigvals=vals.astype(np.float32), eta_crit=eta_crit,
+        pos,
+        np.ones((n, 1), np.float32),
+        np.ones(n, np.float32),
+        np.ones(dim, np.float32),
+        gridnums,
+        adaptive=True,
+        structure="covariant",
+        kernel_name="cubic_spline",
+        periodic=True,
+        particle_hmat_eigvecs=vecs,
+        particle_hmat_eigvals=vals.astype(np.float32),
+        eta_crit=eta_crit,
     )
     assert grid.sum() == pytest.approx(n, rel=1e-5)

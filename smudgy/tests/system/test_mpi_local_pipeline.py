@@ -47,11 +47,19 @@ def _make_dataset(mode, rng, dim=3):
     elif mode == "wraparound":
         n_a, n_b = 40, 40
         a = np.stack(
-            [rng.uniform(0.0, 0.02, n_a), rng.uniform(0.0, 1.0, n_a), rng.uniform(0.0, 1.0, n_a)],
+            [
+                rng.uniform(0.0, 0.02, n_a),
+                rng.uniform(0.0, 1.0, n_a),
+                rng.uniform(0.0, 1.0, n_a),
+            ],
             axis=1,
         )
         b = np.stack(
-            [rng.uniform(0.98, 1.0, n_b), rng.uniform(0.0, 1.0, n_b), rng.uniform(0.0, 1.0, n_b)],
+            [
+                rng.uniform(0.98, 1.0, n_b),
+                rng.uniform(0.0, 1.0, n_b),
+                rng.uniform(0.0, 1.0, n_b),
+            ],
             axis=1,
         )
         filler = rng.uniform(0.0, 1.0, size=(220, dim))
@@ -74,15 +82,21 @@ def _run_pipeline_under_mpi(out_path, dist_mode, structure, periodic):
     rng = np.random.default_rng(5)
     positions, weights = _make_dataset(dist_mode, rng)
     dim = positions.shape[1]
-    scalar_field = np.random.default_rng(6).uniform(size=positions.shape[0]).astype(np.float32)
+    scalar_field = (
+        np.random.default_rng(6).uniform(size=positions.shape[0]).astype(np.float32)
+    )
     boxsize = 1.0 if periodic else None
     # deposit() requires boxsize or an explicit extent -- non-periodic clouds
     # here have no boxsize, so give it the same [0,1]^dim domain explicitly.
     deposit_extent = None if periodic else [[0.0, 1.0]] * dim
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=boxsize,
-        verbose=False, backend="quadrants", arch="cpu",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=boxsize,
+        verbose=False,
+        backend="quadrants",
+        arch="cpu",
     ).global_setup(kernel_name="cubic_spline", num_neighbors=8, structure=structure)
     pc.find_neighbors()
     pc.compute_smoothing()
@@ -90,12 +104,18 @@ def _run_pipeline_under_mpi(out_path, dist_mode, structure, periodic):
     pc.add_fields("sf", scalar_field)
     interp = pc.interpolate("sf", structure=structure)
     fgrid, wgrid = pc.deposit(
-        "sf", averaged=True, gridnums=6, adaptive=True, structure=structure,
-        extent=deposit_extent, return_weights=True,
+        "sf",
+        averaged=True,
+        gridnums=6,
+        adaptive=True,
+        structure=structure,
+        extent=deposit_extent,
+        return_weights=True,
     )
 
     density_local = (
-        pc.smoothing.density_covariant if structure == "covariant"
+        pc.smoothing.density_covariant
+        if structure == "covariant"
         else pc.smoothing.density_isotropic
     )
     density_full = pc.gather_particles(density_local)
@@ -128,8 +148,12 @@ def _run_num_neighbors_mismatch_under_mpi(out_path):
     positions, weights = _make_dataset("uniform", rng)
 
     pc = PointCloud(
-        positions=positions.copy(), weights=weights.copy(), boxsize=1.0,
-        verbose=False, backend="quadrants", arch="cpu",
+        positions=positions.copy(),
+        weights=weights.copy(),
+        boxsize=1.0,
+        verbose=False,
+        backend="quadrants",
+        arch="cpu",
     ).global_setup(kernel_name="cubic_spline", structure="isotropic")
     pc.find_neighbors(num_neighbors=8)
     raised = False

@@ -40,8 +40,9 @@ def test_non_positive_num_neighbors_rejected(rng, bad):
 
 # -- smoothing at query positions ------------------------------------------------
 def test_query_smoothing_blocks_particle_operations(rng):
-    pc = _cloud(rng).global_setup(num_neighbors=8, structure="isotropic",
-                                  kernel_name="cubic_spline")
+    pc = _cloud(rng).global_setup(
+        num_neighbors=8, structure="isotropic", kernel_name="cubic_spline"
+    )
     pc.compute_smoothing(query_positions=rng.uniform(0, 1, (50, 3)))
     assert pc.smoothing.smoothing_lengths.shape == (50,)
     with pytest.raises(ValueError, match="query positions"):
@@ -54,8 +55,9 @@ def test_query_smoothing_blocks_particle_operations(rng):
 
 # -- stale densities / kernels -------------------------------------------------
 def test_recomputed_smoothing_invalidates_density(rng):
-    pc = _cloud(rng).global_setup(num_neighbors=8, structure="isotropic",
-                                  kernel_name="cubic_spline")
+    pc = _cloud(rng).global_setup(
+        num_neighbors=8, structure="isotropic", kernel_name="cubic_spline"
+    )
     pc.compute_smoothing()
     pc.compute_density()
     pc.find_neighbors(num_neighbors=16)
@@ -80,12 +82,16 @@ def test_interpolate_without_global_num_neighbors(rng):
     pc.compute_density(kernel_name="cubic_spline", structure="isotropic")
     assert pc.interpolate("f", structure="isotropic").shape == (300, 3)
     q = rng.uniform(0, 1, (20, 3))
-    assert pc.interpolate("f", query_positions=q, structure="isotropic").shape == (20, 3)
+    assert pc.interpolate("f", query_positions=q, structure="isotropic").shape == (
+        20,
+        3,
+    )
 
 
 def test_interpolate_rejects_mismatched_neighbor_lists(rng):
-    pc = _cloud(rng).global_setup(num_neighbors=8, structure="isotropic",
-                                  kernel_name="cubic_spline")
+    pc = _cloud(rng).global_setup(
+        num_neighbors=8, structure="isotropic", kernel_name="cubic_spline"
+    )
     pc.compute_smoothing()
     pc.compute_density()
     pc.find_neighbors(num_neighbors=12)
@@ -95,15 +101,18 @@ def test_interpolate_rejects_mismatched_neighbor_lists(rng):
 
 # -- set_smoothing ---------------------------------------------------------------
 def test_set_smoothing_tensors_without_eigensystem(rng):
-    pc = _cloud(rng).global_setup(num_neighbors=16, structure="covariant",
-                                  kernel_name="cubic_spline")
+    pc = _cloud(rng).global_setup(
+        num_neighbors=16, structure="covariant", kernel_name="cubic_spline"
+    )
     pc.compute_smoothing()
     kw = dict(fields="f", averaged=False, gridnums=12)
     ref = pc.deposit(**kw)
     fresh = _cloud(np.random.default_rng(0)).global_setup(
-        structure="covariant", kernel_name="cubic_spline")
-    fresh.set_smoothing(structure="covariant",
-                        smoothing_tensors=pc.smoothing.smoothing_tensors)
+        structure="covariant", kernel_name="cubic_spline"
+    )
+    fresh.set_smoothing(
+        structure="covariant", smoothing_tensors=pc.smoothing.smoothing_tensors
+    )
     np.testing.assert_allclose(fresh.deposit(**kw), ref, rtol=1e-4, atol=1e-5)
 
 
@@ -120,7 +129,9 @@ def test_plane_projection_input_forms(rng):
     pc = _cloud(rng).global_setup(kernel_name="cic")
     kw = dict(fields="f", averaged=False, gridnums=8, adaptive=False)
     ref = pc.deposit(plane_projection=[0, 2], **kw)
-    np.testing.assert_array_equal(pc.deposit(plane_projection=np.array([0, 2]), **kw), ref)
+    np.testing.assert_array_equal(
+        pc.deposit(plane_projection=np.array([0, 2]), **kw), ref
+    )
     np.testing.assert_array_equal(pc.deposit(plane_projection=(0, 2), **kw), ref)
     for bad in ([0, 0], [0, 3], [0, 1, 2], [0]):
         with pytest.raises(ValueError, match="plane_projection"):
@@ -134,9 +145,12 @@ def test_plane_projection_input_forms(rng):
 def test_deposit_extent_without_particles(rng, structure):
     pc = PointCloud(rng.uniform(0, 0.5, (200, 2)), verbose=False)
     pc.global_setup(num_neighbors=8, kernel_name="tsc")
-    pc.compute_smoothing(structure="isotropic" if structure == "separable" else structure)
-    grid = pc.deposit(None, averaged=False, gridnums=8, extent=[[0.6, 0.9]] * 2,
-                      structure=structure)
+    pc.compute_smoothing(
+        structure="isotropic" if structure == "separable" else structure
+    )
+    grid = pc.deposit(
+        None, averaged=False, gridnums=8, extent=[[0.6, 0.9]] * 2, structure=structure
+    )
     assert grid.shape == (8, 8) and not grid.any()
 
 
@@ -160,8 +174,9 @@ def test_single_field_given_as_list(rng):
 
 
 def test_get_rejects_non_array(rng):
-    pc = _cloud(rng).global_setup(num_neighbors=8, structure="isotropic",
-                                  kernel_name="cubic_spline")
+    pc = _cloud(rng).global_setup(
+        num_neighbors=8, structure="isotropic", kernel_name="cubic_spline"
+    )
     pc.compute_smoothing()
     pc.compute_density()
     with pytest.raises(TypeError):
@@ -169,8 +184,9 @@ def test_get_rejects_non_array(rng):
 
 
 def test_divergence_in_1d(rng):
-    pc = _cloud(rng, dim=1).global_setup(num_neighbors=8, structure="isotropic",
-                                         kernel_name="cubic_spline")
+    pc = _cloud(rng, dim=1).global_setup(
+        num_neighbors=8, structure="isotropic", kernel_name="cubic_spline"
+    )
     pc.compute_smoothing()
     pc.compute_density()
     div = pc.interpolate("f", mode="divergence")
@@ -183,16 +199,18 @@ def test_divergence_in_1d(rng):
 def test_interpolate_reuses_ghost_smoothing(rng, structure, monkeypatch):
     import smudgy.pointcloud as pointcloud_module
 
-    pc = _cloud(rng).global_setup(num_neighbors=16, structure=structure,
-                                  kernel_name="cubic_spline")
+    pc = _cloud(rng).global_setup(
+        num_neighbors=16, structure=structure, kernel_name="cubic_spline"
+    )
     pc.compute_smoothing()
     pc.compute_density()
     first = pc.interpolate("f", mode="gradient")
 
     calls = []
     real_push = pointcloud_module.push_to_ghosts
-    monkeypatch.setattr(pointcloud_module, "push_to_ghosts",
-                        lambda *a: calls.append(1) or real_push(*a))
+    monkeypatch.setattr(
+        pointcloud_module, "push_to_ghosts", lambda *a: calls.append(1) or real_push(*a)
+    )
     np.testing.assert_array_equal(pc.interpolate("f", mode="gradient"), first)
     assert len(calls) == 1  # the fields only; density and h are cached
 
@@ -202,7 +220,8 @@ def test_interpolate_reuses_ghost_smoothing(rng, structure, monkeypatch):
     pc.compute_density()
     fresh = pc.interpolate("f", mode="gradient")
     ref = _cloud(np.random.default_rng(0)).global_setup(
-        num_neighbors=24, structure=structure, kernel_name="cubic_spline")
+        num_neighbors=24, structure=structure, kernel_name="cubic_spline"
+    )
     ref.compute_smoothing()
     ref.compute_density()
     np.testing.assert_array_equal(fresh, ref.interpolate("f", mode="gradient"))

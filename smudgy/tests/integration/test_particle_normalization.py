@@ -60,7 +60,9 @@ def _point_cloud(pos, backend, kernel_name, structure, volume_preserving):
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 @pytest.mark.parametrize("structure,volume_preserving", VARIANTS)
 @pytest.mark.parametrize("dim", DIMS)
-def test_density_normalized(positions, backend, kernel_name, structure, volume_preserving, dim):
+def test_density_normalized(
+    positions, backend, kernel_name, structure, volume_preserving, dim
+):
     """Mean leave-one-out density of uniform points recovers the true density 1."""
     pos = positions[dim]
     pc = _point_cloud(pos, backend, kernel_name, structure, volume_preserving)
@@ -84,7 +86,9 @@ def test_density_normalized(positions, backend, kernel_name, structure, volume_p
 @pytest.mark.parametrize("kernel_name", KERNEL_NAMES)
 @pytest.mark.parametrize("structure,volume_preserving", VARIANTS)
 @pytest.mark.parametrize("dim", DIMS)
-def test_partition_of_unity(positions, backend, kernel_name, structure, volume_preserving, dim):
+def test_partition_of_unity(
+    positions, backend, kernel_name, structure, volume_preserving, dim
+):
     """Interpolating a constant field at the particles returns that constant."""
     pos = positions[dim]
     pc = _point_cloud(pos, backend, kernel_name, structure, volume_preserving)
